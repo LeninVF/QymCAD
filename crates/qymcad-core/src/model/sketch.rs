@@ -1055,3 +1055,5 @@ mod offset;
 mod solve;
 mod contours;
 mod profiles;
+mod pieces;
+pub use pieces::LayAs;

@@ -635,7 +635,7 @@ pub use regen::{ArrayAxis, BodyOp, ChamferShape, CombineSpan, ExtrudeSpan, HoleT
 mod tess;
 mod timeline;
 mod sketch;
-pub use sketch::{LoftEncoded, LoftSectionsEncoded};
+pub use sketch::{LayAs, LoftEncoded, LoftSectionsEncoded};
 mod drag;
 mod round;
 pub use sketch::{ChamferLegs, CornerAt, CornerBlend, CornerCut, CornerTool, ExtendAsk, ExtendSides, ExtendStop, ExtendStops, EndKept, FilletBy, FilletSize, LineExtension, LinesCrossing, TextSpec};
@@ -1441,6 +1441,8 @@ mod name_map_tests {
 mod sketch_types;
 pub use sketch_types::*;
 mod curves;
+pub mod curve;
+pub use tess::NodeTangents;
 pub use curves::*;
 mod sketch_ops;
 mod params;

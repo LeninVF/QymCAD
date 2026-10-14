@@ -1092,8 +1092,8 @@ fn auto_tangent(pts: &[Point2], i: usize, ends: crate::feature::Ends) -> Point2 
 }
 
 /// THE TWO TANGENTS OF A NODE OF A SPLINE, as the spans on either side of it use them.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct NodeTangents {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NodeTangents {
     /// the tangent the span before the node ends with
     pub arrive: Point2,
     /// the tangent the span after the node starts with
