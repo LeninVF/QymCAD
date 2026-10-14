@@ -627,6 +627,13 @@ impl<'a> Hand<'a> {
         spot
     }
 
+    /// WHETHER A CLICK AT `place` WOULD PICK the item of `kind` and `id` - the hand looks where it is about to click and
+    /// sees what lights up under the pointer. The place is brought into view first.
+    pub fn would_pick2d(&mut self, place: (f64, f64), kind: u8, id: u64) -> bool {
+        self.in_view2d(&[place]);
+        self.picks2d(place) == Some((kind, id))
+    }
+
     /// The places along each item a hand would try: a point is its own place, a line is tried from the middle
     /// outwards.
     fn places_on2d(&self, items: &[(u8, u64)]) -> Vec<Vec<(f64, f64)>> {
@@ -1105,6 +1112,26 @@ impl<'a> Hand<'a> {
         self.press_screen(f.center());
         self.chord(egui::Modifiers::COMMAND, egui::Key::A);
         self.type_text(text);
+        true
+    }
+
+    /// TYPE `value` INTO THE FIELD SHOWING `hint` in grey while empty - the first such in reading order - all of what it
+    /// held replaced, with no Enter. Answers whether such a field was on screen.
+    pub fn type_into_hinted(&mut self, hint: &str, value: f64) -> bool {
+        self.frame(Vec::new());
+        let Some(f) = self
+            .win
+            .widgets
+            .iter()
+            .filter(|w| w.kind == super::window::Kind::TextField && w.placeholder == hint)
+            .map(|w| w.rect)
+            .min_by(|a, b| a.min.y.total_cmp(&b.min.y).then(a.min.x.total_cmp(&b.min.x)))
+        else {
+            return false;
+        };
+        self.press_screen(f.center());
+        self.chord(egui::Modifiers::COMMAND, egui::Key::A);
+        self.type_text(&format!("{value}"));
         true
     }
 
