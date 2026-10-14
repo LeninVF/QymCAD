@@ -69,7 +69,7 @@ fn a_face_outline_projects_as_four_straight_lines() {
     let ents = proj_entities(&live.p, si);
     assert_eq!(ents.len(), 4, "a square face has four edges, and it came out {}", ents.len());
     for e in &ents {
-        let kind = live.p.sketches[si].entities.iter().find(|x| x.id == *e).map(|x| x.kind).expect("the entity is there");
+        let kind = live.p.sketches[si].entities.iter().find(|x| x.id == *e).map(|x| x.kind.clone()).expect("the entity is there");
         assert!(matches!(kind, qymcad_core::model::EntityKind::Line { .. }), "an edge of a box must land as a LINE, and it landed as {kind:?}");
     }
     // the geometry agrees: a 20x20 square in sketch coordinates

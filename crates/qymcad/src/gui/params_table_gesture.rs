@@ -402,7 +402,7 @@ mod tests {
         // solver is a variable keyed by the centre (`RadiusVar { center }`). The first edition of the
         // check put the id of the ENTITY here — the constraint did not find its variable, the sketch
         // silently did not recompute, and the check blamed the rebuild of the bodies for it.
-        let c = match app.project.sketches[si].entities.iter().find(|e| e.id == ent).map(|e| e.kind) {
+        let c = match app.project.sketches[si].entities.iter().find(|e| e.id == ent).map(|e| e.kind.clone()) {
             Some(qymcad_core::model::EntityKind::Circle { center, .. }) => center,
             _ => panic!("the circle was not created"),
         };

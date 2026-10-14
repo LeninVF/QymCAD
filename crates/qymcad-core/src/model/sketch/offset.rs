@@ -9,7 +9,7 @@ impl Project {
     /// is: what the tool previews before Enter. Circles, loops and open chains alike (`offset_entities`).
     pub fn offset_preview(&self, si: usize, eids: &[Id], dist: f64) -> Vec<Vec<Point2>> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        let ents: Vec<SketchEntity> = s.entities.iter().filter(|e| eids.contains(&e.id)).copied().collect();
+        let ents: Vec<SketchEntity> = s.entities.iter().filter(|e| eids.contains(&e.id)).cloned().collect();
         let mut out = Vec::new();
         for e in &ents {
             if let EntityKind::Circle { center, r } = e.kind {
@@ -45,7 +45,7 @@ impl Project {
     pub fn offset_entities(&mut self, si: usize, eids: &[Id], dist: f64) -> usize {
         let (pts, ents) = {
             let Some(s) = self.sketches.get(si) else { return 0 };
-            let ents: Vec<SketchEntity> = s.entities.iter().filter(|e| eids.contains(&e.id)).copied().collect();
+            let ents: Vec<SketchEntity> = s.entities.iter().filter(|e| eids.contains(&e.id)).cloned().collect();
             (s.points.clone(), ents)
         };
         let mut count = 0;

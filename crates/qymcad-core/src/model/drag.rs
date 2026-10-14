@@ -178,7 +178,7 @@ pub struct DragSession {
 fn structure_stamp(s: &Sketch) -> u64 {
     let mut h: u64 = 0;
     let mut mix = |x: u64| h = (h.rotate_left(5) ^ x).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-    for n in [s.points.len(), s.entities.len(), s.constraints.len(), s.rects.len(), s.splines.len(), s.texts.len()] {
+    for n in [s.points.len(), s.entities.len(), s.constraints.len(), s.rects.len(), s.texts.len()] {
         mix(n as u64);
     }
     for e in &s.entities {
@@ -187,7 +187,8 @@ fn structure_stamp(s: &Sketch) -> u64 {
             EntityKind::Line { a, b } => [a, b].into_iter().for_each(&mut mix),
             EntityKind::Arc { center, a, b, .. } => [center, a, b].into_iter().for_each(&mut mix),
             EntityKind::Circle { center, .. } => mix(center),
-            EntityKind::Ellipse { c, ma, mi } => [c, ma, mi].into_iter().for_each(&mut mix),
+            EntityKind::Ellipse { .. } => entity_points(e).into_iter().for_each(&mut mix),
+            EntityKind::Spline { ref nodes, .. } => nodes.iter().copied().for_each(&mut mix),
         }
     }
     use std::hash::{Hash, Hasher};
@@ -339,7 +340,7 @@ impl Project {
         let s = self.sketches.get(si)?;
         let origin_drawn = s.origin != 0 && s.entities.iter().any(|e| entity_points(e).contains(&s.origin));
         let frame_missing = (s.origin != 0 || s.axis_pts.iter().any(|g| *g != 0)) && s.frame == 0;
-        if !s.splines.is_empty() || !s.texts.is_empty() || origin_drawn || frame_missing {
+        if s.entities.iter().any(|e| matches!(e.kind, EntityKind::Spline { .. })) || !s.texts.is_empty() || origin_drawn || frame_missing {
             return None;
         }
         let place: HashMap<Id, usize> = s.points.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
@@ -492,7 +493,7 @@ impl Project {
         for cid in old.iter().filter(|cid| !closed(cid)) {
             from.extend(sess.made_of.get(cid).into_iter().flatten().filter_map(|e| sess.drawn_at.get(e).copied()));
         }
-        let curve = |k: usize| s.entities[sess.drawn[k]];
+        let curve = |k: usize| s.entities[sess.drawn[k]].clone();
         let at = |id: Id| sess.place.get(&id).map(|&i| s.points[i]);
         let near = |b: &[f64; 4]| sess.boxes.near(b).into_iter().chain(sess.moving.iter().copied()).collect();
         let change = round::Change { curve: &curve, boxes: &sess.boxes.boxes, at: &at, near: &near, moved: &shifted, swept: &swept, held };

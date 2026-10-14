@@ -114,7 +114,7 @@ pub(crate) fn tie_what_landed(project: &mut Project, view: qymcad_ui_state::View
                         ties.push(Constraint::PointOnCircle { p: point, c: center });
                     }
                 }
-                EntityKind::Ellipse { .. } => {}
+                EntityKind::Ellipse { .. } | EntityKind::Spline { .. } => {}
             }
         }
         for (axis, off) in [(0, at.y), (1, at.x)] {

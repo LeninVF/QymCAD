@@ -18,7 +18,7 @@ fn the_redundant_of_a_ladder_of_500_rungs_are_found_in_time() {
     let si = p.new_sketch("S");
     let width = 10.0 * n as f64;
     let rails = [p.add_line_entity(si, -5.0, 0.0, width, 0.0, Purpose::Real), p.add_line_entity(si, -5.0, 50.0, width, 50.0, Purpose::Real)];
-    let ends = |p: &Project, line: u64| match p.sketches[si].entities.iter().find(|e| e.id == line).map(|e| e.kind) {
+    let ends = |p: &Project, line: u64| match p.sketches[si].entities.iter().find(|e| e.id == line).map(|e| e.kind.clone()) {
         Some(EntityKind::Line { a, b }) => (a, b),
         _ => panic!("a line"),
     };

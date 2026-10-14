@@ -194,7 +194,7 @@ pub(super) fn drawing(app: &App) -> Drawing {
     let Some(si) = qymcad_ui_state::edit_si(&app.project, &app.sketch_ses) else { return Drawing::default() };
     let s = &app.project.sketches[si];
     let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y)).unwrap_or(Point2::new(f64::NAN, f64::NAN));
-    let mut curves: Vec<Curve> = s
+    let curves: Vec<Curve> = s
         .entities
         .iter()
         .map(|e| {
@@ -208,20 +208,24 @@ pub(super) fn drawing(app: &App) -> Drawing {
                     let sweep = if ccw { (tb - ta).rem_euclid(std::f64::consts::TAU) } else { -(ta - tb).rem_euclid(std::f64::consts::TAU) };
                     ("arc", round(Turn { centre: c, radii: Point2::new(r, r), rot: 0.0, from: ta, sweep }))
                 }
-                EntityKind::Ellipse { c, ma, mi } => {
+                EntityKind::Ellipse { span: Some(_), .. } => ("arc of an ellipse", qymcad_ui_state::entity_outline(s, &e.kind)),
+                EntityKind::Ellipse { c, ma, mi, span: None } => {
                     let (pc, pa, pi) = (at(c), at(ma), at(mi));
                     let turn = Turn { centre: pc, radii: Point2::new(pc.dist(pa), pc.dist(pi)), rot: (pa.y - pc.y).atan2(pa.x - pc.x), from: 0.0, sweep: std::f64::consts::TAU };
                     ("ellipse", round(turn))
+                }
+                EntityKind::Spline { ends, .. } => {
+                    let mut line = qymcad_ui_state::entity_outline(s, &e.kind);
+                    let closed = ends == qymcad_core::feature::Ends::Closed;
+                    if closed {
+                        line.extend(line.first().copied());
+                    }
+                    (if closed { "closed spline" } else { "open spline" }, line)
                 }
             };
             Curve { key: Picked { kind: 1, id: e.id }, kind, construction: e.construction, path }
         })
         .collect();
-    for (spi, sp) in s.splines.iter().enumerate() {
-        let kind = if sp.closed { "closed spline" } else { "open spline" };
-        let id = sp.points.first().copied().unwrap_or(0);
-        curves.push(Curve { key: Picked { kind: qymcad_ui_state::SEL_SPLINE, id }, kind, construction: sp.construction, path: app.project.spline_polyline(si, spi) });
-    }
     let unseen = s.unseen_points();
     let points = s.points.iter().filter(|q| !unseen.contains(&q.id)).map(|q| Dot { key: Picked { kind: 0, id: q.id }, at: Point2::new(q.x, q.y) }).collect();
     Drawing { curves, points }

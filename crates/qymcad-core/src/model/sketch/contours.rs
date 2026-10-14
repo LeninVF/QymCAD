@@ -195,7 +195,7 @@ impl Project {
             return false;
         }
         let Some((ox, oy)) = s.points.iter().find(|p| p.id == origin).map(|p| (p.x, p.y)) else { return false };
-        let used = s.entities.iter().any(|e| entity_points(e).contains(&origin)) || s.splines.iter().any(|sp| sp.points.contains(&origin));
+        let used = s.entities.iter().any(|e| entity_points(e).contains(&origin));
         if !used {
             return false; // nobody's geometry - nothing to separate
         }
@@ -205,13 +205,6 @@ impl Project {
         let (guides, frame) = (s.axis_pts, s.frame);
         for e in &mut s.entities {
             remap_entity_point(e, origin, fresh);
-        }
-        for sp in &mut s.splines {
-            for id in &mut sp.points {
-                if *id == origin {
-                    *id = fresh;
-                }
-            }
         }
         for c in &mut s.constraints {
             // `Fixed` on the origin stays on the origin; so does anything naming the frame or an axis

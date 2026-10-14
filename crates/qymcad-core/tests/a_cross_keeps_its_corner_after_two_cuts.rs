@@ -17,7 +17,7 @@ fn a_cross() -> (Project, usize, u64, [u64; 4]) {
     p.regen_sketch(si);
     let middle = p.sketches[si].points.iter().find(|q| q.x.abs() < 1e-9 && q.y.abs() < 1e-9).map(|q| q.id).expect("the middle");
     for (k, &l) in lines.iter().enumerate() {
-        let Some(EntityKind::Line { a, b }) = p.sketches[si].entities.iter().find(|e| e.id == l).map(|e| e.kind) else { panic!("a line") };
+        let Some(EntityKind::Line { a, b }) = p.sketches[si].entities.iter().find(|e| e.id == l).map(|e| e.kind.clone()) else { panic!("a line") };
         p.sketches[si].constraints.push(if k % 2 == 0 { Constraint::Horizontal { a, b } } else { Constraint::Vertical { a, b } });
     }
     p.solve_sketch(si);
@@ -58,7 +58,7 @@ fn two_cuts_on_a_cross_keep_every_line_on_its_corner(cut: Cut) {
     let m = at(middle);
     let mut sins = Vec::new();
     for (k, &line) in l.iter().enumerate() {
-        let Some(EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == line).map(|e| e.kind) else { panic!("a line") };
+        let Some(EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == line).map(|e| e.kind.clone()) else { panic!("a line") };
         let (pa, pb) = (at(a), at(b));
         // the line, extended, runs through the middle point
         let off = ((pb.0 - pa.0) * (m.1 - pa.1) - (pb.1 - pa.1) * (m.0 - pa.0)).abs() / (pb.0 - pa.0).hypot(pb.1 - pa.1);

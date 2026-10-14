@@ -13,7 +13,7 @@ fn a_broken_horizontal_line_is_two_horizontal_lines() {
     p.new_document();
     let si = p.new_sketch("S");
     let l = p.add_line_entity(si, -20.0, 0.0, 20.0, 0.0, Purpose::Real);
-    let (a, b) = match p.sketches[si].entities.iter().find(|e| e.id == l).map(|e| e.kind) {
+    let (a, b) = match p.sketches[si].entities.iter().find(|e| e.id == l).map(|e| e.kind.clone()) {
         Some(EntityKind::Line { a, b }) => (a, b),
         _ => panic!("the line"),
     };

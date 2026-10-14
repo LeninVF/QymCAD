@@ -22,7 +22,7 @@ fn an_angle_on_a_side_turns_the_dimensions_of_the_rectangle() {
     p.solve_sketch(si);
     // a fixed line from (10, 10) at -20 deg, the angle measured between it and the bottom side
     let a = p.add_line_entity(si, 10.0, 10.0, 40.0, 10.0 - 30.0 * 20f64.to_radians().tan(), Purpose::Real);
-    let line = match p.sketches[si].entities.iter().find(|e| e.id == a).map(|e| e.kind) {
+    let line = match p.sketches[si].entities.iter().find(|e| e.id == a).map(|e| e.kind.clone()) {
         Some(EntityKind::Line { a, b }) => (a, b),
         _ => panic!("a line"),
     };

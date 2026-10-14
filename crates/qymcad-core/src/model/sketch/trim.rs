@@ -23,6 +23,8 @@ impl Project {
                 continue; // Construction geometry is a valid trim boundary.
             }
             match e.kind {
+                // a spline takes no part in these crossings
+                EntityKind::Spline { .. } => {}
                 EntityKind::Line { a: c, b: d } => {
                     if let (Some((cx, cy)), Some((dx, dy))) = (self.point_xy(si, c), self.point_xy(si, d)) {
                         if let Some(t) = seg_seg_t([pax, pay], [pbx, pby], [cx, cy], [dx, dy]) {
@@ -35,7 +37,7 @@ impl Project {
                         cuts.extend(seg_circle_t(pax, pay, pbx, pby, cx, cy, r));
                     }
                 }
-                EntityKind::Ellipse { c, ma, mi } => {
+                EntityKind::Ellipse { c, ma, mi, .. } => {
                     if let (Some((ex, ey)), Some((mx, my)), Some((nx, ny))) = (self.point_xy(si, c), self.point_xy(si, ma), self.point_xy(si, mi)) {
                         let (ux, uy, major, minor) = ellipse_axes(ex, ey, mx, my, nx, ny);
                         cuts.extend(seg_ellipse_t([pax, pay], [pbx, pby], [ex, ey], [ux, uy], major, minor));
@@ -131,6 +133,8 @@ impl Project {
         for e in self.sketches.get(si)?.entities.iter().filter(|e| e.id != eid) {
             let mut ts: Vec<f64> = Vec::new();
             match e.kind {
+                // a spline takes no part in these crossings
+                EntityKind::Spline { .. } => {}
                 EntityKind::Line { a: c, b: d } => {
                     if let (Some((cx, cy)), Some((dx, dy))) = (self.point_xy(si, c), self.point_xy(si, d)) {
                         ts.extend(line_seg_t([pax, pay], [pbx, pby], [cx, cy], [dx, dy]));
@@ -141,7 +145,7 @@ impl Project {
                         ts.extend(line_circle_t(pax, pay, pbx, pby, cx, cy, r));
                     }
                 }
-                EntityKind::Ellipse { c, ma, mi } => {
+                EntityKind::Ellipse { c, ma, mi, .. } => {
                     if let (Some((ex, ey)), Some((mx, my)), Some((nx, ny))) = (self.point_xy(si, c), self.point_xy(si, ma), self.point_xy(si, mi)) {
                         let (ux, uy, major, minor) = ellipse_axes(ex, ey, mx, my, nx, ny);
                         ts.extend(line_ellipse_roots([pax, pay], [pbx, pby], [ex, ey], [ux, uy], major, minor));
@@ -225,9 +229,9 @@ impl Project {
             (0..64).map(|k| f64::from(k) / 64.0 * std::f64::consts::TAU).any(|t| inside(x, t) && inside(y, t) && inside(x, t + 0.01) && inside(y, t + 0.01))
         };
         let over = |e: &super::SketchEntity| -> bool {
-            match (me.kind, e.kind) {
+            match (&me.kind, &e.kind) {
                 (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) => {
-                    let (Some(a), Some(b), Some(c), Some(d)) = (at(a), at(b), at(c), at(d)) else { return false };
+                    let (Some(a), Some(b), Some(c), Some(d)) = (at(*a), at(*b), at(*c), at(*d)) else { return false };
                     let Some(mine) = line_span(a, b, a, b) else { return false };
                     line_span(a, b, c, d).is_some_and(|other| other.to.min(mine.to) - other.from.max(mine.from) > TOL)
                 }
@@ -502,6 +506,8 @@ impl Project {
                 continue; // Construction geometry is a valid cut boundary for a curve.
             }
             match e.kind {
+                // a spline takes no part in these crossings
+                EntityKind::Spline { .. } => {}
                 EntityKind::Line { a, b } => {
                     if let (Some((ax, ay)), Some((bx, by))) = (p(a), p(b)) {
                         for t in seg_circle_t(ax, ay, bx, by, cx, cy, r) {
@@ -525,7 +531,7 @@ impl Project {
                         }
                     }
                 }
-                EntityKind::Ellipse { c, ma, mi } => {
+                EntityKind::Ellipse { c, ma, mi, .. } => {
                     if let (Some((ex, ey)), Some((mx, my)), Some((nx, ny))) = (p(c), p(ma), p(mi)) {
                         let (ux, uy, major, minor) = ellipse_axes(ex, ey, mx, my, nx, ny);
                         pts.extend(circle_ellipse_pts([cx, cy], r, [ex, ey], [ux, uy], major, minor));
@@ -542,10 +548,12 @@ impl Project {
     /// world coordinates. Used for the hover preview of trim and break.
     pub fn entity_intersections(&self, si: usize, eid: Id) -> Vec<(f64, f64)> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind) else { return Vec::new() };
+        let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) else { return Vec::new() };
         let p = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
         let mut out: Vec<(f64, f64)> = Vec::new();
         match kind {
+            // a spline takes no part in these crossings
+            EntityKind::Spline { .. } => {}
             EntityKind::Line { a, b } => {
                 let (Some((ax, ay)), Some((bx, by))) = (p(a), p(b)) else { return out };
                 for o in &s.entities {
@@ -553,6 +561,8 @@ impl Project {
                         continue;
                     }
                     match o.kind {
+                        // a spline takes no part in these crossings
+                        EntityKind::Spline { .. } => {}
                         EntityKind::Line { a: c, b: d } => {
                             if let (Some((cx, cy)), Some((dx, dy))) = (p(c), p(d)) {
                                 if let Some(t) = seg_seg_t([ax, ay], [bx, by], [cx, cy], [dx, dy]) {
@@ -583,7 +593,7 @@ impl Project {
                                 }
                             }
                         }
-                        EntityKind::Ellipse { c, ma, mi } => {
+                        EntityKind::Ellipse { c, ma, mi, .. } => {
                             if let (Some((ex, ey)), Some((mx, my)), Some((nx, ny))) = (p(c), p(ma), p(mi)) {
                                 let (ux, uy, major, minor) = ellipse_axes(ex, ey, mx, my, nx, ny);
                                 for t in seg_ellipse_t([ax, ay], [bx, by], [ex, ey], [ux, uy], major, minor) {

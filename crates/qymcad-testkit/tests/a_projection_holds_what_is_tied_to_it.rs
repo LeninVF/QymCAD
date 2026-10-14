@@ -118,12 +118,12 @@ fn a_projection_keeps_the_ties_on_its_curves_when_its_face_changes_structure() {
         .entities
         .iter()
         .copied()
-        .find(|e| match live.p.sketches[si].entities.iter().find(|x| x.id == *e).map(|x| x.kind) {
+        .find(|e| match live.p.sketches[si].entities.iter().find(|x| x.id == *e).map(|x| x.kind.clone()) {
             Some(EntityKind::Line { a, b }) => at(&live.p, si, a).1.abs() < 1e-6 && at(&live.p, si, b).1.abs() < 1e-6,
             _ => false,
         })
         .expect("the bottom side");
-    let Some(EntityKind::Line { a: ba, b: bb }) = live.p.sketches[si].entities.iter().find(|x| x.id == bottom).map(|x| x.kind) else { panic!("the bottom side is a line") };
+    let Some(EntityKind::Line { a: ba, b: bb }) = live.p.sketches[si].entities.iter().find(|x| x.id == bottom).map(|x| x.kind.clone()) else { panic!("the bottom side is a line") };
     let start = if at(&live.p, si, ba).0 < at(&live.p, si, bb).0 { ba } else { bb };
     let free = a_point(&mut live.p, si, 15.0, 0.0);
     live.p.sketches[si].constraints.push(Constraint::PointOnLine { p: free, a: ba, b: bb });

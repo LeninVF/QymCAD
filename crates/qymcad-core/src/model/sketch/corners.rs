@@ -342,14 +342,7 @@ impl Project {
     }
     /// Whether any entity of the sketch stands on the point `pid` - an end of a line or an arc, a centre of one.
     pub fn point_used_by_geometry(&self, si: usize, pid: Id) -> bool {
-        self.sketches.get(si).is_some_and(|s| {
-            s.entities.iter().any(|e| match e.kind {
-                EntityKind::Line { a, b } => a == pid || b == pid,
-                EntityKind::Arc { center, a, b, .. } => center == pid || a == pid || b == pid,
-                EntityKind::Circle { center, .. } => center == pid,
-                EntityKind::Ellipse { c, ma, mi } => c == pid || ma == pid || mi == pid,
-            }) || s.splines.iter().any(|sp| sp.points.contains(&pid))
-        })
+        self.sketches.get(si).is_some_and(|s| s.entities.iter().any(|e| entity_points(e).contains(&pid)))
     }
     /// HOW MANY CONSTRAINTS STATE SOMETHING ABOUT THE POINT `pid` - a dimension measured to a corner above all.
     pub fn constraints_on_point(&self, si: usize, pid: Id) -> usize {
@@ -477,7 +470,7 @@ impl Project {
             Circle { cx: f64, cy: f64, rad: f64, center: Id },
         }
         let support = |me: &Self, eid: Id, other: Id| -> Option<Sup> {
-            let kind = me.sketches.get(si)?.entities.iter().find(|e| e.id == eid).map(|e| e.kind)?;
+            let kind = me.sketches.get(si)?.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone())?;
             match kind {
                 EntityKind::Line { .. } => {
                     let (ox, oy) = me.point_xy(si, other)?;
@@ -770,7 +763,7 @@ impl Project {
         let pid = self.shared_vertex(si, e1, e2)?;
         let (pcx, pcy) = self.point_xy(si, pid)?;
         let dir = |me: &Self, eid: Id| -> Option<(f64, f64)> {
-            let kind = me.sketches.get(si)?.entities.iter().find(|e| e.id == eid)?.kind;
+            let kind = me.sketches.get(si)?.entities.iter().find(|e| e.id == eid)?.kind.clone();
             let (dx, dy) = match kind {
                 EntityKind::Arc { center, a, ccw, .. } => {
                     // the way along the arc out of the point: from its start the way it turns, from its end back
@@ -1041,7 +1034,7 @@ impl Project {
         if self.corner_of_pair(si, e1, e2).is_none() {
             return false; // two lines in one straight line: nothing is cut, and the cut would be along them
         }
-        let both_lines = [e1, e2].iter().all(|&eid| matches!(self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).map(|e| e.kind), Some(EntityKind::Line { .. })));
+        let both_lines = [e1, e2].iter().all(|&eid| matches!(self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).map(|e| &e.kind), Some(EntityKind::Line { .. })));
         if !both_lines {
             return false;
         }

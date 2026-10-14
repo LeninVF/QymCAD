@@ -784,7 +784,7 @@ fn parametric_ellipse_axes_perpendicular_and_sized() {
         .entities
         .iter()
         .find_map(|e| match e.kind {
-            EntityKind::Ellipse { c, ma, mi } if c == center => Some((ma, mi)),
+            EntityKind::Ellipse { c, ma, mi, .. } if c == center => Some((ma, mi)),
             _ => None,
         })
         .unwrap();

@@ -14,7 +14,7 @@ fn a_dimensioned_rectangle(p: &mut Project) -> (usize, Vec<u64>, (u64, u64)) {
     p.new_document();
     let si = p.new_sketch("S");
     let lines = p.add_rect_entity(si, 0.0, 0.0, 30.0, 20.0, Purpose::Real);
-    let ends = |p: &Project, e: u64| match p.sketches[si].entities.iter().find(|x| x.id == e).map(|x| x.kind) {
+    let ends = |p: &Project, e: u64| match p.sketches[si].entities.iter().find(|x| x.id == e).map(|x| x.kind.clone()) {
         Some(EntityKind::Line { a, b }) => (a, b),
         _ => panic!("a line"),
     };

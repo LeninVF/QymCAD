@@ -666,10 +666,19 @@ fn remap_point_id(s: &mut Sketch, from: Id, to: Id) {
                 r(b);
             }
             EntityKind::Circle { center, .. } => r(center),
-            EntityKind::Ellipse { c, ma, mi } => {
+            EntityKind::Ellipse { c, ma, mi, span } => {
                 r(c);
                 r(ma);
                 r(mi);
+                if let Some(s) = span {
+                    r(&mut s.from);
+                    r(&mut s.to);
+                }
+            }
+            EntityKind::Spline { nodes, .. } => {
+                for n in nodes {
+                    r(n);
+                }
             }
         }
     }
@@ -734,6 +743,12 @@ fn remap_point_id(s: &mut Sketch, from: Id, to: Id) {
                 r(p);
                 r(c);
             }
+            Constraint::PointOnEllipse { p, c, ma, mi } => {
+                r(p);
+                r(c);
+                r(ma);
+                r(mi);
+            }
             Constraint::Concentric { c1, c2 } => {
                 r(c1);
                 r(c2);
@@ -749,11 +764,6 @@ fn remap_point_id(s: &mut Sketch, from: Id, to: Id) {
                 r(c);
                 r(d);
             }
-        }
-    }
-    for sp in &mut s.splines {
-        for id in &mut sp.points {
-            r(id);
         }
     }
 }

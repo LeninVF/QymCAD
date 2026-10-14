@@ -261,6 +261,27 @@ pub(crate) fn con_jac(c: &Constraint, x: &[f64], x0: &[f64], idx: &HashMap<Id, u
             }
             out.push(row);
         }
+        Constraint::PointOnEllipse { p, c: cc, ma, mi } => {
+            // r = L (s^2 + t^2 - 1), s = d.A / |A|^2, t = d.B / |B|^2, d = p - c, A = ma - c, B = mi - c; L from the start
+            let ((px, py), (cx, cy), (ax, ay), (bx, by)) = (g(p), g(cc), g(ma), g(mi));
+            let (d, a, b) = ((px - cx, py - cy), (ax - cx, ay - cy), (bx - cx, by - cy));
+            let (a2, b2) = ((a.0 * a.0 + a.1 * a.1).max(1e-18), (b.0 * b.0 + b.1 * b.1).max(1e-18));
+            let (s, t) = ((d.0 * a.0 + d.1 * a.1) / a2, (d.0 * b.0 + d.1 * b.1) / b2);
+            let l = ellipse_scale(x0, [idx[&cc], idx[&ma], idx[&mi]]);
+            let dp = (2.0 * l * (s * a.0 / a2 + t * b.0 / b2), 2.0 * l * (s * a.1 / a2 + t * b.1 / b2));
+            let dma = (2.0 * l * s * (d.0 - 2.0 * s * a.0) / a2, 2.0 * l * s * (d.1 - 2.0 * s * a.1) / a2);
+            let dmi = (2.0 * l * t * (d.0 - 2.0 * t * b.0) / b2, 2.0 * l * t * (d.1 - 2.0 * t * b.1) / b2);
+            out.push(vec![
+                (vx(p), dp.0),
+                (vy(p), dp.1),
+                (vx(ma), dma.0),
+                (vy(ma), dma.1),
+                (vx(mi), dmi.0),
+                (vy(mi), dmi.1),
+                (vx(cc), -(dp.0 + dma.0 + dmi.0)),
+                (vy(cc), -(dp.1 + dma.1 + dmi.1)),
+            ]);
+        }
         Constraint::ArcLength { c: cc, a, b, ccw, .. } => {
             let ((cx, cy), (ax, ay), (bx, by)) = (g(cc), g(a), g(b));
             let (rx, ry) = (ax - cx, ay - cy);
@@ -499,6 +520,15 @@ pub(crate) fn con_rows(c: &Constraint, x: &[f64], x0: &[f64], idx: &HashMap<Id, 
                 r.push(ax - bx);
                 r.push(ay - by);
             }
+            Constraint::PointOnEllipse { p, c, ma, mi } => {
+                // point p lies on the ellipse: in the frame of its semi-axes A and B the sum of the squared shares is one,
+                // scaled to millimetres by the mean semi-axis at the start of the solve
+                let ((px, py), (cx, cy), (ax, ay), (bx, by)) = (g(p), g(c), g(ma), g(mi));
+                let (d, a, b) = ((px - cx, py - cy), (ax - cx, ay - cy), (bx - cx, by - cy));
+                let (a2, b2) = ((a.0 * a.0 + a.1 * a.1).max(1e-18), (b.0 * b.0 + b.1 * b.1).max(1e-18));
+                let (s, t) = ((d.0 * a.0 + d.1 * a.1) / a2, (d.0 * b.0 + d.1 * b.1) / b2);
+                r.push(ellipse_scale(x0, [idx[&c], idx[&ma], idx[&mi]]) * (s * s + t * t - 1.0));
+            }
             Constraint::ArcLength { c, a, b, ccw, len, .. } => {
                 // arc length = R·θ, with R = |c→a| and θ the angle swept from a to b in the `ccw` direction
                 let (cx, cy) = g(c);
@@ -526,6 +556,15 @@ pub(crate) fn con_rows(c: &Constraint, x: &[f64], x0: &[f64], idx: &HashMap<Id, 
             }
         }
     }
+}
+
+/// THE LENGTH A POINT-ON-ELLIPSE RESIDUAL IS SCALED BY: the geometric mean of the semi-axes at the start of the solve
+/// (`x0`), so the residual reads in millimetres near the ellipse and its scale does not move within a solve. The places are
+/// those of the centre, the major and the minor end among the points.
+fn ellipse_scale(x0: &[f64], at: [usize; 3]) -> f64 {
+    let [c, a, b] = at;
+    let len = |k: usize| (x0[2 * k] - x0[2 * c]).hypot(x0[2 * k + 1] - x0[2 * c + 1]);
+    (len(a) * len(b)).sqrt().max(1e-6) * 0.5
 }
 
 /// Whether a constraint can be evaluated at all. It is not enough that its points exist — it must also have
@@ -556,6 +595,7 @@ pub(crate) fn cons_ok(c: &Constraint, has: &impl Fn(Id) -> bool, is_center: &imp
         Constraint::EqualRadius { c1, c2 } => has(c1) && has(c2),
         Constraint::CircleTangent { c1, c2, .. } => has(c1) && has(c2),
         Constraint::PointOnCircle { p, c } => has(p) && has(c) && is_center(c),
+        Constraint::PointOnEllipse { p, c, ma, mi } => has(p) && has(c) && has(ma) && has(mi),
         Constraint::Concentric { c1, c2 } => has(c1) && has(c2),
         Constraint::ArcLength { c, a, b, .. } => has(c) && has(a) && has(b),
         Constraint::AngleLines { a, b, c, d, .. } => has(a) && has(b) && has(c) && has(d),

@@ -155,20 +155,6 @@ pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: 
     };
     // construction geometry is dashed
     let aux_col = pn.scheme.pal.sketch_construction();
-    // A SPLINE PICKED OR UNDER THE POINTER IS LIT along its curve, as a picked or hovered line is
-    for (spi, sp) in s.splines.iter().enumerate() {
-        let key = sp.points.first().map(|&id| (qymcad_ui_state::SEL_SPLINE, id));
-        let (sel, hov) = (key.is_some_and(|k| pn.sel_sk.items.contains(&k)), key.is_some() && pn.hover.sketch == key);
-        if !sel && !hov {
-            continue;
-        }
-        let hl = if sel { Stroke::new(2.5, pn.scheme.pal.emphasis()) } else { Stroke::new(2.0, pn.scheme.pal.preview()) };
-        let mut line: Vec<Pos2> = pn.project.spline_polyline(si, spi).iter().map(|p| sh.at(*p)).collect();
-        if sp.closed {
-            line.extend(line.first().copied());
-        }
-        painter.add(egui::Shape::line(line, hl));
-    }
     // THE TANGENT HANDLES of the splines picked (`splines_with_handles`): a line from the knot to the handle and a point
     // at its end to take it by. The one under the pointer is lit in the colour of what a click takes, and the one held by
     // the pressed button in the colour of what is being moved - the handle follows the pointer, so the one under it is
@@ -176,11 +162,11 @@ pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: 
     let hcol = pn.scheme.pal.dim_helper();
     let grab = qymcad_ui_state::grab::grab(pn.set, qymcad_ui_state::grab::Grab::Point);
     let pointer = painter.ctx().input(|i| i.pointer.hover_pos().map(|p| (p, i.pointer.primary_down())));
-    let handles: Vec<(Point2, Point2)> = qymcad_ui_state::splines_with_handles(pn.project, pn.sel_sk, si).into_iter().flat_map(|spi| pn.project.spline_handles(si, spi)).collect();
-    let under = pointer.and_then(|(p, _)| handles.iter().map(|(_, h)| sh.at(*h).distance(p)).enumerate().filter(|(_, d)| *d <= grab).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(k, _)| k));
+    let handles: Vec<qymcad_core::model::SplineHandle> = qymcad_ui_state::splines_with_handles(pn.project, pn.sel_sk, si).into_iter().flat_map(|eid| pn.project.spline_handles(si, eid)).collect();
+    let under = pointer.and_then(|(p, _)| handles.iter().map(|h| sh.at(h.end).distance(p)).enumerate().filter(|(_, d)| *d <= grab).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(k, _)| k));
     let held = pointer.is_some_and(|(_, down)| down);
-    for (k, (knot, hend)) in handles.into_iter().enumerate() {
-        let (sk, sh) = (sh.at(knot), sh.at(hend));
+    for (k, handle) in handles.into_iter().enumerate() {
+        let (sk, sh) = (sh.at(handle.node), sh.at(handle.end));
         let (col, r) = match under == Some(k) {
             true if held => (pn.scheme.pal.active(), 5.0),
             true => (pn.scheme.pal.preview(), 5.0),
@@ -189,17 +175,6 @@ pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: 
         painter.line_segment([sk, sh], Stroke::new(1.0, col));
         painter.circle_filled(sh, r, col);
         painter.circle_stroke(sh, r, Stroke::new(1.0, pn.scheme.pal.dim_helper_ring()));
-    }
-    // construction splines are dashed (they do not go into a profile)
-    for spi in 0..s.splines.len() {
-        if !s.splines[spi].construction {
-            continue;
-        }
-        let poly = pn.project.spline_polyline(si, spi);
-        if poly.len() >= 2 {
-            let pts: Vec<Pos2> = poly.iter().map(|p| sh.at(*p)).collect();
-            painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, aux_col), 6.0, 4.0));
-        }
     }
     let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
     let pt_of = |id: Id| points_by_id.get(&id).copied().map(|p| Point2::new(p.x, p.y));
@@ -241,8 +216,14 @@ pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: 
                     }
                 }
             }
-            qymcad_core::model::EntityKind::Ellipse { c, ma, mi } => {
+            qymcad_core::model::EntityKind::Ellipse { c, ma, mi, span: None } => {
                 let pts: Vec<Pos2> = qymcad_ui_state::ellipse_outline_world(pn.project, si, c, ma, mi).iter().map(|p| sh.at(*p)).collect();
+                if pts.len() >= 2 {
+                    painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, aux_col), 6.0, 4.0));
+                }
+            }
+            qymcad_core::model::EntityKind::Spline { .. } | qymcad_core::model::EntityKind::Ellipse { span: Some(_), .. } => {
+                let pts: Vec<Pos2> = qymcad_ui_state::entity_outline(s, &e.kind).iter().map(|p| sh.at(*p)).collect();
                 if pts.len() >= 2 {
                     painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, aux_col), 6.0, 4.0));
                 }

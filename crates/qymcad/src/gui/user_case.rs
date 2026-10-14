@@ -1267,11 +1267,11 @@ mod tests {
                 drawing(11, "text", &[(0.0, 75.0)]),
             ];
             for Drawing { tool, name, clicks: pts } in draws {
-                // TEXT LIVES IN ITS OWN LIST, as points and splines live in theirs. Counting only the entities
-                // would declare a working tool broken.
+                // TEXT LIVES IN ITS OWN LIST, as points live in theirs. Counting only the entities would declare a working
+                // tool broken.
                 let count = |a: &App| {
                     let sk = &a.project.sketches[si];
-                    sk.entities.len() + sk.points.len() + sk.splines.len() + sk.texts.len() + sk.notes.len()
+                    sk.entities.len() + sk.points.len() + sk.texts.len() + sk.notes.len()
                 };
                 let before = count(&app);
                 let mut hand = Hand::new(&mut app);

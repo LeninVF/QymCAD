@@ -96,14 +96,14 @@ pub fn sketch_props(pr: &mut qymcad_ui_state::PropsCtx, ui: &mut egui::Ui, si: u
         // red (real contradictions of values are still caught by `sketch_conflicts`, which works on the
         // geometry and is reliable).
         let flagged = qymcad_ui_state::flagged_redundant(&*pr.cache, &*pr.project, si); // ONE rule for the list and for the canvas
-        let holders = pr.project.sketches[si].corner_holders();
+        let holders = pr.project.sketches[si].held_by_shapes();
         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
             for (ci, c) in cons.iter_mut().enumerate() {
                 if is_sys(c) {
                     continue; // a system `Fixed` on the origin or an axis is not shown
                 }
                 if matches!(c, Constraint::Orientation { .. }) || holders.contains(&ci) {
-                    continue; // the turn of a rectangle is the rectangle's own, and a cut corner's holders are the corner's
+                    continue; // the turn of a rectangle is the rectangle's own, a cut corner's holders the corner's, a figure's the figure's
                 }
                 let is_sel = cur_sel == Some(ci);
                 // is it a dimension? (consistent redundancy among dimensions is harmless and gets no warning)

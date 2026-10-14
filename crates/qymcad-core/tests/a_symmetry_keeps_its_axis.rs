@@ -14,7 +14,7 @@ fn a_symmetry_about_a_line_held_on_an_axis_mirrors_the_pair_and_keeps_the_line()
     let si = p.sketch_index(sid).expect("the sketch is there");
     let pair = p.add_line_entity(si, 10.0, 5.0, 30.0, 25.0, Purpose::Real);
     let axis = p.add_line_entity(si, 0.0, -20.0, 0.0, 20.0, Purpose::Real);
-    let ends = |p: &Project, id: Id| match p.sketches[si].entities.iter().find(|e| e.id == id).map(|e| e.kind) {
+    let ends = |p: &Project, id: Id| match p.sketches[si].entities.iter().find(|e| e.id == id).map(|e| e.kind.clone()) {
         Some(EntityKind::Line { a, b }) => (a, b),
         other => panic!("the line {id} is {other:?}"),
     };

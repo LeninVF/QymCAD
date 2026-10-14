@@ -57,16 +57,13 @@ pub fn take_whole_rects(project: &Project, si: usize, sel_sk: &mut SketchSelecti
     }
 }
 
-/// THE KIND OF A SPLINE in the sketch selection, kept by the id of its first node: a spline has no id of its own, and no
-/// entity has the id of a point. Picked by a click on its curve; its handles show while it is picked.
-pub const SEL_SPLINE: u8 = 5;
-
-/// THE SPLINES OF SKETCH `si` WHOSE HANDLES SHOW AND ARE TAKEN: those picked by their curve, and those with a node
-/// picked. A handle shown on every spline of a sketch covered the drawing, and one under a point took the point's drag.
-pub fn splines_with_handles(project: &Project, sel_sk: &SketchSelection, si: usize) -> Vec<usize> {
+/// THE SPLINES OF SKETCH `si` WHOSE HANDLES SHOW AND ARE TAKEN, by their ids: those picked by their curve, and those with
+/// a node picked. A handle shown on every spline of a sketch covered the drawing, and one under a point took the point's
+/// drag.
+pub fn splines_with_handles(project: &Project, sel_sk: &SketchSelection, si: usize) -> Vec<Id> {
     let Some(s) = project.sketches.get(si) else { return Vec::new() };
-    let picked = |sp: &qymcad_core::model::Spline| sel_sk.items.iter().any(|&(k, id)| (k == SEL_SPLINE && sp.points.first() == Some(&id)) || (k == 0 && sp.points.contains(&id)));
-    s.splines.iter().enumerate().filter(|(_, sp)| picked(sp)).map(|(spi, _)| spi).collect()
+    let picked = |e: &qymcad_core::model::SketchEntity, nodes: &[Id]| sel_sk.items.iter().any(|&(k, id)| (k == 1 && id == e.id) || (k == 0 && nodes.contains(&id)));
+    s.entities.iter().filter(|e| matches!(&e.kind, qymcad_core::model::EntityKind::Spline { nodes, .. } if picked(e, nodes))).map(|e| e.id).collect()
 }
 
 /// The indices of the texts selected in sketch `si`, in the order they were picked.

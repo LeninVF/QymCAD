@@ -273,7 +273,7 @@ pub fn constraint_glyphs(pick: &PickCtx, rect: Rect, si: usize) -> Vec<(usize, P
         }
     };
     let mut push = |out: &mut Vec<(usize, Pos2, Gly)>, ci: usize, p: Option<Pos2>, g: Gly| place(out, &mut seen, ci, p, g);
-    let holders = s.corner_holders(); // a cut corner's own constraints show no badge: the corner holds itself by them
+    let holders = s.held_by_shapes(); // the own constraints of a cut corner or a figure show no badge: the shape holds itself by them
     for (ci, c) in s.constraints.iter().enumerate().filter(|(ci, _)| !holders.contains(ci)) {
         match *c {
             Constraint::Horizontal { a, b } => push(&mut out, ci, mid(a, b), Gly::Horiz),

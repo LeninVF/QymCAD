@@ -31,9 +31,6 @@ pub struct Sketch {
     /// Geometric constraints and dimensions (solved by the sketch solver).
     #[serde(default)]
     pub constraints: Vec<Constraint>,
-    /// Splines (smooth curves through control points).
-    #[serde(default)]
-    pub splines: Vec<Spline>,
     /// Text notes and annotations. Not geometry: they never reach a profile or a toolpath.
     #[serde(default)]
     pub notes: Vec<Note>,
@@ -46,6 +43,10 @@ pub struct Sketch {
     /// The rectangles kept as one shape: their sides, corners, centre and construction diagonals, see `SketchRect`.
     #[serde(default)]
     pub rects: Vec<SketchRect>,
+    /// The other figures kept as one shape - regular polygons and slots: their curves and their own constraints, see
+    /// `SketchFigure`.
+    #[serde(default)]
+    pub figures: Vec<SketchFigure>,
     /// Projections of body geometry (driven entities that reference their source).
     #[serde(default)]
     pub projections: Vec<SketchProjection>,
@@ -191,6 +192,15 @@ impl Sketch {
     ///
     /// One source of truth on purpose: spelled out by hand in six places the set drifts apart, some copies
     /// forgetting the origin and others the axes.
+    /// THE CONSTRAINTS THE SHAPES OF THE SKETCH HOLD THEMSELVES BY, by their index: those of a cut corner
+    /// (`corner_holders`) and those of a figure (`SketchFigure::own`). Neither is listed nor badged.
+    pub fn held_by_shapes(&self) -> std::collections::HashSet<usize> {
+        let mut out = self.corner_holders();
+        if !self.figures.is_empty() {
+            out.extend(self.constraints.iter().enumerate().filter(|(_, c)| self.figures.iter().any(|f| f.holds(c))).map(|(ci, _)| ci));
+        }
+        out
+    }
     /// THE CONSTRAINTS A CUT CORNER HOLDS ITSELF BY, by their index: the virtual sharp standing on the extension of each
     /// side (`PointOnLine` of a point no geometry ends at), the legs of a symmetric chamfer kept equal on it (`Equal` from
     /// the sharp to the two ends of the cut line), and the arc of a fillet touching the lines it ends on (`Tangent` of a
@@ -203,16 +213,7 @@ impl Sketch {
         if !self.constraints.iter().any(|c| matches!(c, Constraint::PointOnLine { .. } | Constraint::Equal { .. } | Constraint::Tangent { .. })) {
             return Default::default();
         }
-        let drawn: std::collections::HashSet<Id> = self
-            .entities
-            .iter()
-            .flat_map(|e| match e.kind {
-                EntityKind::Line { a, b } => vec![a, b],
-                EntityKind::Arc { center, a, b, .. } => vec![center, a, b],
-                EntityKind::Circle { center, .. } => vec![center],
-                EntityKind::Ellipse { c, ma, mi } => vec![c, ma, mi],
-            })
-            .collect();
+        let drawn: std::collections::HashSet<Id> = self.entities.iter().flat_map(entity_points).collect();
         let cut = |x: Id, y: Id| self.entities.iter().any(|e| matches!(e.kind, EntityKind::Line { a, b } if (a == x && b == y) || (a == y && b == x)));
         let at = |id: Id| self.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
         // whether `p` lies on the line through `a` and `b` beyond its ends, by more than a millionth of its length
@@ -323,7 +324,7 @@ impl Sketch {
 
     /// Driven entities (projections of a body).
     pub fn projected_entities(&self) -> std::collections::HashSet<Id> {
-        self.projections.iter().flat_map(|p| p.entities.iter().copied()).collect()
+        self.projections.iter().flat_map(|p| p.entities.iter().cloned()).collect()
     }
 
     /// Points that cannot be dragged: the system ones (origin and axes) plus the driven projections.
@@ -356,7 +357,7 @@ impl Sketch {
             return rect;
         }
         if let Some((ma, mi)) = self.entities.iter().find_map(|e| match e.kind {
-            EntityKind::Ellipse { c, ma, mi } if c == centre => Some((ma, mi)),
+            EntityKind::Ellipse { c, ma, mi, .. } if c == centre => Some((ma, mi)),
             _ => None,
         }) {
             return vec![ma, mi];
@@ -536,6 +537,34 @@ pub struct SketchRect {
     pub anchor: RectAnchor,
 }
 
+/// A FIGURE OF A SKETCH KEPT AS ONE SHAPE, other than a rectangle (`SketchRect`, which holds a turn, an anchor and a
+/// centre of its own): a regular polygon or a slot. Its curves, and the constraints it holds itself by - not listed,
+/// not badged: they are the figure's, as the turn of a rectangle is the rectangle's. It stays a figure until one of its
+/// curves is deleted; then the record and its own constraints go, and plain curves are left.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SketchFigure {
+    pub id: Id,
+    pub shape: FigureShape,
+    pub curves: Vec<Id>,
+    pub own: Vec<Constraint>,
+}
+
+/// WHAT A FIGURE IS.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FigureShape {
+    /// a regular polygon: its sides and its construction circle, each corner on the circle and the sides equal
+    Polygon,
+    /// a slot: two straight sides and two end arcs of one radius, the sides touching both ends
+    Slot,
+}
+
+impl SketchFigure {
+    /// Is `c` one of the constraints the figure holds itself by - of its kind, on the same points in the same order?
+    pub fn holds(&self, c: &Constraint) -> bool {
+        self.own.iter().any(|o| std::mem::discriminant(o) == std::mem::discriminant(c) && constraint_point_ids(o) == constraint_point_ids(c))
+    }
+}
+
 /// THE WIDTH AND THE HEIGHT DIMENSIONS OF A RECTANGLE, as indices of its sketch's constraints: the first along its
 /// first side, the second along the side after it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -604,18 +633,29 @@ pub struct SketchProjection {
     pub edges: Vec<u32>,
 }
 
-/// A sketch spline: a smooth Catmull-Rom curve through control points.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Spline {
-    pub points: Vec<Id>,
-    /// Explicit tangent vector at each node; `None` means the automatic Catmull-Rom tangent, which follows
-    /// the nodes. Dragging a handle makes the tangent explicit, pinning the shape at that node.
-    #[serde(default)]
-    pub tangents: Vec<Option<[f64; 2]>>,
-    pub closed: bool,
-    /// A construction spline: drawn dashed and never reaching a profile or a toolpath.
-    #[serde(default)]
-    pub construction: bool,
+/// AN ARC OF AN ELLIPSE TO BE LAID: the centre, the semi-axes (major along X of `radii`, minor along Y) turned by `rot`
+/// radians, the eccentric angles of its ends and the way it goes from the first to the second.
+#[derive(Clone, Copy, Debug)]
+pub struct EllipseArcSpec {
+    pub centre: Point2,
+    pub radii: Point2,
+    pub rot: f64,
+    pub angles: [f64; 2],
+    pub winding: crate::feature::Winding,
+}
+
+/// A SPLINE AS IT STANDS: its nodes where they are, its handles and its ends.
+pub(crate) struct SplineNow {
+    pub at: Vec<Point2>,
+    pub handles: Vec<Handle>,
+    pub ends: crate::feature::Ends,
+}
+
+/// A HANDLE OF A SPLINE ON SCREEN: the node, and the end of the tangent drawn from it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SplineHandle {
+    pub node: Point2,
+    pub end: Point2,
 }
 
 /// A sketch constraint or dimension, expressed through point ids. Solved by the sketch solver.
@@ -708,6 +748,9 @@ pub enum Constraint {
     /// centre). It also implicitly keeps the endpoints of an arc on its circle, which is what makes an arc
     /// a real entity.
     PointOnCircle { p: Id, c: Id },
+    /// Point `p` lies on the ellipse of centre `c`, major end `ma` and minor end `mi`. It keeps the ends of an arc of an
+    /// ellipse on its ellipse, as `PointOnCircle` keeps those of an arc of a circle.
+    PointOnEllipse { p: Id, c: Id, ma: Id, mi: Id },
     /// Concentric: centres `c1` and `c2` coincide. A distinct kind with its own glyph, not to be confused
     /// with coincidence of ordinary points.
     Concentric { c1: Id, c2: Id },
@@ -822,6 +865,7 @@ impl Constraint {
             CircleTangent { c1, c2, .. } | EqualRadius { c1, c2 } | Concentric { c1, c2 } | EdgeDistance { c1, c2, .. } => vec![c1, c2],
             Symmetric { a, b, la, lb } => vec![a, b, la, lb],
             PointOnCircle { p, c } => vec![p, c],
+            PointOnEllipse { p, c, ma, mi } => vec![p, c, ma, mi],
             Diameter { c, .. } => vec![c],
         }
     }

@@ -241,7 +241,7 @@ fn an_angle_dimension_on_a_side_turns_the_rectangle() {
     let (mut p, si) = drawn(0);
     // a fixed line from (0, 0) at -20 deg, the angle measured between it and the first side, both run from their meeting
     let a = p.add_line_entity(si, 0.0, 0.0, 30.0, -30.0 * 20f64.to_radians().tan(), Purpose::Real);
-    let line = match p.sketches[si].entities.iter().find(|e| e.id == a).map(|e| e.kind) {
+    let line = match p.sketches[si].entities.iter().find(|e| e.id == a).map(|e| e.kind.clone()) {
         Some(EntityKind::Line { a, b }) => (a, b),
         _ => panic!("a line"),
     };

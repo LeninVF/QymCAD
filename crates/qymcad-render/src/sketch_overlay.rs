@@ -8,7 +8,7 @@ pub fn draw_entity_xform(pick: &PickCtx, painter: &egui::Painter, rect: Rect, si
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
     use qymcad_core::model::EntityKind;
     let Some(s) = pick.project.sketches.get(si) else { return };
-    let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind) else { return };
+    let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) else { return };
     let pt = |id: Id| {
         s.points.iter().find(|q| q.id == id).map(|q| {
             let (x, y) = f(q.x, q.y);
@@ -16,6 +16,11 @@ pub fn draw_entity_xform(pick: &PickCtx, painter: &egui::Painter, rect: Rect, si
         })
     };
     match kind {
+        // a spline or an arc of an ellipse laid out where it stands, each of its points taken through the map
+        EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
+            let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, &kind).iter().map(|p| f(p.x, p.y)).map(|(x, y)| sh.at(Point2::new(x, y))).collect();
+            painter.add(egui::Shape::line(line, stroke));
+        }
         EntityKind::Line { a, b } => {
             if let (Some(pa), Some(pb)) = (pt(a), pt(b)) {
                 painter.line_segment([sh.at(pa), sh.at(pb)], stroke);
@@ -52,7 +57,7 @@ pub fn draw_entity_xform(pick: &PickCtx, painter: &egui::Painter, rect: Rect, si
                 painter.add(egui::Shape::line(pts, stroke));
             }
         }
-        EntityKind::Ellipse { c, ma, mi } => {
+        EntityKind::Ellipse { c, ma, mi, span: None } => {
             if let (Some(pc), Some(pma), Some(pmi)) = (pt(c), pt(ma), pt(mi)) {
                 let major = ((pma.x - pc.x).powi(2) + (pma.y - pc.y).powi(2)).sqrt().max(1e-6);
                 let minor = ((pmi.x - pc.x).powi(2) + (pmi.y - pc.y).powi(2)).sqrt().max(1e-6);
@@ -212,6 +217,20 @@ pub fn draw_clip_ghost(clip: &Clipboard, cursor: Option<Point2>, scheme: &Scheme
     let pt = |id: Id| clip.points.iter().find(|(pid, ..)| *pid == id).map(|(_, x, y)| Point2::new(x + ox, y + oy));
     for e in &clip.entities {
         match e.kind {
+            // an arc of an ellipse of the clipboard where it would land
+            EntityKind::Ellipse { c, ma, mi, span: Some(sp) } => {
+                if let (Some(pc), Some(pa), Some(pi), Some(from), Some(to)) = (pt(c), pt(ma), pt(mi), pt(sp.from), pt(sp.to)) {
+                    let line: Vec<Pos2> = qymcad_core::model::ellipse_arc_line([pc, pa, pi], [from, to], sp.winding).iter().map(|p| sh.at(*p)).collect();
+                    painter.add(egui::Shape::line(line, stroke));
+                }
+            }
+            // a spline of the clipboard where it would land: its nodes shifted, its tangents as they are
+            EntityKind::Spline { ref nodes, ref handles, ends } => {
+                if let Some(at) = nodes.iter().map(|id| pt(*id)).collect::<Option<Vec<Point2>>>() {
+                    let line: Vec<Pos2> = qymcad_core::model::spline_line(&at, handles, ends).iter().map(|p| sh.at(*p)).collect();
+                    painter.add(egui::Shape::line(line, stroke));
+                }
+            }
             EntityKind::Line { a, b } => {
                 if let (Some(pa), Some(pb)) = (pt(a), pt(b)) {
                     painter.line_segment([sh.at(pa), sh.at(pb)], stroke);
@@ -243,7 +262,7 @@ pub fn draw_clip_ghost(clip: &Clipboard, cursor: Option<Point2>, scheme: &Scheme
                     painter.add(egui::Shape::line(pts, stroke));
                 }
             }
-            EntityKind::Ellipse { c, ma, mi } => {
+            EntityKind::Ellipse { c, ma, mi, span: None } => {
                 if let (Some(pc), Some(pma), Some(pmi)) = (pt(c), pt(ma), pt(mi)) {
                     let major = ((pma.x - pc.x).powi(2) + (pma.y - pc.y).powi(2)).sqrt().max(1e-6);
                     let minor = ((pmi.x - pc.x).powi(2) + (pmi.y - pc.y).powi(2)).sqrt().max(1e-6);
@@ -441,6 +460,10 @@ pub fn draw_sketch_constraints(pn: &Painting, painter: &egui::Painter, rect: Rec
         }
         let hl = if sel { Stroke::new(2.5, pn.scheme.pal.emphasis()) } else { Stroke::new(2.0, pn.scheme.pal.preview()) };
         match e.kind {
+            EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
+                let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, &e.kind).iter().map(|p| sh.at(*p)).collect();
+                painter.add(egui::Shape::line(line, hl));
+            }
             EntityKind::Line { a, b } => {
                 if let (Some(pa), Some(pb)) = (pt(a), pt(b)) {
                     painter.line_segment([sh.at(pa), sh.at(pb)], hl);
@@ -472,7 +495,7 @@ pub fn draw_sketch_constraints(pn: &Painting, painter: &egui::Painter, rect: Rec
                     }
                 }
             }
-            EntityKind::Ellipse { c, ma, mi } => {
+            EntityKind::Ellipse { c, ma, mi, span: None } => {
                 if let (Some(pc), Some(pma), Some(pmi)) = (pt(c), pt(ma), pt(mi)) {
                     let major = ((pma.x - pc.x).powi(2) + (pma.y - pc.y).powi(2)).sqrt().max(1e-6);
                     let minor = ((pmi.x - pc.x).powi(2) + (pmi.y - pc.y).powi(2)).sqrt().max(1e-6);

@@ -255,7 +255,7 @@ pub(crate) fn draw_extend_preview(pn: &Painting, painter: &egui::Painter, rect: 
     let sh = qymcad_ui_state::Sheet { view: pn.view, rect };
     let pick = PickCtx { project: pn.project, set: pn.set, view: &pn.view };
     let Some(s) = pn.project.sketches.get(held.si) else { return };
-    let Some(qymcad_core::model::EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == held.line).map(|e| e.kind) else { return };
+    let Some(qymcad_core::model::EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == held.line).map(|e| e.kind.clone()) else { return };
     let at = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y));
     let (Some(pa), Some(pb)) = (at(a), at(b)) else { return };
     let green = pn.scheme.pal.add();
@@ -293,7 +293,7 @@ pub fn draw_trim_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
         return;
     };
     let Some(s) = pn.project.sketches.get(si) else { return };
-    let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind) else { return };
+    let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) else { return };
     let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
     let pt = |id: Id| points_by_id.get(&id).copied().map(|q| Point2::new(q.x, q.y));
     let red = pn.scheme.pal.error();
@@ -303,6 +303,8 @@ pub fn draw_trim_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
         1 => {
             // TRIM: light the span that will be removed in red
             match kind {
+                // a spline takes no part in the crossings the preview is cut at
+                EntityKind::Spline { .. } => {}
                 EntityKind::Line { a, b } => {
                     let (Some(pa), Some(pb)) = (pt(a), pt(b)) else { return };
                     let (dx, dy) = (pb.x - pa.x, pb.y - pa.y);
@@ -360,6 +362,7 @@ pub fn draw_trim_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
         3 => {
             // BREAK: a marker at the cut point (the cursor projected onto the entity)
             let split = match kind {
+                EntityKind::Spline { .. } => None,
                 EntityKind::Line { a, b } => {
                     if let (Some(pa), Some(pb)) = (pt(a), pt(b)) {
                         let (dx, dy) = (pb.x - pa.x, pb.y - pa.y);

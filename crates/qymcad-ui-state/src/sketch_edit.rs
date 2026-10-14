@@ -13,25 +13,7 @@ pub fn select_all_sketch(annot: &mut AnnotEdit, gsel: &mut GeomSelection, projec
     let mut sel: Vec<(u8, Id)> = Vec::new();
     for e in &s.entities {
         sel.push((1, e.id));
-        match e.kind {
-            qymcad_core::model::EntityKind::Line { a, b } => {
-                used.insert(a);
-                used.insert(b);
-            }
-            qymcad_core::model::EntityKind::Circle { center, .. } => {
-                used.insert(center);
-            }
-            qymcad_core::model::EntityKind::Arc { center, a, b, .. } => {
-                used.insert(center);
-                used.insert(a);
-                used.insert(b);
-            }
-            qymcad_core::model::EntityKind::Ellipse { c, ma, mi } => {
-                used.insert(c);
-                used.insert(ma);
-                used.insert(mi);
-            }
-        }
+        used.extend(qymcad_core::model::entity_points(e));
     }
     // lone points (not part of an entity and not system ones)
     for p in &s.points {
@@ -139,6 +121,7 @@ pub fn constraint_label(c: &qymcad_core::model::Constraint) -> String {
         C::CircleTangent { external, .. } => qymcad_i18n::tr(if *external { "con-circle-tangent-out" } else { "con-circle-tangent-in" }),
         C::EdgeDistance { d, driven, expr, .. } => dim("con-name-edge-distance", value(qymcad_i18n::num(*d, 1), expr), *driven),
         C::PointOnCircle { .. } => qymcad_i18n::tr("con-point-on-circle"),
+        C::PointOnEllipse { .. } => qymcad_i18n::tr("con-point-on-ellipse"),
         C::Concentric { .. } => qymcad_i18n::tr("con-concentric"),
         C::Angle { deg, driven, .. } => dim("con-name-angle", format!("{}°", qymcad_i18n::num(*deg, 0)), *driven),
         C::AngleLines { deg, driven, expr, .. } => dim("con-name-angle", value(format!("{}°", qymcad_i18n::num(*deg, 0)), expr), *driven),
@@ -268,7 +251,7 @@ pub fn active_edges(dc: &DrawCtx, si: usize) -> ActiveEdges {
                         circs.push(Rim { centre: c, radius: ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt(), arc: Some(RimArc { from: pa, to: pb, ccw }) });
                     }
                 }
-                EntityKind::Ellipse { .. } => {} // drawn by its own outline (as a profile)
+                EntityKind::Ellipse { .. } | EntityKind::Spline { .. } => {} // drawn by its own outline (as a profile)
             }
         }
     }
@@ -393,7 +376,8 @@ pub fn lineage_of(project: &qymcad_core::model::Project, id: Option<Id>) -> Line
 }
 
 /// THE OUTLINE OF A SKETCH ENTITY as a polyline in sketch coordinates: a line its two ends, a circle, an arc and an
-/// ellipse 48 pieces of themselves - enough for a box to tell touched from missed at any zoom a box is drawn at.
+/// ellipse 48 pieces of themselves, a spline the points it is laid out by - enough for a box to tell touched from missed
+/// at any zoom a box is drawn at.
 pub fn entity_outline(s: &qymcad_core::model::Sketch, kind: &qymcad_core::model::EntityKind) -> Vec<Point2> {
     use qymcad_core::model::EntityKind;
     let pt = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y));
@@ -406,6 +390,10 @@ pub fn entity_outline(s: &qymcad_core::model::Sketch, kind: &qymcad_core::model:
             .collect()
     };
     match *kind {
+        EntityKind::Spline { ref nodes, ref handles, ends } => match nodes.iter().map(|id| pt(*id)).collect::<Option<Vec<Point2>>>() {
+            Some(at) => qymcad_core::model::spline_line(&at, handles, ends),
+            None => Vec::new(),
+        },
         EntityKind::Line { a, b } => [pt(a), pt(b)].into_iter().flatten().collect(),
         EntityKind::Circle { center, r } => pt(center).map(|c| ring(c, (r, 0.0), (0.0, r), 0.0, std::f64::consts::TAU)).unwrap_or_default(),
         EntityKind::Arc { center, a, b, ccw } => match (pt(center), pt(a), pt(b)) {
@@ -420,8 +408,12 @@ pub fn entity_outline(s: &qymcad_core::model::Sketch, kind: &qymcad_core::model:
             }
             _ => Vec::new(),
         },
-        EntityKind::Ellipse { c, ma, mi } => match (pt(c), pt(ma), pt(mi)) {
+        EntityKind::Ellipse { c, ma, mi, span: None } => match (pt(c), pt(ma), pt(mi)) {
             (Some(c), Some(pa), Some(pi)) => ring(c, (pa.x - c.x, pa.y - c.y), (pi.x - c.x, pi.y - c.y), 0.0, std::f64::consts::TAU),
+            _ => Vec::new(),
+        },
+        EntityKind::Ellipse { c, ma, mi, span: Some(s) } => match (pt(c), pt(ma), pt(mi), pt(s.from), pt(s.to)) {
+            (Some(c), Some(pa), Some(pi), Some(from), Some(to)) => qymcad_core::model::ellipse_arc_line([c, pa, pi], [from, to], s.winding),
             _ => Vec::new(),
         },
     }

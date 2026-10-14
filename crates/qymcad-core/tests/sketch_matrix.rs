@@ -293,28 +293,7 @@ fn matrix_trim_no_orphan_points() {
         fails.push("trim_line of the tail returned false".into());
     }
     let s = &p.sketches[si];
-    let mut used: std::collections::HashSet<u64> = Default::default();
-    for e in &s.entities {
-        match e.kind {
-            qymcad_core::model::EntityKind::Line { a, b } => {
-                used.insert(a);
-                used.insert(b);
-            }
-            qymcad_core::model::EntityKind::Arc { center, a, b, .. } => {
-                used.insert(center);
-                used.insert(a);
-                used.insert(b);
-            }
-            qymcad_core::model::EntityKind::Circle { center, .. } => {
-                used.insert(center);
-            }
-            qymcad_core::model::EntityKind::Ellipse { c, ma, mi } => {
-                used.insert(c);
-                used.insert(ma);
-                used.insert(mi);
-            }
-        }
-    }
+    let used: std::collections::HashSet<u64> = s.entities.iter().flat_map(qymcad_core::model::entity_points).collect();
     let sys: std::collections::HashSet<u64> = s.system_ids().into_iter().collect();
     for pt in &s.points {
         if !used.contains(&pt.id) && !sys.contains(&pt.id) {

@@ -56,7 +56,7 @@ fn a_rectangle_turns_as_a_whole() {
     let (mut p, si, eids) = rect_sketch();
     let side = |p: &Project, k: usize| {
         let at = |id: u64| p.sketches[si].points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("the point exists");
-        match p.sketches[si].entities.iter().find(|e| e.id == eids[k]).map(|e| e.kind) {
+        match p.sketches[si].entities.iter().find(|e| e.id == eids[k]).map(|e| e.kind.clone()) {
             Some(EntityKind::Line { a, b }) => (at(a), at(b)),
             _ => panic!("a side"),
         }
@@ -528,20 +528,20 @@ fn spline_tangent_handle_changes_shape() {
     // handles. The tangent is automatic to begin with (Catmull-Rom); `set_spline_handle` makes it explicit.
     let mut p = Project::default();
     let si = p.new_sketch("s");
-    p.add_spline(si, vec![Point2::new(0.0, 0.0), Point2::new(10.0, 0.0), Point2::new(20.0, 0.0)], qymcad_core::feature::Ends::Open, qymcad_core::feature::Purpose::Real);
+    let sp = p.add_spline(si, vec![Point2::new(0.0, 0.0), Point2::new(10.0, 0.0), Point2::new(20.0, 0.0)], qymcad_core::feature::Ends::Open, qymcad_core::feature::Purpose::Real).expect("the spline");
     // There is one handle per knot.
-    let h = p.spline_handles(si, 0);
+    let h = p.spline_handles(si, sp);
     assert_eq!(h.len(), 3, "one handle per knot");
     // The height of the contour starts near zero, since the knots lie on a line.
     let cid = p.sketches[si].contour_ids[0];
     let h0 = p.contours[p.contour_index(cid).unwrap()].points.iter().map(|q| q.y.abs()).fold(0.0, f64::max);
     assert!(h0 < 0.5, "the spline must start flat, max|y| = {h0}");
     // Pull the handle of the middle knot sharply upwards, which bows the curve.
-    assert!(p.set_spline_handle(si, 0, 1, 10.0, 15.0), "the handle must be set");
+    assert!(p.set_spline_handle(si, sp, 1, Point2::new(10.0, 15.0)), "the handle must be set");
     let h1 = p.contours[p.contour_index(cid).unwrap()].points.iter().map(|q| q.y).fold(f64::MIN, f64::max);
     assert!(h1 > 1.0, "the tangent handle must bow the spline upwards, max y = {h1}");
     // Resetting to automatic returns it to flat.
-    assert!(p.reset_spline_handle(si, 0, 1));
+    assert!(p.reset_spline_handle(si, sp, 1));
     let h2 = p.contours[p.contour_index(cid).unwrap()].points.iter().map(|q| q.y.abs()).fold(0.0, f64::max);
     assert!(h2 < 0.5, "resetting the handle must make it flat again, max|y| = {h2}");
 }
@@ -766,7 +766,7 @@ fn copy_and_move_entities_work() {
     let ids = p.copy_entities(si, &[eid], 0.0, 5.0);
     assert_eq!(ids.len(), 1, "one copy");
     assert_eq!(p.sketches[si].entities.len(), n0 + 1, "the entity count must grow");
-    if let Some(EntityKind::Line { a, .. }) = p.sketches[si].entities.iter().find(|e| e.id == ids[0]).map(|e| e.kind) {
+    if let Some(EntityKind::Line { a, .. }) = p.sketches[si].entities.iter().find(|e| e.id == ids[0]).map(|e| e.kind.clone()) {
         let pa = p.sketches[si].points.iter().find(|q| q.id == a).unwrap();
         assert!((pa.y - 5.0).abs() < 1e-9, "the copy must be offset by 5 along y: {}", pa.y);
     } else {

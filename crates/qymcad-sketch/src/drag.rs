@@ -81,17 +81,17 @@ pub fn sketch_drag_start(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Contex
         if !sk.drag.active() && !ctrl {
             if let (qymcad_ui_state::Sel::Sketch(si), Some(pp)) = (*sk.sel, pp) {
                 if qymcad_ui_state::edit_si(&*sk.project, &*sk.sketch_ses) == Some(si) {
-                    let mut best: Option<(f32, usize, usize)> = None;
-                    for spi in qymcad_ui_state::splines_with_handles(&*sk.project, &*sk.sel_sk, si) {
-                        for (ki, (_knot, hend)) in sk.project.spline_handles(si, spi).into_iter().enumerate() {
-                            let d = sh.at(hend).distance(pp);
-                            if d <= qymcad_ui_state::grab::grab(sk.set, Grab::Point) && best.is_none_or(|(bd, _, _)| d < bd) {
-                                best = Some((d, spi, ki));
+                    let mut best: Option<(f32, qymcad_ui_state::HandleHeld)> = None;
+                    for spline in qymcad_ui_state::splines_with_handles(&*sk.project, &*sk.sel_sk, si) {
+                        for (node, h) in sk.project.spline_handles(si, spline).into_iter().enumerate() {
+                            let d = sh.at(h.end).distance(pp);
+                            if d <= qymcad_ui_state::grab::grab(sk.set, Grab::Point) && best.is_none_or(|(bd, _)| d < bd) {
+                                best = Some((d, qymcad_ui_state::HandleHeld { si, spline, node }));
                             }
                         }
                     }
-                    if let Some((_, spi, ki)) = best {
-                        *sk.drag = qymcad_ui_state::Dragging::Handle(si, spi, ki);
+                    if let Some((_, held)) = best {
+                        *sk.drag = qymcad_ui_state::Dragging::Handle(held);
                     }
                 }
             }
@@ -370,7 +370,7 @@ pub fn ref_edge_at(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos2, s
             let (pc, pa) = (qymcad_ui_state::sketch_pt(&*sk.project, si, center)?, qymcad_ui_state::sketch_pt(&*sk.project, si, a)?);
             Some(qymcad_ui_state::EdgeRef::Circle { center, r: ((pa.x - pc.x).powi(2) + (pa.y - pc.y).powi(2)).sqrt() })
         }
-        EntityKind::Ellipse { .. } => None,
+        EntityKind::Ellipse { .. } | EntityKind::Spline { .. } => None,
     }
 }
 
@@ -516,12 +516,12 @@ pub fn sketch_drag_update(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Conte
             sk.drag.clear();
             qymcad_ui_state::commit_edit_if_changed(&mut sk.rebuild());
         }
-    } else if let Some((si, spi, ki)) = sk.drag.handle() {
+    } else if let Some(held) = sk.drag.handle() {
         // dragging a tangent handle of a spline changes its shape (the tangent becomes explicit)
         if resp.dragged() {
             if let Some(pp) = resp.interact_pointer_pos() {
                 let w = qymcad_ui_state::to_world(&*sk.view, rect, pp);
-                sk.project.set_spline_handle(si, spi, ki, w.x, w.y);
+                sk.project.set_spline_handle(held.si, held.spline, held.node, Point2::new(w.x, w.y));
                 qymcad_ui_state::invalidate(&mut *sk.regen);
             }
         }

@@ -16,7 +16,7 @@ pub fn lines(p: &Project, n: usize) -> Vec<Id> {
 
 /// The ends of line `eid`.
 fn ends(p: &Project, eid: Id) -> (Id, Id) {
-    match p.sketches[0].entity(eid).map(|e| e.kind) {
+    match p.sketches[0].entity(eid).map(|e| e.kind.clone()) {
         Some(EntityKind::Line { a, b }) | Some(EntityKind::Arc { a, b, .. }) => (a, b),
         _ => (0, 0),
     }
@@ -81,7 +81,7 @@ pub fn lay_targets(p: &mut Project) -> Targets {
     let wall = p.add_line_entity(0, x0 + 60.0, 0.0, x0 + 60.0, 40.0, Purpose::Real);
     let short = p.add_line_entity(0, x0 + 45.0, 20.0, x0 + 55.0, 20.0, Purpose::Real);
     let circle_line = p.add_circle_entity(0, x0 + 90.0, 20.0, 10.0, Purpose::Real);
-    let circle = match p.sketches[0].entity(circle_line).map(|e| e.kind) {
+    let circle = match p.sketches[0].entity(circle_line).map(|e| e.kind.clone()) {
         Some(EntityKind::Circle { center, .. }) => center,
         _ => 0,
     };
@@ -114,7 +114,7 @@ pub enum Effect {
 /// Whether `after` shows the effect against `before`; the words where it does not.
 pub fn shows(effect: Effect, before: &Project, after: &Project) -> Option<String> {
     let (b, a) = (&before.sketches[0], &after.sketches[0]);
-    let curves = |s: &qymcad_core::model::Sketch| s.entities.len() + s.splines.len();
+    let curves = |s: &qymcad_core::model::Sketch| s.entities.len();
     let ok = match effect {
         Effect::Adds => curves(a) > curves(b),
         Effect::Removes => curves(a) < curves(b),
@@ -335,7 +335,9 @@ pub fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "a spline drawn",
-            work: |p, _| p.add_spline(0, vec![Point2::new(-200.0, -100.0), Point2::new(-195.0, -92.0), Point2::new(-188.0, -98.0), Point2::new(-180.0, -90.0)], Ends::Open, Purpose::Real),
+            work: |p, _| {
+                p.add_spline(0, vec![Point2::new(-200.0, -100.0), Point2::new(-195.0, -92.0), Point2::new(-188.0, -98.0), Point2::new(-180.0, -90.0)], Ends::Open, Purpose::Real);
+            },
             effect: Effect::Adds,
         },
         Tool {

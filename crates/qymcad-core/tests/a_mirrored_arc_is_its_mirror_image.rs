@@ -10,7 +10,7 @@ use qymcad_core::model::{EntityKind, Project};
 fn middle(p: &Project, si: usize, id: u64) -> (f64, f64) {
     let s = &p.sketches[si];
     let at = |q: u64| s.points.iter().find(|x| x.id == q).map(|x| (x.x, x.y)).expect("the point");
-    let Some(EntityKind::Arc { center, a, b, ccw }) = s.entities.iter().find(|e| e.id == id).map(|e| e.kind) else { panic!("no arc {id}") };
+    let Some(EntityKind::Arc { center, a, b, ccw }) = s.entities.iter().find(|e| e.id == id).map(|e| e.kind.clone()) else { panic!("no arc {id}") };
     let (c, pa, pb) = (at(center), at(a), at(b));
     let (a0, a1) = ((pa.1 - c.1).atan2(pa.0 - c.0), (pb.1 - c.1).atan2(pb.0 - c.0));
     let tau = std::f64::consts::TAU;

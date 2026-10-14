@@ -91,7 +91,7 @@ pub struct SketchPoint {
 }
 
 /// A typed sketch entity.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SketchEntity {
     pub id: Id,
     pub kind: EntityKind,
@@ -101,7 +101,7 @@ pub struct SketchEntity {
     pub construction: bool,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EntityKind {
     /// Segment between points `a` and `b`.
     Line { a: Id, b: Id },
@@ -112,8 +112,56 @@ pub enum EntityKind {
     /// Ellipse: centre `c`, endpoint of the major semi-axis `ma`, endpoint of the minor semi-axis `mi`.
     /// The semi-axes are kept perpendicular by an implicit constraint; the major axis is |c-ma|, the minor
     /// |c-mi|, and the rotation is the direction from `c` to `ma`. A real analytic entity with five degrees
-    /// of freedom, not a polygon.
-    Ellipse { c: Id, ma: Id, mi: Id },
+    /// of freedom, not a polygon. With a `span` it is an arc of the ellipse: the stretch of it from one point on it to
+    /// another.
+    Ellipse {
+        c: Id,
+        ma: Id,
+        mi: Id,
+        #[serde(default)]
+        span: Option<EllipseSpan>,
+    },
+    /// A spline: a cubic Hermite curve through its `nodes`, in order, a loop when `ends` is `Closed`. Each node has
+    /// a `Handle` - the tangent the curve arrives by and the one it leaves by - one per node.
+    Spline { nodes: Vec<Id>, handles: Vec<Handle>, ends: crate::feature::Ends },
+}
+
+/// THE STRETCH OF AN ELLIPSE AN ARC OF IT TAKES: from point `from` to point `to`, both held on the ellipse, the way
+/// `winding` goes round its centre. The points stand anywhere on the ellipse; the arc runs between their eccentric
+/// angles - the angle `t` of the point `c + a cos t u + b sin t v` of an ellipse of semi-axes `a`, `b` along `u`, `v`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EllipseSpan {
+    pub from: Id,
+    pub to: Id,
+    pub winding: crate::feature::Winding,
+}
+
+/// THE POINTS A SPLINE IS LAID OUT BY, in order along it, from its nodes where they stand (`at`): what it is drawn,
+/// picked and boxed by, its sag under 0.4 % of the mean span between its nodes.
+pub fn spline_line(at: &[Point2], handles: &[Handle], ends: crate::feature::Ends) -> Vec<Point2> {
+    tess::tessellate_spline_hermite(at, handles, ends).points
+}
+
+/// THE POINTS AN ARC OF AN ELLIPSE IS LAID OUT BY, in order along it: the ellipse by its centre and the ends of its
+/// semi-axes (`axes`), the arc from `ends[0]` to `ends[1]` the way `winding` goes.
+pub fn ellipse_arc_line(axes: [Point2; 3], ends: [Point2; 2], winding: crate::feature::Winding) -> Vec<Point2> {
+    tess::ellipse_arc_points(axes, ends, winding)
+}
+
+/// THE TANGENTS OF A SPLINE AT A NODE, as the Hermite vector dP/dt of the spans on either side of it.
+///
+/// `arrive` is the tangent the span before the node ends with; `None` is the automatic Catmull-Rom tangent, which follows
+/// the neighbouring nodes. `leave` is the tangent the span after it starts with; `None` leaves by the arriving one, so a
+/// node is smooth unless told otherwise. A spline cut inside a span keeps its shape only with the two pieces of that
+/// span scaled apart - the piece before the cut ends with the tangent times the share it keeps, the piece after starts
+/// with the tangent times its own share - which is why a node may leave by a vector other than the one it arrives by.
+/// Dragging a handle sets both, so the node stays smooth.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Handle {
+    #[serde(default)]
+    pub arrive: Option<[f64; 2]>,
+    #[serde(default)]
+    pub leave: Option<[f64; 2]>,
 }
 
 /// Snapshot of sketch geometry for the clipboard (copy, cut and paste between sketches or within one).
@@ -442,6 +490,7 @@ pub fn constraint_point_ids(c: &Constraint) -> Vec<Id> {
         Constraint::EqualRadius { c1, c2 } => vec![c1, c2],
         Constraint::CircleTangent { c1, c2, .. } => vec![c1, c2],
         Constraint::PointOnCircle { p, c } => vec![p, c],
+        Constraint::PointOnEllipse { p, c, ma, mi } => vec![p, c, ma, mi],
         Constraint::Concentric { c1, c2 } => vec![c1, c2],
         Constraint::ArcLength { c, a, b, .. } => vec![c, a, b],
     }
@@ -454,11 +503,13 @@ pub fn constraint_point_ids(c: &Constraint) -> Vec<Id> {
 /// move to the tangency point. Non-point fields (radii, expressions) are left alone.
 /// The points an entity stands on.
 pub fn entity_points(e: &SketchEntity) -> Vec<Id> {
-    match e.kind {
-        EntityKind::Line { a, b } => vec![a, b],
-        EntityKind::Arc { center, a, b, .. } => vec![center, a, b],
-        EntityKind::Circle { center, .. } => vec![center],
-        EntityKind::Ellipse { c, ma, mi } => vec![c, ma, mi],
+    match &e.kind {
+        EntityKind::Line { a, b } => vec![*a, *b],
+        EntityKind::Arc { center, a, b, .. } => vec![*center, *a, *b],
+        EntityKind::Circle { center, .. } => vec![*center],
+        EntityKind::Ellipse { c, ma, mi, span: None } => vec![*c, *ma, *mi],
+        EntityKind::Ellipse { c, ma, mi, span: Some(s) } => vec![*c, *ma, *mi, s.from, s.to],
+        EntityKind::Spline { nodes, .. } => nodes.clone(),
     }
 }
 
@@ -480,11 +531,16 @@ pub fn remap_entity_point(e: &mut SketchEntity, from: Id, to: Id) {
             fix(b);
         }
         EntityKind::Circle { center, .. } => fix(center),
-        EntityKind::Ellipse { c, ma, mi } => {
+        EntityKind::Ellipse { c, ma, mi, span } => {
             fix(c);
             fix(ma);
             fix(mi);
+            if let Some(s) = span {
+                fix(&mut s.from);
+                fix(&mut s.to);
+            }
         }
+        EntityKind::Spline { nodes, .. } => nodes.iter_mut().for_each(fix),
     }
 }
 
@@ -539,6 +595,12 @@ pub(crate) fn remap_constraint_point(c: &mut Constraint, from: Id, to: Id) {
         Constraint::PointOnCircle { p, c } => {
             fix(p);
             fix(c);
+        }
+        Constraint::PointOnEllipse { p, c, ma, mi } => {
+            fix(p);
+            fix(c);
+            fix(ma);
+            fix(mi);
         }
         Constraint::ArcLength { c, a, b, .. } => {
             fix(c);

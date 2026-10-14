@@ -77,33 +77,7 @@ impl Project {
         let s = &self.sketches[si];
         let mut used: std::collections::HashSet<Id> = s.system_ids().into_iter().collect();
         // Endpoints of the entities.
-        for e in &s.entities {
-            match e.kind {
-                EntityKind::Line { a, b } => {
-                    used.insert(a);
-                    used.insert(b);
-                }
-                EntityKind::Arc { center, a, b, .. } => {
-                    used.insert(center);
-                    used.insert(a);
-                    used.insert(b);
-                }
-                EntityKind::Circle { center, .. } => {
-                    used.insert(center);
-                }
-                EntityKind::Ellipse { c, ma, mi } => {
-                    used.insert(c);
-                    used.insert(ma);
-                    used.insert(mi);
-                }
-            }
-        }
-        // Spline nodes.
-        for sp in &s.splines {
-            for &p in &sp.points {
-                used.insert(p);
-            }
-        }
+        used.extend(s.entities.iter().flat_map(entity_points));
         s.points
             .iter()
             .filter(|p| !used.contains(&p.id))
@@ -119,32 +93,7 @@ impl Project {
         let Some(si) = self.sketch_index(sid) else { return Vec::new() };
         let s = &self.sketches[si];
         let mut used: std::collections::HashSet<Id> = s.system_ids().into_iter().collect();
-        for e in &s.entities {
-            match e.kind {
-                EntityKind::Line { a, b } => {
-                    used.insert(a);
-                    used.insert(b);
-                }
-                EntityKind::Arc { center, a, b, .. } => {
-                    used.insert(center);
-                    used.insert(a);
-                    used.insert(b);
-                }
-                EntityKind::Circle { center, .. } => {
-                    used.insert(center);
-                }
-                EntityKind::Ellipse { c, ma, mi } => {
-                    used.insert(c);
-                    used.insert(ma);
-                    used.insert(mi);
-                }
-            }
-        }
-        for sp in &s.splines {
-            for &p in &sp.points {
-                used.insert(p);
-            }
-        }
+        used.extend(s.entities.iter().flat_map(entity_points));
         s.points.iter().filter(|p| !used.contains(&p.id)).map(|p| p.id).collect()
     }
     /// Profile of sketch `si` for an extrude or a revolve: its first closed contour, flattened to XY.
@@ -175,7 +124,7 @@ impl Project {
     /// circles cut by a line, for instance. Used to pick an extrude profile.
     pub fn sketch_regions(&self, si: usize) -> Vec<crate::geom::Contour> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        arrangement_regions(&s.points, &s.entities, &s.splines)
+        arrangement_regions(&s.points, &s.entities)
     }
     /// Like `feature_profile_encoded`, but the contours listed in `fill` are not subtracted as holes, having
     /// been explicitly selected as filled. Two concentric circles with both selected put the inner one in

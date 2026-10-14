@@ -50,13 +50,14 @@ pub fn sketch_plane_words(project: &qymcad_core::model::Project, plane: qymcad_c
 }
 
 /// THE LENGTH OF CURVE `eid` of sketch `si`, mm: a line end to end, an arc along its span, a circle and an ellipse round
-/// their circle (the ellipse by Ramanujan's formula).
+/// their circle (the ellipse by Ramanujan's formula), a spline and an arc of an ellipse along the points they are laid
+/// out by.
 fn curve_length(project: &Project, si: usize, eid: Id) -> f64 {
     use qymcad_core::model::EntityKind as EK;
     let Some(s) = project.sketches.get(si) else { return 0.0 };
     let at = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).unwrap_or_default();
     let dist = |p: (f64, f64), q: (f64, f64)| (q.0 - p.0).hypot(q.1 - p.1);
-    match s.entities.iter().find(|e| e.id == eid).map(|e| e.kind) {
+    match s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) {
         Some(EK::Line { a, b }) => dist(at(a), at(b)),
         Some(EK::Arc { center, a, b, ccw }) => {
             let (c, pa, pb) = (at(center), at(a), at(b));
@@ -65,11 +66,13 @@ fn curve_length(project: &Project, si: usize, eid: Id) -> f64 {
             dist(c, pa) * sweep
         }
         Some(EK::Circle { r, .. }) => std::f64::consts::TAU * r,
-        Some(EK::Ellipse { c, ma, mi }) => {
+        Some(kind @ EK::Ellipse { span: Some(_), .. }) => qymcad_ui_state::entity_outline(s, &kind).windows(2).map(|w| w[0].dist(w[1])).sum(),
+        Some(EK::Ellipse { c, ma, mi, span: None }) => {
             let (x, y) = (dist(at(c), at(ma)), dist(at(c), at(mi)));
             let h = ((x - y) / (x + y)).powi(2);
             std::f64::consts::PI * (x + y) * (1.0 + 3.0 * h / (10.0 + (4.0 - 3.0 * h).sqrt()))
         }
+        Some(kind @ EK::Spline { .. }) => qymcad_ui_state::entity_outline(s, &kind).windows(2).map(|w| w[0].dist(w[1])).sum(),
         None => 0.0,
     }
 }
@@ -87,6 +90,7 @@ pub fn sketch_entity_name(project: &qymcad_core::model::Project, si: usize, eid:
         EK::Arc { .. } => "ent-arc",
         EK::Circle { .. } => "ent-circle",
         EK::Ellipse { .. } => "ent-ellipse",
+        EK::Spline { .. } => "ent-spline",
     };
     let same = |k: &EK| std::mem::discriminant(k) == std::mem::discriminant(&e.kind);
     let n = s.entities.iter().filter(|x| same(&x.kind)).position(|x| x.id == eid).unwrap_or(0) + 1;
@@ -121,7 +125,7 @@ pub fn sketch_export_edges(project: &qymcad_core::model::Project, si: usize) -> 
 pub fn trim_span_key(project: &qymcad_core::model::Project, si: usize, eid: Id, x: f64, y: f64) -> u32 {
     let inter = project.entity_intersections(si, eid);
     let Some(s) = project.sketches.get(si) else { return 0 };
-    let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind) else { return 0 };
+    let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) else { return 0 };
     let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
     let pt = |id: Id| points_by_id.get(&id).copied().map(|q| (q.x, q.y));
     match kind {
@@ -240,6 +244,11 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
     let mut best_e: Option<(u8, f32, Id)> = None;
     for e in &s.entities {
         let d = match e.kind {
+            // a spline and an arc of an ellipse by the points they are laid out by
+            EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
+                let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, &e.kind).into_iter().map(|p| sh.at(p)).collect();
+                line.windows(2).map(|w| qymcad_ui_state::screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min)
+            }
             EntityKind::Line { a, b } => match (pt(a), pt(b)) {
                 (Some(pa), Some(pb)) => qymcad_ui_state::screen_dist_seg(pos, sh.at(pa), sh.at(pb)),
                 _ => f32::INFINITY,
@@ -256,7 +265,7 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
                 (Some(c), Some(pa), Some(pb)) => qymcad_pick::arc_screen_dist(&sh, pos, c, pa, pb, ccw),
                 _ => f32::INFINITY,
             },
-            EntityKind::Ellipse { c, ma, mi } => match (pt(c), pt(ma), pt(mi)) {
+            EntityKind::Ellipse { c, ma, mi, span: None } => match (pt(c), pt(ma), pt(mi)) {
                 (Some(pc), Some(pma), Some(pmi)) => {
                     // the distance to the outline of the ellipse, measured over samples
                     let major = ((pma.x - pc.x).powi(2) + (pma.y - pc.y).powi(2)).sqrt().max(1e-6);
@@ -286,24 +295,7 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
             }
         }
     }
-    if let Some((_, _, id)) = best_e {
-        return Some((1u8, id));
-    }
-    // 3) the nearest spline, by its curve: kept by its first node (`SEL_SPLINE`), as a spline has no id of its own
-    let mut best_sp: Option<(u8, f32, Id)> = None;
-    for (spi, sp) in s.splines.iter().enumerate() {
-        let Some(&first) = sp.points.first() else { continue };
-        let mut line: Vec<Pos2> = pick.project.spline_polyline(si, spi).into_iter().map(|p| sh.at(p)).collect();
-        if sp.closed {
-            line.extend(line.first().copied());
-        }
-        let d = line.windows(2).map(|w| qymcad_ui_state::screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min);
-        let tier = if sp.construction { 1u8 } else { 0u8 };
-        if d <= qymcad_ui_state::grab::grab(pick.set, Grab::Curve) && best_sp.is_none_or(|(bt, bd, _)| (tier, d) < (bt, bd)) {
-            best_sp = Some((tier, d, first));
-        }
-    }
-    best_sp.map(|(_, _, id)| (qymcad_ui_state::SEL_SPLINE, id))
+    best_e.map(|(_, _, id)| (1u8, id))
 }
 
 /// FINISH THE SPLINE - what a double click does.
@@ -526,7 +518,6 @@ fn touch_point(project: &mut Project, si: usize, sel_sk: &qymcad_ui_state::Sketc
 /// Every point belonging to the current sketch selection: the points themselves plus the ends and
 /// centres of the picked entities. Used to move geometry as a whole.
 pub fn sketch_sel_points(project: &Project, sel_sk: &qymcad_ui_state::SketchSelection, si: usize) -> Vec<Id> {
-    use qymcad_core::model::EntityKind;
     let Some(s) = project.sketches.get(si) else { return vec![] };
     let mut ids: std::collections::HashSet<Id> = std::collections::HashSet::new();
     for (k, id) in &sel_sk.items {
@@ -534,32 +525,9 @@ pub fn sketch_sel_points(project: &Project, sel_sk: &qymcad_ui_state::SketchSele
             0 => {
                 ids.insert(*id);
             }
-            &qymcad_ui_state::SEL_SPLINE => {
-                if let Some(sp) = s.splines.iter().find(|sp| sp.points.first() == Some(id)) {
-                    ids.extend(sp.points.iter().copied());
-                }
-            }
             1 => {
                 if let Some(e) = s.entities.iter().find(|e| e.id == *id) {
-                    match e.kind {
-                        EntityKind::Line { a, b } => {
-                            ids.insert(a);
-                            ids.insert(b);
-                        }
-                        EntityKind::Circle { center, .. } => {
-                            ids.insert(center);
-                        }
-                        EntityKind::Arc { center, a, b, .. } => {
-                            ids.insert(center);
-                            ids.insert(a);
-                            ids.insert(b);
-                        }
-                        EntityKind::Ellipse { c, ma, mi } => {
-                            ids.insert(c);
-                            ids.insert(ma);
-                            ids.insert(mi);
-                        }
-                    }
+                    ids.extend(qymcad_core::model::entity_points(e));
                 }
             }
             _ => {}
@@ -778,17 +746,7 @@ fn delete_selected_in(sk: &mut qymcad_ui_state::SketchCtx, si: usize) {
     // system points (the origin and the axes) and DRIVEN ones (projections of a body) are not deleted one
     // by one
     let sys: std::collections::HashSet<Id> = sk.project.sketches[si].immovable_points();
-    let mut pids: Vec<Id> = sk.sel_sk.items.iter().filter(|(k, id)| *k == 0 && !sys.contains(id)).map(|(_, id)| *id).collect();
-    // a spline picked by its curve goes with its nodes, as a line goes with its ends
-    let s = &sk.project.sketches[si];
-    pids.extend(
-        sk.sel_sk
-            .items
-            .iter()
-            .filter(|(k, _)| *k == qymcad_ui_state::SEL_SPLINE)
-            .filter_map(|(_, id)| s.splines.iter().find(|sp| sp.points.first() == Some(id)))
-            .flat_map(|sp| sp.points.iter().copied()),
-    );
+    let pids: Vec<Id> = sk.sel_sk.items.iter().filter(|(k, id)| *k == 0 && !sys.contains(id)).map(|(_, id)| *id).collect();
     if eids.is_empty() && pids.is_empty() {
         return;
     }

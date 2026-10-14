@@ -10,19 +10,8 @@ use super::*;
 /// exist but gives no way to find the one wanted. Highlighting on hover already existed, but it answers
 /// "where is this one" rather than "which one do I need".
 pub fn constraint_parts(dc: &qymcad_ui_state::DrawCtx, si: usize, c: &qymcad_core::model::Constraint) -> Vec<String> {
-    use qymcad_core::model::EntityKind as EK;
     let Some(s) = dc.project.sketches.get(si) else { return Vec::new() };
-    let owner = |pid: Id| -> Option<Id> {
-        s.entities
-            .iter()
-            .find(|e| match e.kind {
-                EK::Line { a, b } => a == pid || b == pid,
-                EK::Arc { center, a, b, .. } => center == pid || a == pid || b == pid,
-                EK::Circle { center, .. } => center == pid,
-                EK::Ellipse { c, ma, mi } => c == pid || ma == pid || mi == pid,
-            })
-            .map(|e| e.id)
-    };
+    let owner = |pid: Id| -> Option<Id> { s.entities.iter().find(|e| qymcad_core::model::entity_points(e).contains(&pid)).map(|e| e.id) };
     let mut out: Vec<String> = Vec::new();
     for pid in c.points() {
         if let Some(eid) = owner(pid) {

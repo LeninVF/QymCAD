@@ -41,6 +41,7 @@ pub fn draw_projection_overlay(project: &Project, scheme: &SchemeUi, sel: Sel, v
                     _ => Vec::new(),
                 },
                 EntityKind::Ellipse { .. } => Vec::new(),
+                EntityKind::Spline { .. } => qymcad_ui_state::entity_outline(s, &e.kind).iter().map(|p| sh.at(*p)).collect(),
             };
             if path.len() < 2 {
                 continue;

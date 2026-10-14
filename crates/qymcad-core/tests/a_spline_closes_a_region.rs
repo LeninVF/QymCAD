@@ -35,11 +35,11 @@ fn p2(x: f64, y: f64) -> Point2 {
 #[test]
 fn a_spline_closed_by_two_lines_is_one_region_of_its_area() {
     let (mut p, si) = sketch();
-    p.add_spline(si, vec![p2(0.0, 0.0), p2(5.0, 6.0), p2(10.0, 0.0)], Ends::Open, Purpose::Real);
+    let sp = p.add_spline(si, vec![p2(0.0, 0.0), p2(5.0, 6.0), p2(10.0, 0.0)], Ends::Open, Purpose::Real).expect("the spline");
     p.add_line_entity(si, 10.0, 0.0, 5.0, -5.0, Purpose::Real);
     p.add_line_entity(si, 5.0, -5.0, 0.0, 0.0, Purpose::Real);
     // the cap of the curve over its chord, plus the triangle under the chord: 10 x 5 / 2
-    let want = shoelace(&p.spline_polyline(si, 0)) + 25.0;
+    let want = shoelace(&p.spline_polyline(si, sp)) + 25.0;
     let regions = closed(&p, si);
     let areas: Vec<f64> = regions.iter().map(|c| c.area()).collect();
     assert_eq!(regions.len(), 1, "a spline and two lines close one region; the areas found: {areas:?}");
@@ -59,7 +59,7 @@ fn a_spline_crossing_itself_gives_its_two_lobes() {
 #[test]
 fn a_closed_spline_over_a_rectangle_gives_the_parts_the_two_make() {
     let (mut p, si) = sketch();
-    p.add_spline(si, vec![p2(10.0, 0.0), p2(0.0, 10.0), p2(-10.0, 0.0), p2(0.0, -10.0)], Ends::Closed, Purpose::Real);
+    let sp = p.add_spline(si, vec![p2(10.0, 0.0), p2(0.0, 10.0), p2(-10.0, 0.0), p2(0.0, -10.0)], Ends::Closed, Purpose::Real).expect("the spline");
     let corners = [(-5.0, -15.0), (5.0, -15.0), (5.0, 15.0), (-5.0, 15.0)];
     for k in 0..4 {
         let (a, b) = (corners[k], corners[(k + 1) % 4]);
@@ -69,7 +69,7 @@ fn a_closed_spline_over_a_rectangle_gives_the_parts_the_two_make() {
     let areas: Vec<f64> = regions.iter().map(|c| c.area()).collect();
     // the middle the two share, the two sides of the spline left and right, the two ends of the rectangle above and below
     assert_eq!(regions.len(), 5, "a closed spline over a rectangle makes five parts; the areas found: {areas:?}");
-    let union = shoelace(&p.spline_polyline(si, 0)) + 10.0 * 30.0 - areas.iter().copied().fold(0.0, f64::max);
+    let union = shoelace(&p.spline_polyline(si, sp)) + 10.0 * 30.0 - areas.iter().copied().fold(0.0, f64::max);
     let sum: f64 = areas.iter().sum();
     assert!((sum - union).abs() < 0.01 * union, "the parts cover {sum} mm^2, not the {union} mm^2 of the two together");
 }

@@ -250,6 +250,38 @@ pub(super) fn ellipse_contour(pc: Point2, pma: Point2, pmi: Point2) -> Contour {
     Contour { points: pts, closed: true, edges: Vec::new(), edge_src: Vec::new() }
 }
 
+/// THE ECCENTRIC ANGLE OF POINT `p` on the ellipse of centre `pc`, major end `pma` and minor end `pmi`: the `t` of the
+/// point `c + a cos t u + b sin t v` the line from the centre through `p` meets.
+pub(crate) fn ellipse_angle(axes: [Point2; 3], p: Point2) -> f64 {
+    let [pc, pma, pmi] = axes;
+    let (a, b) = (pc.dist(pma).max(1e-9), pc.dist(pmi).max(1e-9));
+    let (u, v) = (pma - pc, pmi - pc);
+    let d = p - pc;
+    ((d.x * v.x + d.y * v.y) / (b * b)).atan2((d.x * u.x + d.y * u.y) / (a * a))
+}
+
+/// THE POINTS AN ARC OF AN ELLIPSE IS LAID OUT BY, from the eccentric angle of `from` to that of `to` the way `winding`
+/// goes, at the sag of the whole ellipse (`ellipse_contour`). The minor end need not stand square to the major one in
+/// the middle of a solve: the points follow the two ends as they stand.
+pub(crate) fn ellipse_arc_points(axes: [Point2; 3], ends: [Point2; 2], winding: crate::feature::Winding) -> Vec<Point2> {
+    let [pc, pma, pmi] = axes;
+    let (t0, t1) = (ellipse_angle(axes, ends[0]), ellipse_angle(axes, ends[1]));
+    let tau = std::f64::consts::TAU;
+    let sweep = match winding {
+        crate::feature::Winding::Ccw => (t1 - t0).rem_euclid(tau),
+        crate::feature::Winding::Cw => -(t0 - t1).rem_euclid(tau),
+    };
+    let whole = ellipse_contour(pc, pma, pmi).points.len().max(24);
+    let n = ((sweep.abs() / tau) * whole as f64).ceil().max(2.0) as usize;
+    let (u, v) = (pma - pc, pmi - pc);
+    (0..=n)
+        .map(|k| {
+            let t = t0 + sweep * k as f64 / n as f64;
+            crate::geom::Point2::new(pc.x + u.x * t.cos() + v.x * t.sin(), pc.y + u.y * t.cos() + v.y * t.sin())
+        })
+        .collect()
+}
+
 pub(super) fn tessellate_sketch_multi(points: &[SketchPoint], entities: &[SketchEntity]) -> Vec<Contour> {
     let at: std::collections::HashMap<Id, Point2> = points.iter().map(|p| (p.id, crate::geom::Point2::new(p.x, p.y))).collect();
     let pt = |id: Id| at.get(&id).copied();
@@ -267,10 +299,17 @@ pub(super) fn tessellate_sketch_multi(points: &[SketchPoint], entities: &[Sketch
                 out.push(crate::geom::circle_contour_from(c.x, c.y, rr, sag, e.id));
             }
         }
-        // an ellipse is a closed contour of its own: an analytic entity with adaptive tessellation
-        if let EntityKind::Ellipse { c, ma, mi } = e.kind {
-            if let (Some(pc), Some(pma), Some(pmi)) = (pt(c), pt(ma), pt(mi)) {
-                out.push(ellipse_contour(pc, pma, pmi));
+        // an ellipse is a closed contour of its own: an analytic entity with adaptive tessellation; an arc of one is an
+        // open chain of its own
+        if let EntityKind::Ellipse { c, ma, mi, span } = e.kind {
+            match (pt(c), pt(ma), pt(mi), span) {
+                (Some(pc), Some(pma), Some(pmi), None) => out.push(ellipse_contour(pc, pma, pmi)),
+                (Some(pc), Some(pma), Some(pmi), Some(s)) => {
+                    if let (Some(from), Some(to)) = (pt(s.from), pt(s.to)) {
+                        out.push(Contour::open(ellipse_arc_points([pc, pma, pmi], [from, to], s.winding)));
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -579,15 +618,15 @@ pub(super) fn meeting_boxes(boxes: &[[f64; 4]]) -> Vec<BoxPair> {
 /// assembled. This is what turns the strip between two circles, cut by a line, into a selectable closed region.
 /// Returns the faces as contours, carrying exact `ProfEdge` edges for the B-rep; a spline as the segments of its
 /// tessellation. Ellipses are not cut: each is a region of its own.
-pub(super) fn arrangement_regions(points: &[SketchPoint], entities: &[SketchEntity], splines: &[Spline]) -> Vec<Contour> {
-    arrangement_regions_prov(points, entities, splines).into_iter().map(|(c, _)| c).collect()
+pub(super) fn arrangement_regions(points: &[SketchPoint], entities: &[SketchEntity]) -> Vec<Contour> {
+    arrangement_regions_prov(points, entities).into_iter().map(|(c, _)| c).collect()
 }
 
 /// As `arrangement_regions`, but each region carries its provenance: the sorted set of entity ids its boundary
 /// is stitched from. This is what keeps the identity of a contour stable across edits, so that loops which
 /// swapped places do not take over each other's ids.
-pub(super) fn arrangement_regions_prov(points: &[SketchPoint], entities: &[SketchEntity], splines: &[Spline]) -> Vec<(Contour, Vec<Id>)> {
-    arrangement_faces(points, entities, splines)
+pub(super) fn arrangement_regions_prov(points: &[SketchPoint], entities: &[SketchEntity]) -> Vec<(Contour, Vec<Id>)> {
+    arrangement_faces(points, entities)
         .inner
         .into_iter()
         .map(|(mut c, mut prov)| {
@@ -647,7 +686,7 @@ pub(super) struct Faces {
     pub outer: Vec<Contour>,
 }
 
-pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity], splines: &[Spline]) -> Faces {
+pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity]) -> Faces {
     use std::f64::consts::{PI, TAU};
     let at: std::collections::HashMap<Id, (f64, f64)> = points.iter().map(|p| (p.id, (p.x, p.y))).collect();
     let pt = |id: Id| at.get(&id).copied();
@@ -659,6 +698,24 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
             continue;
         }
         match e.kind {
+            // A SPLINE ENTERS AS THE SEGMENTS OF ITS TESSELLATION, so it is cut by the lines and arcs and by itself, and a
+            // region closed partly by it, or by it crossing itself, is a face like any other. Its pieces carry its id.
+            EntityKind::Spline { ref nodes, ref handles, ends } => {
+                let cps: Vec<Point2> = nodes.iter().filter_map(|id| pt(*id)).map(|(x, y)| Point2::new(x, y)).collect();
+                if cps.len() < 2 {
+                    continue;
+                }
+                let line = tessellate_spline_hermite(&cps, handles, ends);
+                let n = line.points.len();
+                let spans = if ends == crate::feature::Ends::Closed { n } else { n.saturating_sub(1) };
+                for k in 0..spans {
+                    let (a, b) = (line.points[k], line.points[(k + 1) % n]);
+                    if a.dist(b) > 1e-9 {
+                        curves.push(ArrCurve::Line { a: (a.x, a.y), b: (b.x, b.y) });
+                        curve_eid.push(e.id);
+                    }
+                }
+            }
             EntityKind::Line { a, b } => {
                 if let (Some(pa), Some(pb)) = (pt(a), pt(b)) {
                     if (pa.0 - pb.0).hypot(pa.1 - pb.1) > 1e-9 {
@@ -682,30 +739,25 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
                     }
                 }
             }
-            EntityKind::Ellipse { c, ma, mi } => {
+            // AN ARC OF AN ELLIPSE ENTERS AS THE SEGMENTS OF ITS POINTS, as a spline does, so with lines or arcs across its
+            // ends it closes a region; its pieces carry its id
+            EntityKind::Ellipse { c, ma, mi, span: Some(s) } => {
+                let at = |id: Id| pt(id).map(|(x, y)| Point2::new(x, y));
+                if let (Some(pc), Some(pma), Some(pmi), Some(from), Some(to)) = (at(c), at(ma), at(mi), at(s.from), at(s.to)) {
+                    for w in ellipse_arc_points([pc, pma, pmi], [from, to], s.winding).windows(2) {
+                        if w[0].dist(w[1]) > 1e-9 {
+                            let (a, b) = ((w[0].x, w[0].y), (w[1].x, w[1].y));
+                            curves.push(ArrCurve::Line { a, b });
+                            curve_eid.push(e.id);
+                        }
+                    }
+                }
+            }
+            EntityKind::Ellipse { c, ma, mi, span: None } => {
                 // an ellipse is a closed region of its own; its intersections are not part of the arrangement yet
                 if let (Some(pc), Some(pma), Some(pmi)) = (pt(c), pt(ma), pt(mi)) {
                     out_ellipse.push((ellipse_contour(crate::geom::Point2::new(pc.0, pc.1), crate::geom::Point2::new(pma.0, pma.1), crate::geom::Point2::new(pmi.0, pmi.1)), vec![e.id]));
                 }
-            }
-        }
-    }
-    // A SPLINE ENTERS AS THE SEGMENTS OF ITS TESSELLATION, so it is cut by the lines and arcs and by itself, and a region
-    // closed partly by it, or by it crossing itself, is a face like any other. The kernel takes a spline as that same
-    // polyline (`ProfEdge` has no spline), so the face loses nothing the whole loop had. A spline has no id of its own:
-    // its pieces carry the id of its first node, an id no entity has, which keeps the provenance of its regions
-    // stable while the curve is edited.
-    for sp in splines.iter().filter(|sp| !sp.construction) {
-        let cps: Vec<Point2> = sp.points.iter().filter_map(|id| pt(*id)).map(|(x, y)| Point2::new(x, y)).collect();
-        let Some(&first) = sp.points.first().filter(|_| cps.len() >= 2) else { continue };
-        let line = tessellate_spline_hermite(&cps, &sp.tangents, sp.closed);
-        let n = line.points.len();
-        let spans = if sp.closed { n } else { n.saturating_sub(1) };
-        for k in 0..spans {
-            let (a, b) = (line.points[k], line.points[(k + 1) % n]);
-            if a.dist(b) > 1e-9 {
-                curves.push(ArrCurve::Line { a: (a.x, a.y), b: (b.x, b.y) });
-                curve_eid.push(first);
             }
         }
     }
@@ -1024,16 +1076,12 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
 
 /// A smooth Catmull-Rom curve through the control points, as a contour.
 ///
-/// The tangent, that is the Hermite vector dP/dt, at spline node `i`: taken explicitly when given, otherwise
-/// the automatic Catmull-Rom value `(p_{i+1} − p_{i-1})/2`, one-sided at the ends of an open spline. It governs
-/// the shape of the curve.
-pub(super) fn spline_tangent_at(pts: &[Point2], tangents: &[Option<[f64; 2]>], i: usize, closed: bool) -> Point2 {
-    if let Some(Some([x, y])) = tangents.get(i) {
-        return crate::geom::Point2::new(*x, *y);
-    }
+/// THE AUTOMATIC TANGENT at spline node `i`, the Hermite vector dP/dt: the Catmull-Rom value `(p_{i+1} - p_{i-1}) / 2`,
+/// one-sided at the ends of an open spline.
+fn auto_tangent(pts: &[Point2], i: usize, ends: crate::feature::Ends) -> Point2 {
     let n = pts.len() as i64;
     let get = |k: i64| -> Point2 {
-        if closed {
+        if ends == crate::feature::Ends::Closed {
             pts[((k % n + n) % n) as usize]
         } else {
             pts[k.clamp(0, n - 1) as usize]
@@ -1041,6 +1089,24 @@ pub(super) fn spline_tangent_at(pts: &[Point2], tangents: &[Option<[f64; 2]>], i
     };
     let (a, b) = (get(i as i64 - 1), get(i as i64 + 1));
     crate::geom::Point2::new((b.x - a.x) * 0.5, (b.y - a.y) * 0.5)
+}
+
+/// THE TWO TANGENTS OF A NODE OF A SPLINE, as the spans on either side of it use them.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NodeTangents {
+    /// the tangent the span before the node ends with
+    pub arrive: Point2,
+    /// the tangent the span after the node starts with
+    pub leave: Point2,
+}
+
+/// The tangents at spline node `i`: those of its handle where given, the automatic one otherwise; a node with no tangent
+/// to leave by of its own leaves by the one it arrives by.
+pub(crate) fn spline_tangents_at(pts: &[Point2], handles: &[crate::model::Handle], i: usize, ends: crate::feature::Ends) -> NodeTangents {
+    let h = handles.get(i).copied().unwrap_or_default();
+    let vec = |v: [f64; 2]| crate::geom::Point2::new(v[0], v[1]);
+    let arrive = h.arrive.map(vec).unwrap_or_else(|| auto_tangent(pts, i, ends));
+    NodeTangents { arrive, leave: h.leave.map(vec).unwrap_or(arrive) }
 }
 
 /// A point on a cubic Hermite segment: nodes p0 and p1 with tangents m0 and m1, at t ∈ [0,1].
@@ -1084,7 +1150,8 @@ pub(super) fn hermite_seg_adaptive(seg: HermiteSeg, t0: f64, t1: f64, a: Point2,
 }
 
 /// Tessellation of a spline as a cubic Hermite with tangents: a fit-point spline with handles.
-pub(super) fn tessellate_spline_hermite(pts: &[Point2], tangents: &[Option<[f64; 2]>], closed: bool) -> Contour {
+pub(crate) fn tessellate_spline_hermite(pts: &[Point2], handles: &[crate::model::Handle], ends: crate::feature::Ends) -> Contour {
+    let closed = ends == crate::feature::Ends::Closed;
     let n = pts.len();
     if n < 2 {
         return if closed { Contour::closed(pts.to_vec()) } else { Contour::open(pts.to_vec()) };
@@ -1095,7 +1162,7 @@ pub(super) fn tessellate_spline_hermite(pts: &[Point2], tangents: &[Option<[f64;
     let mut out: Vec<Point2> = vec![pts[0]];
     for s in 0..seg {
         let (p0, p1) = (pts[s], pts[(s + 1) % n]);
-        let (m0, m1) = (spline_tangent_at(pts, tangents, s, closed), spline_tangent_at(pts, tangents, (s + 1) % n, closed));
+        let (m0, m1) = (spline_tangents_at(pts, handles, s, ends).leave, spline_tangents_at(pts, handles, (s + 1) % n, ends).arrive);
         hermite_seg_adaptive(HermiteSeg { p0, m0, p1, m1 }, 0.0, 1.0, p0, p1, SagLimit { tol, depth: 10 }, &mut out);
     }
     if closed {
@@ -1177,7 +1244,7 @@ mod tests {
         ];
         let before: Vec<SketchEntity> = all.iter().filter(|e| e.id != 138).cloned().collect();
         let faces = |ents: &[SketchEntity]| -> Vec<Vec<u64>> {
-            super::arrangement_regions_prov(&pts, ents, &[])
+            super::arrangement_regions_prov(&pts, ents)
                 .into_iter()
                 .map(|r| {
                     let mut ids = r.1;
@@ -1211,7 +1278,7 @@ mod tests {
         ];
         let l = |id, a, b| SketchEntity { id, kind: EntityKind::Line { a, b }, construction: false };
         let ents = vec![l(10, 1, 2), l(11, 2, 3), l(12, 3, 4), l(13, 4, 1), l(14, 5, 6)];
-        let regions = super::arrangement_regions_prov(&pts, &ents, &[]);
+        let regions = super::arrangement_regions_prov(&pts, &ents);
         assert_eq!(regions.len(), 1, "the square is not one region: {}", regions.len());
         let (contour, ids) = &regions[0];
         assert!(!ids.contains(&14), "the line hanging into the square is an edge of its region: {ids:?}");

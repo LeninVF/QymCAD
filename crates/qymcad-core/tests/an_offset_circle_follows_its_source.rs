@@ -25,7 +25,7 @@ fn an_offset_circle_is_concentric_and_follows_the_source() {
     p.new_document();
     let si = p.new_sketch("S");
     let c = p.add_circle_entity(si, 5.0, 5.0, 10.0, Purpose::Real);
-    let centre = match p.sketches[si].entities.iter().find(|e| e.id == c).map(|e| e.kind) {
+    let centre = match p.sketches[si].entities.iter().find(|e| e.id == c).map(|e| e.kind.clone()) {
         Some(EntityKind::Circle { center, .. }) => center,
         _ => panic!("the circle"),
     };

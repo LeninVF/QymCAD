@@ -29,7 +29,7 @@ fn sketch_groups_and_removes_contours() {
     assert_eq!(p.contour_index(loose), Some(0));
 }
 
-/// A SKETCH OF SPLINES ALONE IS TYPED: its nodes are points the sketcher edits, though a spline is not an entity.
+/// A SKETCH OF SPLINES ALONE IS TYPED: its nodes are points the sketcher edits, a spline an entity like any curve.
 #[test]
 fn a_sketch_of_splines_alone_is_typed() {
     let mut p = Project::default();
@@ -39,7 +39,6 @@ fn a_sketch_of_splines_alone_is_typed() {
     let si = p.sketch_index(sid).unwrap();
     assert!(!p.is_typed_sketch(si), "an empty sketch has nothing to edit");
     p.add_spline(si, vec![Point2::new(0.0, 0.0), Point2::new(20.0, 10.0), Point2::new(40.0, 0.0)], qymcad_core::feature::Ends::Open, qymcad_core::feature::Purpose::Real);
-    assert!(p.sketches[si].entities.is_empty(), "setup: a spline is not an entity");
     assert!(p.is_typed_sketch(si), "a sketch holding a spline alone is not taken for one the sketcher edits");
 }
 

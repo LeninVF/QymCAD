@@ -54,7 +54,7 @@ fn edge_towards(p: &Project, si: usize, pid: u64, to: (f64, f64)) -> u64 {
     p.vertex_edges(si, pid)
         .into_iter()
         .find(|&e| {
-            let ends = match p.sketches[si].entities.iter().find(|x| x.id == e).map(|x| x.kind) {
+            let ends = match p.sketches[si].entities.iter().find(|x| x.id == e).map(|x| x.kind.clone()) {
                 Some(EntityKind::Line { a, b }) => Some((a, b)),
                 _ => None,
             };

@@ -308,8 +308,12 @@ impl Project {
                     out.push(on_the_arc(center, a));
                     out.push(on_the_arc(center, b));
                 }
-                EntityKind::Ellipse { c, ma, mi } => {
+                EntityKind::Ellipse { c, ma, mi, span } => {
                     out.push(Constraint::Perpendicular { a: c, b: ma, c, d: mi });
+                    // the ends of an arc of an ellipse stay on the ellipse
+                    for p in span.into_iter().flat_map(|s| [s.from, s.to]) {
+                        out.push(Constraint::PointOnEllipse { p, c, ma, mi });
+                    }
                 }
                 _ => {}
             }
@@ -385,11 +389,9 @@ impl Project {
             measure_driven(c, &pos, &crad);
         }
     }
-    /// Whether a sketch is typed: built from points the sketcher edits - its entities, or its splines, which are
-    /// kept apart from the entities. A sketch of splines alone is typed too; read from the entities only, its nodes
-    /// could not be dragged.
+    /// Whether a sketch is typed: built from points the sketcher edits - its entities.
     pub fn is_typed_sketch(&self, si: usize) -> bool {
-        self.sketches.get(si).is_some_and(|s| !s.entities.is_empty() || !s.splines.is_empty())
+        self.sketches.get(si).is_some_and(|s| !s.entities.is_empty())
     }
     /// THE LOOPS OF A SKETCH MADE FROM ALL ITS CURVES, whatever changed since they were made: what a rebuild round a
     /// change (`round`) is held to.
@@ -425,7 +427,7 @@ impl Project {
         let Some(s) = self.sketches.get(si) else { return };
         // only the loops round what changed since they were made (`round::Laid`), where few curves changed; splines and
         // text are made whole
-        let plain = s.splines.is_empty() && s.texts.is_empty();
+        let plain = !s.entities.iter().any(|e| matches!(e.kind, EntityKind::Spline { .. })) && s.texts.is_empty();
         if let Some(changed) = self.changed_since_laid(si).filter(|_| plain) {
             let drawn = s.entities.iter().filter(|e| !e.construction).count();
             if changed.drawn.is_empty() && changed.gone.is_empty() {
@@ -441,19 +443,20 @@ impl Project {
         // Construction geometry never reaches a profile or a contour; it is drawn separately, dashed. Only
         // ordinary entities enter the contours.
         let ents: Vec<SketchEntity> = s.entities.iter().filter(|e| !e.construction).cloned().collect();
-        let (pts, splines) = (s.points.clone(), s.splines.clone());
+        let pts = s.points.clone();
         // Closed contours are the region faces of the planar arrangement (intersections give minimal faces), so
         // half-rings and other areas that are not whole loops become selectable. Open chains (sweep and loft
         // paths) come from the ordinary tessellation, the arrangement producing closed faces only.
         // Splines are cut into the arrangement with the rest (`arrangement_faces`), so their closed regions are among these.
-        let mut pairs: Vec<(Contour, Vec<Id>)> = arrangement_regions_prov(&pts, &ents, &splines);
+        let mut pairs: Vec<(Contour, Vec<Id>)> = arrangement_regions_prov(&pts, &ents);
         pairs.extend(tessellate_sketch_multi(&pts, &ents).into_iter().filter(|c| !c.closed).map(|c| (c, Vec::new())));
         // An open spline is an open chain too (cubic Hermite with tangent handles, automatic Catmull-Rom by default): a
         // path for a sweep or a loft. A construction spline never reaches a profile; it is drawn dashed.
-        for sp in splines.iter().filter(|sp| !sp.closed && !sp.construction) {
-            let cps: Vec<Point2> = sp.points.iter().filter_map(|id| pts.iter().find(|p| p.id == *id).map(|p| crate::geom::Point2::new(p.x, p.y))).collect();
+        for e in &ents {
+            let EntityKind::Spline { nodes, handles, ends: crate::feature::Ends::Open } = &e.kind else { continue };
+            let cps: Vec<Point2> = nodes.iter().filter_map(|id| pts.iter().find(|p| p.id == *id).map(|p| crate::geom::Point2::new(p.x, p.y))).collect();
             if cps.len() >= 2 {
-                pairs.push((tessellate_spline_hermite(&cps, &sp.tangents, false), Vec::new()));
+                pairs.push((tessellate_spline_hermite(&cps, handles, crate::feature::Ends::Open), Vec::new()));
             }
         }
         // Contours of parametric text (its baked glyphs); ordinary, non-construction text reaches the
@@ -524,7 +527,7 @@ impl Project {
         s.drag_session = None; // its loops are made anew: what a drag kept of them goes
         let s = &self.sketches[si];
         // a frame of reference to be made first (`ensure_frame` in `regen_sketch`), splines, text: rebuilt whole
-        if !s.splines.is_empty() || !s.texts.is_empty() || (s.origin != 0 || s.axis_pts.iter().any(|g| *g != 0)) && s.frame == 0 {
+        if s.entities.iter().any(|e| matches!(e.kind, EntityKind::Spline { .. })) || !s.texts.is_empty() || (s.origin != 0 || s.axis_pts.iter().any(|g| *g != 0)) && s.frame == 0 {
             return self.regen_sketch(si);
         }
         if self.detach_geometry_from_origin(si) || self.sketches[si].pin_frame() {
@@ -544,7 +547,7 @@ impl Project {
         let laid = self.laid_held(si);
         let s = &self.sketches[si];
         let at: std::collections::HashMap<Id, SketchPoint> = s.points.iter().map(|p| (p.id, *p)).collect();
-        let drawn: Vec<SketchEntity> = s.entities.iter().filter(|e| !e.construction).copied().collect();
+        let drawn: Vec<SketchEntity> = s.entities.iter().filter(|e| !e.construction).cloned().collect();
         let shifted: Vec<usize> = drawn.iter().enumerate().filter(|(_, e)| changed.contains(&e.id)).map(|(k, _)| k).collect();
         let touched = |e: &Id| changed.contains(e) || gone.contains(e);
         // each loop of the sketch: its place, closed or open, its box, and whether a curve changed is in it - looked at
@@ -588,7 +591,7 @@ impl Project {
             .chain(before.iter().filter(|b| b.touched && (!b.closed || of(b.id, b.ci).any(|e| gone.contains(e)))).flat_map(|b| of(b.id, b.ci).filter_map(|e| place.get(e).copied())))
             .collect();
         let grid = round::BoxGrid::new(&boxes);
-        let curve = |k: usize| drawn[k];
+        let curve = |k: usize| drawn[k].clone();
         let point = |id: Id| at.get(&id).copied();
         let near = |b: &[f64; 4]| grid.near(b, boxes.len());
         let change = round::Change { curve: &curve, boxes: &boxes, at: &point, near: &near, moved: &shifted, swept: &swept, held };

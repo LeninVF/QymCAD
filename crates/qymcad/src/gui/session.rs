@@ -425,7 +425,7 @@ impl Drop for Session {
 }
 
 /// THE BOX AROUND WHAT IS DRAWN IN A SKETCH, in the coordinates of the sheet: the points a person put there, and the
-/// reach of the round shapes, which have no point on their rims.
+/// reach of the round and the free shapes, which have no point on their rims.
 fn box_of_sketch(sk: &qymcad_core::model::Sketch, system: &std::collections::HashSet<u64>) -> ([f64; 2], [f64; 2]) {
     use qymcad_core::model::EntityKind;
     let mut min = [f64::MAX, f64::MAX];
@@ -465,7 +465,7 @@ fn box_of_sketch(sk: &qymcad_core::model::Sketch, system: &std::collections::Has
                     }
                 }
             }
-            EntityKind::Ellipse { c, ma, mi } => {
+            EntityKind::Ellipse { c, ma, mi, span: None } => {
                 if let (Some((cx, cy)), Some((mx, my)), Some((nx, ny))) = (at(c), at(ma), at(mi)) {
                     let (a, b) = ((mx - cx).hypot(my - cy), (nx - cx).hypot(ny - cy));
                     take(cx - a.max(b), cy - a.max(b));
@@ -473,6 +473,13 @@ fn box_of_sketch(sk: &qymcad_core::model::Sketch, system: &std::collections::Has
                 }
             }
             EntityKind::Line { .. } => {}
+            // a spline and an arc of an ellipse by the points they are laid out by: a handle pulls a spline past the box of
+            // its nodes
+            EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
+                for q in qymcad_ui_state::entity_outline(sk, &e.kind) {
+                    take(q.x, q.y);
+                }
+            }
         }
     }
     if min[0] == f64::MAX {

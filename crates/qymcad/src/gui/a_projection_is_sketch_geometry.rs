@@ -134,7 +134,7 @@ mod tests {
     /// The first end of `side` and where it stands.
     fn projected_points_of(hand: &Hand, si: usize, side: u64) -> (u64, (f64, f64)) {
         let s = &hand.app.project.sketches[si];
-        let Some(EntityKind::Line { a, .. }) = s.entities.iter().find(|e| e.id == side).map(|e| e.kind) else { panic!("the side") };
+        let Some(EntityKind::Line { a, .. }) = s.entities.iter().find(|e| e.id == side).map(|e| e.kind.clone()) else { panic!("the side") };
         (a, s.points.iter().find(|q| q.id == a).map(|q| (q.x, q.y)).expect("the end"))
     }
 
@@ -183,7 +183,7 @@ mod tests {
             // the side runs level when its ends stand at one height
             let level = {
                 let s = &app.project.sketches[si];
-                let Some(EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == side).map(|e| e.kind) else { panic!("the side") };
+                let Some(EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == side).map(|e| e.kind.clone()) else { panic!("the side") };
                 let y = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| q.y).unwrap_or_default();
                 (y(a) - y(b)).abs() < 1e-6
             };
@@ -200,7 +200,7 @@ mod tests {
                 Cut::Trim => {
                     // a line of its own across the side, a little off its middle, and the shorter piece of the side trimmed
                     let s = &hand.app.project.sketches[si];
-                    let Some(EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == side).map(|e| e.kind) else { panic!("the side") };
+                    let Some(EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == side).map(|e| e.kind.clone()) else { panic!("the side") };
                     let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("the end");
                     let ((ax, ay), (bx, by)) = (at(a), at(b));
                     let cross = (ax + (bx - ax) * 0.25, ay + (by - ay) * 0.25);

@@ -19,7 +19,7 @@ fn corner() -> (Project, usize, u64) {
     let si = p.new_sketch("S");
     let l1 = p.add_line_entity(si, 30.0, 0.0, 0.0, 0.0, Purpose::Real);
     let l2 = p.add_line_entity(si, 0.0, 0.0, 0.0, 30.0, Purpose::Real);
-    let ends = |p: &Project, id| match p.sketches[si].entities.iter().find(|e| e.id == id).map(|e| e.kind) {
+    let ends = |p: &Project, id| match p.sketches[si].entities.iter().find(|e| e.id == id).map(|e| e.kind.clone()) {
         Some(EntityKind::Line { a, b }) => (a, b),
         _ => panic!("a line"),
     };

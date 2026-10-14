@@ -100,11 +100,11 @@ impl Session {
                 EntityKind::Line { a, b } => SketchPick::Line { from: pt(a), to: pt(b) },
                 EntityKind::Arc { center, a, b, ccw } => SketchPick::Arc { centre: pt(center), from: pt(a), to: pt(b), ccw },
                 EntityKind::Circle { center, r } => SketchPick::Circle { centre: pt(center), radius: r },
-                EntityKind::Ellipse { c, ma, mi } => SketchPick::Ellipse { centre: pt(c), major: pt(ma), minor: pt(mi) },
+                EntityKind::Ellipse { c, ma, mi, .. } => SketchPick::Ellipse { centre: pt(c), major: pt(ma), minor: pt(mi) },
+                EntityKind::Spline { ref nodes, .. } => SketchPick::Spline { nodes: nodes.iter().map(|p| pt(*p)).collect() },
             });
         }
-        let spline = sk.splines.iter().find(|sp| sp.points.contains(&id))?;
-        Some(SketchPick::Spline { nodes: spline.points.iter().map(|p| pt(*p)).collect() })
+        None
     }
 
     /// WHERE THE POINT `p` OF THE 3D VIEW FALLS ON SCREEN AS THE VIEW STANDS NOW - no gesture, nothing brought into view,

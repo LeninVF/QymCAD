@@ -16,7 +16,7 @@ fn isosceles() -> (Project, usize, Vec<u64>) {
     let c = [(0.0, 0.0), (60.0, 0.0), (30.0, 50.0)];
     let sides: Vec<u64> = (0..3).map(|i| p.add_line_entity(si, c[i].0, c[i].1, c[(i + 1) % 3].0, c[(i + 1) % 3].1, Purpose::Real)).collect();
     p.regen_sketch(si);
-    let ends = |p: &Project, l: u64| match p.sketches[si].entities.iter().find(|e| e.id == l).map(|e| e.kind) {
+    let ends = |p: &Project, l: u64| match p.sketches[si].entities.iter().find(|e| e.id == l).map(|e| e.kind.clone()) {
         Some(EntityKind::Line { a, b }) => (a, b),
         _ => panic!("the side {l} is a line"),
     };

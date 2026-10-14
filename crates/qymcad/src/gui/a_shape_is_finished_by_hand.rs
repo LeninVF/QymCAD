@@ -37,7 +37,13 @@ mod tests {
     /// The nodes of every spline of the sketch, as places.
     fn spline_nodes(app: &App, si: usize) -> Vec<Vec<(f64, f64)>> {
         let sk = &app.project.sketches[si];
-        sk.splines.iter().map(|s| s.points.iter().filter_map(|id| sk.points.iter().find(|p| p.id == *id).map(|p| (p.x, p.y))).collect()).collect()
+        sk.entities
+            .iter()
+            .filter_map(|e| match &e.kind {
+                qymcad_core::model::EntityKind::Spline { nodes, .. } => Some(nodes.iter().filter_map(|id| sk.points.iter().find(|p| p.id == *id).map(|p| (p.x, p.y))).collect()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// A DOUBLE CLICK ENDS A CHAIN OF LINES WITHOUT A LINE OF NO LENGTH.

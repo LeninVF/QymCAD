@@ -276,7 +276,7 @@ impl Project {
                 }
             }
             for eid in &p.entities {
-                if let Some(EntityKind::Circle { r, .. }) = s.entities.iter().find(|x| x.id == *eid).map(|e| e.kind) {
+                if let Some(EntityKind::Circle { r, .. }) = s.entities.iter().find(|x| x.id == *eid).map(|e| &e.kind) {
                     r.to_bits().hash(&mut h);
                 }
             }
@@ -386,7 +386,7 @@ impl Project {
         let (mut ents, mut edges, mut pts): (Vec<Id>, Vec<u32>, Vec<Id>) = (Vec::new(), Vec::new(), Vec::new());
         for (edge, c) in &curves {
             let olds = by_edge.remove(edge).unwrap_or_default();
-            let kinds: Vec<EntityKind> = olds.iter().filter_map(|id| self.sketches[si].entities.iter().find(|e| e.id == *id).map(|e| e.kind)).collect();
+            let kinds: Vec<EntityKind> = olds.iter().filter_map(|id| self.sketches[si].entities.iter().find(|e| e.id == *id).map(|e| e.kind.clone())).collect();
             match c {
                 Curve2::Line(a, b) => {
                     let old = match kinds.as_slice() {

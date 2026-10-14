@@ -49,7 +49,7 @@ impl Project {
         let Constraint::AngleLines { a, b, c, d, .. } = *dim else { return };
         let Some(s) = self.sketches.get_mut(si) else { return };
         let side_of = |s: &crate::model::Sketch, r: &crate::model::SketchRect, x: Id, y: Id| {
-            r.sides.iter().any(|e| matches!(s.entities.iter().find(|q| q.id == *e).map(|q| q.kind), Some(EntityKind::Line { a, b }) if (a == x && b == y) || (a == y && b == x)))
+            r.sides.iter().any(|e| matches!(s.entities.iter().find(|q| q.id == *e).map(|q| &q.kind), Some(EntityKind::Line { a, b }) if (*a == x && *b == y) || (*a == y && *b == x)))
         };
         let turned: Vec<crate::model::SketchRect> = s.rects.iter().filter(|r| side_of(s, r, a, b) || side_of(s, r, c, d)).cloned().collect();
         for r in turned {
@@ -219,15 +219,9 @@ impl Project {
             let removed = s.constraints.remove(ci);
             if let Constraint::Midpoint { p, .. } = &removed {
                 let p = *p;
-                let used_ent = s.entities.iter().any(|e| match e.kind {
-                    EntityKind::Line { a, b } => a == p || b == p,
-                    EntityKind::Arc { center, a, b, .. } => center == p || a == p || b == p,
-                    EntityKind::Circle { center, .. } => center == p,
-                    EntityKind::Ellipse { c, ma, mi } => c == p || ma == p || mi == p,
-                });
+                let used_ent = s.entities.iter().any(|e| entity_points(e).contains(&p));
                 let used_con = s.constraints.iter().any(|c| constraint_point_ids(c).contains(&p));
-                let used_sp = s.splines.iter().any(|sp| sp.points.contains(&p));
-                if !used_ent && !used_con && !used_sp && !s.system_ids().contains(&p) {
+                if !used_ent && !used_con && !s.system_ids().contains(&p) {
                     s.points.retain(|q| q.id != p); // The orphaned midpoint is removed.
                 }
             }
@@ -440,7 +434,7 @@ impl Project {
         };
         let ents: Vec<SketchEntity> = {
             let Some(s) = self.sketches.get(si) else { return Vec::new() };
-            s.entities.iter().filter(|e| eids.contains(&e.id)).copied().collect()
+            s.entities.iter().filter(|e| eids.contains(&e.id)).cloned().collect()
         };
         let mut map: std::collections::HashMap<Id, Id> = std::collections::HashMap::new();
         for (old, x, y) in coords {
@@ -456,12 +450,23 @@ impl Project {
         let ((ox, oy), (ex, ey), (fx, fy)) = (f(0.0, 0.0), f(1.0, 0.0), f(0.0, 1.0));
         let flips = (ex - ox) * (fy - oy) - (ey - oy) * (fx - ox) < 0.0;
         let mut new_ids = Vec::new();
+        // the tangents of a spline go through the map without its shift: along X to where X went, along Y to where Y went
+        let turn = |v: Option<[f64; 2]>| v.map(|[x, y]| [x * (ex - ox) + y * (fx - ox), x * (ey - oy) + y * (fy - oy)]);
         for e in ents {
             let nk = match e.kind {
                 EntityKind::Line { a, b } => EntityKind::Line { a: m(a), b: m(b) },
                 EntityKind::Arc { center, a, b, ccw } => EntityKind::Arc { center: m(center), a: m(a), b: m(b), ccw: ccw != flips },
                 EntityKind::Circle { center, r } => EntityKind::Circle { center: m(center), r },
-                EntityKind::Ellipse { c, ma, mi } => EntityKind::Ellipse { c: m(c), ma: m(ma), mi: m(mi) },
+                // an arc of an ellipse turns the other way through a mirror, as an arc of a circle does
+                EntityKind::Ellipse { c, ma, mi, span } => EntityKind::Ellipse {
+                    c: m(c),
+                    ma: m(ma),
+                    mi: m(mi),
+                    span: span.map(|s| EllipseSpan { from: m(s.from), to: m(s.to), winding: if flips { s.winding.reversed() } else { s.winding } }),
+                },
+                EntityKind::Spline { nodes, handles, ends } => {
+                    EntityKind::Spline { nodes: nodes.iter().map(|id| m(*id)).collect(), handles: handles.iter().map(|h| Handle { arrive: turn(h.arrive), leave: turn(h.leave) }).collect(), ends }
+                }
             };
             let id = self.alloc_id();
             self.sketches[si].entities.push(SketchEntity { id, kind: nk, construction: e.construction });
@@ -483,7 +488,7 @@ impl Project {
         let pids = self.entity_point_ids(si, eids);
         let Some(s) = self.sketches.get(si) else { return GeomClip::default() };
         let points: Vec<(Id, f64, f64)> = s.points.iter().filter(|p| pids.contains(&p.id)).map(|p| (p.id, p.x, p.y)).collect();
-        let entities: Vec<SketchEntity> = s.entities.iter().filter(|e| eids.contains(&e.id)).copied().collect();
+        let entities: Vec<SketchEntity> = s.entities.iter().filter(|e| eids.contains(&e.id)).cloned().collect();
         let inside: std::collections::HashSet<Id> = pids.iter().copied().collect();
         let constraints = self.internal_constraints(si, &inside); // Internal constraints and dimensions, without
                                                                   // `Fixed` or axis references.
@@ -509,11 +514,14 @@ impl Project {
         let m = |id: Id| map.get(&id).copied().unwrap_or(id);
         let mut new_ids = Vec::new();
         for e in &clip.entities {
-            let nk = match e.kind {
-                EntityKind::Line { a, b } => EntityKind::Line { a: m(a), b: m(b) },
-                EntityKind::Arc { center, a, b, ccw } => EntityKind::Arc { center: m(center), a: m(a), b: m(b), ccw },
-                EntityKind::Circle { center, r } => EntityKind::Circle { center: m(center), r },
-                EntityKind::Ellipse { c, ma, mi } => EntityKind::Ellipse { c: m(c), ma: m(ma), mi: m(mi) },
+            let nk = match &e.kind {
+                EntityKind::Line { a, b } => EntityKind::Line { a: m(*a), b: m(*b) },
+                EntityKind::Arc { center, a, b, ccw } => EntityKind::Arc { center: m(*center), a: m(*a), b: m(*b), ccw: *ccw },
+                EntityKind::Circle { center, r } => EntityKind::Circle { center: m(*center), r: *r },
+                EntityKind::Ellipse { c, ma, mi, span } => {
+                    EntityKind::Ellipse { c: m(*c), ma: m(*ma), mi: m(*mi), span: span.map(|s| EllipseSpan { from: m(s.from), to: m(s.to), winding: s.winding }) }
+                }
+                EntityKind::Spline { nodes, handles, ends } => EntityKind::Spline { nodes: nodes.iter().map(|id| m(*id)).collect(), handles: handles.clone(), ends: *ends },
             };
             let id = self.alloc_id();
             self.sketches[si].entities.push(SketchEntity { id, kind: nk, construction: e.construction });
@@ -583,16 +591,11 @@ impl Project {
         const TOL: f64 = 5e-3;
         let Some((px, py)) = self.point_xy(si, pid) else { return };
         let Some(s) = self.sketches.get(si) else { return };
-        let owns = |k: &EntityKind| match *k {
-            EntityKind::Line { a, b } => a == pid || b == pid,
-            EntityKind::Arc { center, a, b, .. } => center == pid || a == pid || b == pid,
-            EntityKind::Circle { center, .. } => center == pid,
-            EntityKind::Ellipse { c, ma, mi } => c == pid || ma == pid || mi == pid,
-        };
+        let owns = |e: &SketchEntity| entity_points(e).contains(&pid);
         let pt = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
         let mut anchor: Option<Constraint> = None;
         for e in &s.entities {
-            if owns(&e.kind) {
+            if owns(e) {
                 continue; // The point already belongs to this entity as an endpoint or a centre, so it is not
                           // anchored to it again.
             }

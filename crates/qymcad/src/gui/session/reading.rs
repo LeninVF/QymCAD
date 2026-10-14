@@ -65,7 +65,7 @@ impl Session {
                     arcs: count(|k| matches!(k, EntityKind::Arc { .. })),
                     circles: count(|k| matches!(k, EntityKind::Circle { .. })),
                     ellipses: count(|k| matches!(k, EntityKind::Ellipse { .. })),
-                    splines: sk.splines.len(),
+                    splines: count(|k| matches!(k, EntityKind::Spline { .. })),
                     texts: sk.texts.len(),
                     notes: sk.notes.len(),
                     text_fonts: sk.texts.iter().map(|t| qymcad_ui_state::font_label(&t.font, "opt-font")).collect(),

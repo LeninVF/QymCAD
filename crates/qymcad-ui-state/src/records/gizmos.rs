@@ -19,6 +19,15 @@ pub struct RotInput {
     pub focus: bool,
 }
 
+/// A TANGENT HANDLE OF A SPLINE held by the pointer: the sketch by its index, the spline by its id, the node by its place
+/// among the nodes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HandleHeld {
+    pub si: usize,
+    pub spline: Id,
+    pub node: usize,
+}
+
 /// WHAT IS BEING DRAGGED IN THE SKETCH RIGHT NOW.
 ///
 /// AN ENUM, NOT SIX `Option`s: exactly ONE THING can be dragged. As separate fields a pair of them
@@ -30,8 +39,8 @@ pub enum Dragging {
     None,
     /// a sketch point, as (sketch index, point index)
     Point(usize, usize),
-    /// a spline handle, as (sketch, spline, node)
-    Handle(usize, usize, usize),
+    /// a tangent handle of a spline
+    Handle(HandleHeld),
     /// moving the whole selected geometry
     Move(usize, Vec<Id>),
     /// a dimension label / a note / a text
@@ -57,9 +66,9 @@ impl Dragging {
         }
     }
 
-    pub fn handle(&self) -> Option<(usize, usize, usize)> {
+    pub fn handle(&self) -> Option<HandleHeld> {
         match *self {
-            Dragging::Handle(a, b, c) => Some((a, b, c)),
+            Dragging::Handle(h) => Some(h),
             _ => None,
         }
     }

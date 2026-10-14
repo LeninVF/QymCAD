@@ -54,6 +54,7 @@ fn every_constraint_has_correct_analytic_derivatives() {
     check("Diameter", Constraint::Diameter { c: 3, d: 4.0, diam: true, off: 0.0, expr: String::new(), driven: false, at: None });
     check("EqualRadius", Constraint::EqualRadius { c1: 3, c2: 4 });
     check("PointOnCircle", Constraint::PointOnCircle { p: 5, c: 3 });
+    check("PointOnEllipse", Constraint::PointOnEllipse { p: 5, c: 1, ma: 2, mi: 3 });
     check("ArcLength(ccw)", Constraint::ArcLength { c: 3, a: 1, b: 2, ccw: true, len: 5.0, off: 0.0, expr: String::new(), driven: false });
     check("ArcLength(cw)", Constraint::ArcLength { c: 3, a: 1, b: 2, ccw: false, len: 5.0, off: 0.0, expr: String::new(), driven: false });
 }

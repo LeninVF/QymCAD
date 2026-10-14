@@ -981,6 +981,12 @@ pub(super) fn measure_driven(c: &mut Constraint, pos: &std::collections::HashMap
 pub(super) fn entity_box(e: &SketchEntity, at: &dyn Fn(Id) -> Option<(f64, f64)>) -> [f64; 4] {
     let p = |id: Id| at(id).unwrap_or((f64::NAN, f64::NAN));
     let [x0, y0, x1, y1] = match e.kind {
+        // a spline by the box of its laid out points: the curve leaves the box of its nodes where a handle pulls it out
+        EntityKind::Spline { ref nodes, ref handles, ends } => {
+            let cps: Vec<Point2> = nodes.iter().map(|id| p(*id)).map(|(x, y)| Point2::new(x, y)).collect();
+            let line = tessellate_spline_hermite(&cps, handles, ends).points;
+            line.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, q| [b[0].min(q.x), b[1].min(q.y), b[2].max(q.x), b[3].max(q.y)])
+        }
         EntityKind::Line { a, b } => {
             let (pa, pb) = (p(a), p(b));
             [pa.0.min(pb.0), pa.1.min(pb.1), pa.0.max(pb.0), pa.1.max(pb.1)]
@@ -994,7 +1000,7 @@ pub(super) fn entity_box(e: &SketchEntity, at: &dyn Fn(Id) -> Option<(f64, f64)>
             let r = (pa.0 - c.0).hypot(pa.1 - c.1);
             [c.0 - r, c.1 - r, c.0 + r, c.1 + r]
         }
-        EntityKind::Ellipse { c, ma, mi } => {
+        EntityKind::Ellipse { c, ma, mi, .. } => {
             let (pc, pa, pi) = (p(c), p(ma), p(mi));
             let r = (pa.0 - pc.0).hypot(pa.1 - pc.1).max((pi.0 - pc.0).hypot(pi.1 - pc.1));
             [pc.0 - r, pc.1 - r, pc.0 + r, pc.1 + r]

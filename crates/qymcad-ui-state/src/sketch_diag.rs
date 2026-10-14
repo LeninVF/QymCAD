@@ -58,16 +58,7 @@ pub fn flagged_redundant(cache: &Caches, project: &qymcad_core::model::Project, 
     if diag.redundant.is_empty() || s.constraints.iter().any(tangency) {
         return Default::default();
     }
-    let entity_pts: std::collections::HashSet<Id> = s
-        .entities
-        .iter()
-        .flat_map(|e| match e.kind {
-            qymcad_core::model::EntityKind::Line { a, b } => vec![a, b],
-            qymcad_core::model::EntityKind::Arc { center, a, b, .. } => vec![center, a, b],
-            qymcad_core::model::EntityKind::Circle { center, .. } => vec![center],
-            qymcad_core::model::EntityKind::Ellipse { c, ma, mi } => vec![c, ma, mi],
-        })
-        .collect();
+    let entity_pts: std::collections::HashSet<Id> = s.entities.iter().flat_map(qymcad_core::model::entity_points).collect();
     diag.redundant
         .iter()
         .copied()
@@ -132,10 +123,17 @@ pub fn sketch_shape_key(project: &qymcad_core::model::Project, si: usize) -> u64
                 EntityKind::Line { a, b } => [0, a, b, 0].hash(&mut h),
                 EntityKind::Arc { center, a, b, ccw } => [1, center, a, b, ccw as u64].hash(&mut h),
                 EntityKind::Circle { center, .. } => [2, center].hash(&mut h),
-                EntityKind::Ellipse { c, ma, mi } => [3, c, ma, mi].hash(&mut h),
+                EntityKind::Ellipse { c, ma, mi, span } => {
+                    [3, c, ma, mi].hash(&mut h);
+                    span.hash(&mut h);
+                }
+                EntityKind::Spline { ref nodes, ends, .. } => {
+                    4.hash(&mut h);
+                    nodes.hash(&mut h);
+                    ends.hash(&mut h);
+                }
             }
         }
-        s.splines.len().hash(&mut h);
         for c in &s.constraints {
             std::mem::discriminant(c).hash(&mut h);
             c.points().hash(&mut h);
