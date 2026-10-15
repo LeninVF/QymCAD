@@ -722,17 +722,19 @@ probe! {
         pick(&mut s, 30.0, 40.0, true);
         pick(&mut s, 0.0, 20.0, true); // and the whole contour chosen, the last three with Shift
         take(&mut s, "tb-chamfer-sketch-hint");
-        // THE FIELD IS NOT UP YET - nothing has been pointed at - AND NO FIELD LIES OVER THE CONTOUR, which is what
-        // a box standing in the middle of the sheet does to the clicks meant for its own lines.
-        let before_click: Vec<Widget> = sheet_fields(&mut s);
-        assert!(before_click.is_empty(), "the chamfer stood with a field over the contour before anything was pointed at: {before_click:?}");
-        let empty = s.on_sketch(200.0, -200.0);
-        s.click(empty); // the first click opens the field and leaves the four chosen lines as the set
-        let field = field_near(&mut s, empty);
-        assert_eq!(field.kind, Kind::TextField, "the chamfer of a contour chosen before the tool opened no field: {}", s.status());
+        // THE LINES CHOSEN BEFORE THE TOOL OPEN ITS FIELD AT ONCE, as every tool takes what was chosen before it - AND
+        // THE FIELD DOES NOT LIE OVER THE CONTOUR, which is what a box standing in the middle of the sheet did to the
+        // clicks meant for its own lines: it stands beside a corner, outside
+        let fields: Vec<Widget> = sheet_fields(&mut s);
+        let [field] = &fields[..] else { panic!("the chamfer of a contour chosen before the tool opened no single field: {fields:?}; {}", s.status()) };
+        let (lo, hi) = (s.on_sketch(0.0, 40.0), s.on_sketch(60.0, 0.0));
+        let inside = qymcad::Rect::from_two_pos(lo, hi).shrink(2.0);
+        assert!(!inside.intersects(field.rect), "the field of the chamfer lies over the contour: {:?} over {inside:?}", field.rect);
+        let field = field.clone();
         fill_widget(&mut s, &field, "5");
         s.key(Key::Enter);
-        assert_eq!(counts(&mut s).0, 8, "the four corners of the chosen contour were not cut by one answer: {:?}", counts(&mut s));
+        let status = s.status();
+        assert_eq!(counts(&mut s).0, 8, "the four corners of the chosen contour were not cut by one answer: {:?}; the status line says {status:?}", counts(&mut s));
     }
 }
 

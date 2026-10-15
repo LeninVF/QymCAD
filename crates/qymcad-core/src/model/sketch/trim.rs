@@ -353,7 +353,7 @@ impl Project {
         if dlen2 < 1e-12 {
             return false;
         }
-        let tc = (((clickx - pax) * (pbx - pax) + (clicky - pay) * (pby - pay)) / dlen2).clamp(0.05, 0.95);
+        let Some(&tc) = self.break_at(si, eid, Point2::new(clickx, clicky)).first() else { return false };
         let mid = self.sketch_point_at(si, pax + (pbx - pax) * tc, pay + (pby - pay) * tc, 1e-9);
         let con = self.sketches[si].entities.iter().find(|e| e.id == eid).is_some_and(|e| e.construction);
         // THE FIRST HALF IS THE LINE IT WAS, the second a line added: what was built from the line - the wall swept from

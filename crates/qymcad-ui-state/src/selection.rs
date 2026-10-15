@@ -42,19 +42,28 @@ pub fn text_ghost_shown(armed: &Armed, inline: &InlineEdit) -> bool {
     armed.draw_kind() == 11 && inline.text().is_none()
 }
 
-/// A RECTANGLE IS TAKEN WHOLE by the tools that carry geometry - move, copy, rotate, the patterns: a click on one side of a
-/// rectangle picked that side alone, and a turn of it was a turn of one line out of a shape held square. Every side of
-/// a rectangle with one side picked joins the selection.
-pub fn take_whole_rects(project: &Project, si: usize, sel_sk: &mut SketchSelection) {
-    let Some(s) = project.sketches.get(si) else { return };
+/// A FIGURE IS TAKEN WHOLE by the tools that carry geometry - move, copy, rotate, mirror, the patterns: a click on one
+/// side of a rectangle picked that side alone, and a turn of it was a turn of one line out of a shape held square. Every
+/// curve of a rectangle, a polygon or a slot with one curve picked joins the selection.
+pub fn take_whole_figures(project: &Project, si: usize, sel_sk: &mut SketchSelection) {
     let picked: Vec<Id> = sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
-    for r in s.rects.iter().filter(|r| r.sides.iter().any(|e| picked.contains(e))) {
-        for side in r.sides {
-            if !picked.contains(&side) {
-                sel_sk.items.push((1, side));
-            }
+    for curve in with_whole_figures(project, si, &picked) {
+        if !sel_sk.items.contains(&(1, curve)) {
+            sel_sk.items.push((1, curve));
         }
     }
+}
+
+/// The curves `picked`, and every curve of a rectangle, a polygon or a slot one of them belongs to.
+fn with_whole_figures(project: &Project, si: usize, picked: &[Id]) -> Vec<Id> {
+    let mut out = picked.to_vec();
+    let Some(s) = project.sketches.get(si) else { return out };
+    // a rectangle by its sides, a polygon by its sides and its circle, a slot by its sides and its ends
+    let wholes = s.rects.iter().map(|r| r.sides.to_vec()).chain(s.figures.iter().map(|f| f.curves.clone()));
+    for curves in wholes.filter(|c| c.iter().any(|e| picked.contains(e))) {
+        out.extend(curves.into_iter().filter(|c| !picked.contains(c)));
+    }
+    out
 }
 
 /// THE SPLINES OF SKETCH `si` WHOSE HANDLES SHOW AND ARE TAKEN, by their ids: those picked by their curve, and those with
@@ -263,6 +272,30 @@ pub fn sel_point_ids(sel_sk: &SketchSelection) -> Vec<Id> {
     sel_sk.items.iter().filter(|(k, _)| *k == 0).map(|(_, id)| *id).collect()
 }
 
+/// THE SHAPES THE CHOICE HOLDS for the tools that carry shapes whole - Move, Copy, Rotate, Mirror and the patterns: its
+/// curves with the figures they belong to, and its points that stand alone. A point that ends a curve is a place on that curve, and the origin, the axes
+/// and a projection are not the sketch's to carry.
+pub fn shapes_chosen(project: &Project, si: usize, sel_sk: &SketchSelection) -> Vec<Id> {
+    let not_alone = points_not_alone(project, si);
+    // a figure with one curve chosen is carried whole, as `take_whole_figures` shows it
+    let curves: Vec<Id> = sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
+    let points = sel_sk.items.iter().filter(|&&(k, id)| k == 0 && !not_alone.contains(&id)).map(|(_, id)| *id);
+    with_whole_figures(project, si, &curves).into_iter().chain(points).collect()
+}
+
+/// Whether the point stands alone in the sketch: no curve ends or turns about it, and it is not the origin, an axis or
+/// a projection. See `shapes_chosen`.
+pub fn point_alone(project: &Project, si: usize, pid: Id) -> bool {
+    project.sketches.get(si).is_some_and(|s| s.points.iter().any(|p| p.id == pid)) && !points_not_alone(project, si).contains(&pid)
+}
+
+fn points_not_alone(project: &Project, si: usize) -> std::collections::HashSet<Id> {
+    let Some(s) = project.sketches.get(si) else { return Default::default() };
+    // the centre of a rectangle and the middle of a line are places on a shape, held there, not shapes
+    let middles = s.constraints.iter().filter_map(|c| if let qymcad_core::model::Constraint::Midpoint { p, .. } = c { Some(*p) } else { None });
+    s.entities.iter().flat_map(qymcad_core::model::entity_points).chain(s.immovable_points()).chain(s.rects.iter().map(|r| r.centre)).chain(middles).collect()
+}
+
 /// The centre of the selected object (for the gizmo), in the part's XY coordinates.
 pub fn selected_centroid(project: &Project, sel: &Sel) -> Option<Point2> {
     match *sel {
@@ -347,4 +380,9 @@ pub fn lines_parallel(dc: &DrawCtx, si: usize, a1: Id, b1: Id, a2: Id, b2: Id) -
         }
         _ => false,
     }
+}
+
+/// The kind a shape is chosen as: a point (0) where the id names a point of the sketch, a curve (1) otherwise.
+pub fn kind_of_shape(project: &Project, si: usize, id: Id) -> u8 {
+    u8::from(!project.sketches.get(si).is_some_and(|s| s.points.iter().any(|p| p.id == id)))
 }

@@ -8,7 +8,14 @@ pub fn draw_entity_xform(pick: &PickCtx, painter: &egui::Painter, rect: Rect, si
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
     use qymcad_core::model::EntityKind;
     let Some(s) = pick.project.sketches.get(si) else { return };
-    let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return };
+    let Some(e) = s.entities.iter().find(|e| e.id == eid) else {
+        // a point that stands alone is a shape of its own: its ghost is a dot where the map takes it
+        if let Some(q) = s.points.iter().find(|q| q.id == eid) {
+            let (x, y) = f(q.x, q.y);
+            painter.circle_stroke(sh.at(Point2::new(x, y)), 3.5, stroke);
+        }
+        return;
+    };
     let kind = e.kind.clone();
     let pt = |id: Id| {
         s.points.iter().find(|q| q.id == id).map(|q| {
@@ -72,69 +79,6 @@ pub fn draw_entity_xform(pick: &PickCtx, painter: &egui::Painter, rect: Rect, si
                     })
                     .collect();
                 painter.add(egui::Shape::line(pts, stroke));
-            }
-        }
-    }
-}
-
-/// Light the angular span of a circle or arc that will be removed (for draw_trim_preview).
-/// THE ARC A TRIM CLICK LANDS ON: the circle it lies on, and the piece of it that exists. `None` for a
-/// span means the whole circle.
-#[derive(Clone, Copy)]
-pub struct TrimArc {
-    pub c: Point2,
-    pub r: f64,
-    pub span: Option<(f64, f64, bool)>,
-}
-
-pub fn draw_curve_trim_span(pick: &PickCtx, painter: &egui::Painter, rect: Rect, arc: TrimArc, angs: &mut [f64], cur: Point2, col: Color32) {
-    let TrimArc { c, r, span } = arc;
-    use std::f64::consts::TAU;
-    let click_ang = (cur.y - c.y).atan2(cur.x - c.x);
-    let arc_poly = |painter: &egui::Painter, g0: f64, g1: f64| {
-        let n = 24;
-        let pts: Vec<Pos2> = (0..=n)
-            .map(|k| {
-                let g = g0 + (g1 - g0) * k as f64 / n as f64;
-                (qymcad_ui_state::Sheet { view: *pick.view, rect }).at(Point2::new(c.x + r * g.cos(), c.y + r * g.sin()))
-            })
-            .collect();
-        painter.add(egui::Shape::line(pts, Stroke::new(3.0, col)));
-    };
-    match span {
-        None => {
-            // a circle: the span between neighbouring cut angles that contains the click
-            let mut a: Vec<f64> = angs.iter().map(|x| x.rem_euclid(TAU)).collect();
-            a.sort_by(|x, y| x.total_cmp(y));
-            a.dedup_by(|x, y| (*x - *y).abs() < 1e-6);
-            if a.len() < 2 {
-                return;
-            }
-            let ca = click_ang.rem_euclid(TAU);
-            let n = a.len();
-            for i in 0..n {
-                let (a0, a1) = (a[i], if i + 1 < n { a[i + 1] } else { a[0] + TAU });
-                if (ca >= a0 - 1e-9 && ca < a1) || (ca + TAU >= a0 && ca + TAU < a1) {
-                    arc_poly(painter, a0, a1);
-                    return;
-                }
-            }
-        }
-        Some((a0, a1, ccw)) => {
-            let to_param = |ang: f64| if ccw { (ang - a0).rem_euclid(TAU) } else { (a0 - ang).rem_euclid(TAU) };
-            let sweep = if ccw { (a1 - a0).rem_euclid(TAU) } else { (a0 - a1).rem_euclid(TAU) };
-            let mut ps: Vec<f64> = angs.iter().map(|&x| to_param(x)).filter(|&v| v > 1e-6 && v < sweep - 1e-6).collect();
-            ps.push(0.0);
-            ps.push(sweep);
-            ps.sort_by(|x, y| x.total_cmp(y));
-            ps.dedup_by(|x, y| (*x - *y).abs() < 1e-6);
-            let cp = to_param(click_ang);
-            for w in ps.windows(2) {
-                if cp > w[0] - 1e-9 && cp < w[1] + 1e-9 {
-                    let (g0, g1) = if ccw { (a0 + w[0], a0 + w[1]) } else { (a0 - w[0], a0 - w[1]) };
-                    arc_poly(painter, g0, g1);
-                    return;
-                }
             }
         }
     }
@@ -460,58 +404,16 @@ pub fn draw_sketch_constraints(pn: &Painting, painter: &egui::Painter, rect: Rec
             continue;
         }
         let hl = if sel { Stroke::new(2.5, pn.scheme.pal.emphasis()) } else { Stroke::new(2.0, pn.scheme.pal.preview()) };
-        match e.kind {
-            EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
-                let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).iter().map(|p| sh.at(*p)).collect();
-                painter.add(egui::Shape::line(line, hl));
-            }
-            EntityKind::Line { a, b } => {
-                if let (Some(pa), Some(pb)) = (pt(a), pt(b)) {
-                    painter.line_segment([sh.at(pa), sh.at(pb)], hl);
-                    // A LINE PICKED AT ITS MIDDLE SHOWS IT: a ring of the snap's colour round a dot of the selection's, at
-                    // the middle - lit as any picked line, the middle taken was not seen
-                    if sel && pn.sel_sk.at_middle.contains(&e.id) {
-                        let mid = sh.at(Point2::new((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0));
-                        painter.circle_stroke(mid, MIDDLE_RING, Stroke::new(1.6, pn.scheme.pal.snap_marker()));
-                        painter.circle_filled(mid, 2.5, pn.scheme.pal.emphasis());
-                    }
-                }
-            }
-            EntityKind::Circle { center, r } => {
-                if let Some(c) = pt(center) {
-                    let sc = sh.at(c);
-                    let rp = (sh.at(Point2::new(c.x + r, c.y)).x - sc.x).abs();
-                    painter.circle_stroke(sc, rp, hl);
-                }
-            }
-            EntityKind::Arc { center, a, b, ccw } => {
-                if let (Some(c), Some(pa), Some(pb)) = (pt(center), pt(a), pt(b)) {
-                    let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
-                    let a0 = (pa.y - c.y).atan2(pa.x - c.x);
-                    let a1 = (pb.y - c.y).atan2(pb.x - c.x);
-                    let arc = qymcad_core::geom::tessellate_arc(c.x, c.y, r, a0, a1, ccw, 0.02);
-                    let sp: Vec<Pos2> = arc.iter().map(|p| sh.at(Point2::new(p.x, p.y))).collect();
-                    if sp.len() >= 2 {
-                        painter.add(egui::Shape::line(sp, hl));
-                    }
-                }
-            }
-            EntityKind::Ellipse { c, ma, mi, span: None } => {
-                if let (Some(pc), Some(pma), Some(pmi)) = (pt(c), pt(ma), pt(mi)) {
-                    let major = ((pma.x - pc.x).powi(2) + (pma.y - pc.y).powi(2)).sqrt().max(1e-6);
-                    let minor = ((pmi.x - pc.x).powi(2) + (pmi.y - pc.y).powi(2)).sqrt().max(1e-6);
-                    let (ux, uy) = ((pma.x - pc.x) / major, (pma.y - pc.y) / major);
-                    let (vx, vy) = (-uy, ux);
-                    let n = 72;
-                    let sp: Vec<Pos2> = (0..=n)
-                        .map(|k| {
-                            let t = std::f64::consts::TAU * k as f64 / n as f64;
-                            let (ct, st) = (t.cos(), t.sin());
-                            sh.at(Point2::new(pc.x + major * ct * ux + minor * st * vx, pc.y + major * ct * uy + minor * st * vy))
-                        })
-                        .collect();
-                    painter.add(egui::Shape::line(sp, hl));
-                }
+        // ONE HIGHLIGHT FOR EVERY KIND: the curve as the curve module lays it out
+        let Some(curve) = qymcad_core::model::curve::Curve::of(s, e) else { continue };
+        painter.add(egui::Shape::line(curve.polyline().into_iter().map(|p| sh.at(p)).collect(), hl));
+        // A LINE PICKED AT ITS MIDDLE SHOWS IT: a ring of the snap's colour round a dot of the selection's, at the middle -
+        // lit as any picked line, the middle taken was not seen
+        if let (EntityKind::Line { a, b }, true) = (&e.kind, sel && pn.sel_sk.at_middle.contains(&e.id)) {
+            if let (Some(pa), Some(pb)) = (pt(*a), pt(*b)) {
+                let mid = sh.at(Point2::new((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0));
+                painter.circle_stroke(mid, MIDDLE_RING, Stroke::new(1.6, pn.scheme.pal.snap_marker()));
+                painter.circle_filled(mid, 2.5, pn.scheme.pal.emphasis());
             }
         }
     }

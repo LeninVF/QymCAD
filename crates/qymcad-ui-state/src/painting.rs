@@ -68,6 +68,17 @@ pub fn note_at(project: &Project, view: &View2d, rect: Rect, pos: Pos2, si: usiz
 /// The handle of a polygon under the cursor is the centre of its circumscribed (construction)
 /// circle, when the cursor is close to that "rim". A circle counts as a rim when vertices hang on it
 /// (PointOnCircle towards its centre). Returns the Id of the centre (so the radius can be retyped).
+/// The centre of the circle of the polygon curve `eid` belongs to - a side or the circle itself.
+pub fn polygon_of_curve(project: &Project, si: usize, eid: Id) -> Option<Id> {
+    use qymcad_core::model::{EntityKind, FigureShape};
+    let s = project.sketches.get(si)?;
+    let f = s.figures.iter().find(|f| f.shape == FigureShape::Polygon && f.curves.contains(&eid))?;
+    f.curves.iter().find_map(|c| match s.entity(*c)?.kind {
+        EntityKind::Circle { center, .. } => Some(center),
+        _ => None,
+    })
+}
+
 pub fn polygon_under(project: &Project, view: &View2d, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
     let sh = Sheet { view: *view, rect };
     use qymcad_core::model::{Constraint, EntityKind};

@@ -402,4 +402,6 @@ pub enum PlacingShape {
     Ellipse(Id, Point2),
     /// a rectangle reopened by a double click on a side: its width and height dimensions, edited in place
     RectDims(qymcad_core::model::RectDims),
+    /// a slot drawn, or reopened by a double click on a side: a curve of it, its length and width typed in place
+    Slot(Id),
 }

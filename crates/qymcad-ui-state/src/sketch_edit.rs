@@ -261,6 +261,36 @@ pub fn active_edges(dc: &DrawCtx, si: usize) -> ActiveEdges {
     ActiveEdges { lines, circles: circs }
 }
 
+/// A CENTRE LINE OF A CIRCLE: a dashed axis through its centre, a quarter of the radius past the rim each way.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CentreLine {
+    pub from: Point2,
+    pub to: Point2,
+}
+
+/// THE CENTRE LINES OF THE CIRCLES OF SKETCH `si`: a horizontal and a vertical one through each centre, as every CAD
+/// draws them. The pointer is carried along them and snaps where they cross the lines of the sketch, so a line, a
+/// dimension or a tangent is laid off the axes of a circle.
+pub fn circle_centre_lines(project: &Project, si: usize) -> Vec<CentreLine> {
+    use qymcad_core::model::EntityKind;
+    let Some(s) = project.sketches.get(si) else { return Vec::new() };
+    let rims = s.entities.iter().filter_map(|e| match e.kind {
+        EntityKind::Circle { center, r } => sketch_pt(project, si, center).map(|c| CentreReach { centre: c, reach: r * 1.25 }),
+        _ => None,
+    });
+    rims.flat_map(|reach| {
+        let (c, r) = (reach.centre, reach.reach);
+        [CentreLine { from: Point2::new(c.x - r, c.y), to: Point2::new(c.x + r, c.y) }, CentreLine { from: Point2::new(c.x, c.y - r), to: Point2::new(c.x, c.y + r) }]
+    })
+    .collect()
+}
+
+/// How far the centre lines of a circle run from its centre: a quarter of its radius past the rim.
+struct CentreReach {
+    centre: Point2,
+    reach: f64,
+}
+
 /// The entity nearest to a screen point (within 12 px): for a line the distance to the segment, for
 /// a circle or an arc the distance to the rim.
 pub fn entity_near(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {

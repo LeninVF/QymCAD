@@ -230,6 +230,10 @@ pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: 
             }
         }
     }
+    // THE CENTRE LINES OF THE CIRCLES, dashed and faint: the axes a dimension, a line or a tangent is laid off
+    for cl in qymcad_ui_state::circle_centre_lines(pn.project, si) {
+        painter.add(egui::Shape::dashed_line(&[sh.at(cl.from), sh.at(cl.to)], Stroke::new(0.7, aux_col.gamma_multiply(0.7)), 7.0, 3.0));
+    }
     // CONFLICTING dimensions (the value contradicts the geometry) are red
     let conflicts = qymcad_ui_state::sketch_diag(pn.cache, pn.project, si).conflicts;
     // the linear and angular dimensions (the selected one orange, a conflict red, the one under the cursor white)

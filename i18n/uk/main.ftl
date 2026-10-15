@@ -2370,6 +2370,7 @@ sk-profiles-n = Профілів: { $n } — вказуйте ще; Enter — з
 sk-r-all-corners = R усіх кутів
 sk-filleted-n = Скруглено кутів: { $n }
 sk-fillet-too-big = Не вдалося: зробіть значення меншим (не вміщується в ребра кута)
+sk-length-short = Д
 sk-width-short = Ш
 sk-height-short = В
 sk-dim-conflict = Конфлікт розмірів: значення суперечить геометрії — змініть значення або вилучіть зайвий

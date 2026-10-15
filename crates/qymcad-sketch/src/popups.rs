@@ -517,6 +517,7 @@ pub fn place_input_popup(ed: qymcad_ui_state::Editing, mut tools: qymcad_ui_stat
     ellipse_input_popup(pl, ctx, rect, si);
     rect_input_popup(pl, ctx, rect, si);
     rect_dims_popup(pl, ctx, rect, si);
+    slot_size_popup(pl, ctx, rect, si);
     poly_input_popup(pl, ctx, rect, si);
 }
 
@@ -580,7 +581,67 @@ pub fn rect_dims_popup(pl: &mut qymcad_ui_state::PlaceCtx, ctx: &egui::Context, 
     }
 }
 
-/// A DOUBLE CLICK ON A SHAPE OPENS ITS SIZE: a side of a rectangle its width and height, a circle its diameter (laid
+/// A SLOT DRAWN, OR REOPENED BY A DOUBLE CLICK ON A SIDE: its length between the centres of its ends and its width,
+/// typed at it. As at a circle, the model is not touched while the text is typed: Enter or the tick lays the size of
+/// each field whose value was changed as a dimension, and the slot follows; closed untouched, or with Esc, the slot is
+/// left free.
+pub fn slot_size_popup(pl: &mut qymcad_ui_state::PlaceCtx, ctx: &egui::Context, rect: Rect, si: usize) {
+    use qymcad_core::model::SlotSize;
+    let Some(curve) = pl.place.slot() else { return };
+    let sizes = [SlotSize::Length, SlotSize::Width];
+    let (Some(length), Some(width)) = (pl.project.slot_size(si, curve, sizes[0]), pl.project.slot_size(si, curve, sizes[1])) else {
+        pl.place.clear(); // the slot went from under the fields
+        return;
+    };
+    let stood = [qymcad_core::expr::fmt_num(length), qymcad_core::expr::fmt_num(width)];
+    let want_focus = std::mem::take(&mut pl.place.focus);
+    if want_focus {
+        pl.place.buf = stood.clone();
+    }
+    let Some(at) =
+        pl.project.sketches.get(si).and_then(|s| s.entity(curve)).and_then(|e| qymcad_core::model::entity_points(e).first().copied()).and_then(|p| qymcad_ui_state::sketch_pt(pl.project, si, p))
+    else {
+        return;
+    };
+    let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
+    let mut close = false;
+    let mut buf = std::mem::take(&mut pl.place.buf);
+    egui::Area::new(egui::Id::new(("slotsize", si)))
+        .fixed_pos(qymcad_ui_state::clamp_popup((qymcad_ui_state::Sheet { view: *pl.view, rect }).at(at), rect) + egui::vec2(10.0, -10.0))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(qymcad_i18n::tr("sk-length-short"));
+                    let r0 = qymcad_ui_state::focus_edit(ui, &mut buf[0], 60.0, "", want_focus);
+                    ui.label(qymcad_i18n::tr("sk-width-short"));
+                    let r1 = qymcad_ui_state::focus_edit(ui, &mut buf[1], 60.0, "", false);
+                    if ((r0.lost_focus() || r1.lost_focus()) && enter) || ui.button(ph::CHECK).clicked() {
+                        close = true;
+                    }
+                });
+            });
+        });
+    if close {
+        let typed: Vec<SlotSize> = sizes.iter().zip(buf.iter().zip(&stood)).filter(|(_, (now, was))| now != was).map(|(size, _)| *size).collect();
+        for size in &typed {
+            let text = if *size == SlotSize::Length { &buf[0] } else { &buf[1] };
+            if let Some(v) = parse_num(pl.project, text).filter(|v| *v > 0.01) {
+                pl.project.set_slot_size(si, curve, *size, v);
+            }
+        }
+        if !typed.is_empty() {
+            qymcad_ui_state::invalidate(pl.regen);
+        }
+    }
+    pl.place.buf = buf;
+    if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        pl.place.clear();
+    }
+}
+
+/// A DOUBLE CLICK ON A SHAPE OPENS ITS SIZE: a side of a rectangle its width and height, a straight side of a slot its
+/// length and width, a circle its diameter (laid
 /// as a dimension when it has none), an arc its radius, the circle a polygon hangs on - or the polygon itself - its
 /// radius and turn. Answers whether a shape was there.
 pub fn open_shape_size(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos2, si: usize) -> bool {
@@ -589,6 +650,21 @@ pub fn open_shape_size(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
         if let Some(dims) = sk.project.rect_dims(si, eid) {
             sk.project.solve_sketch(si);
             sk.place.set(PlacingShape::RectDims(dims));
+            sk.place.focus = true;
+            return true;
+        }
+        // A SIDE OF A POLYGON OR A SLOT OPENS THE FIGURE'S SIZE, as a side of a rectangle does: the polygon its radius and
+        // turn, the slot its length and width. A polygon opened only within 8 px of its circle, which the middle of a
+        // side of a hexagon R50 stands 6.7 mm off.
+        if let Some(centre) = qymcad_ui_state::polygon_of_curve(&*sk.project, si, eid) {
+            sk.place.set(PlacingShape::Poly(centre));
+            sk.place.focus = true;
+            return true;
+        }
+        // a straight side of a slot: an end of it is an arc, which opens its own radius below
+        let straight = sk.project.sketches[si].entity(eid).is_some_and(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. }));
+        if straight && sk.project.slot_size(si, eid, qymcad_core::model::SlotSize::Length).is_some() {
+            sk.place.set(PlacingShape::Slot(eid));
             sk.place.focus = true;
             return true;
         }
@@ -634,7 +710,7 @@ pub fn sketch_rotate_popup(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Cont
     }
     let qymcad_ui_state::Sel::Sketch(si) = *sk.sel else { return };
     let Some(base) = sk.tool.move_base else { return };
-    let eids: Vec<Id> = sk.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
+    let eids = qymcad_ui_state::shapes_chosen(&*sk.project, si, &*sk.sel_sk);
     let texts = qymcad_ui_state::sel_text_indices(&*sk.project, &*sk.sel_sk, si);
     if eids.is_empty() && texts.is_empty() {
         return;

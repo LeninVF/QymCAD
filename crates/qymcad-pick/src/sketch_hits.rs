@@ -235,6 +235,12 @@ pub fn nearest_circle_entity(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -
     best.map(|(_, id)| id)
 }
 
+/// THE CURVE A CLICK OF TRIM, BREAK OR EXTEND TAKES: the one nearest the pointer, of whatever kind. Taken a line first, a
+/// line 6 px beside a spline under the pointer - within the grab of a curve, 8 px - was cut instead of the spline.
+pub fn edit_target(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
+    nearest_curve_eid(pick, rect, pos, si)
+}
+
 /// THE CURVE OF ANY KIND UNDER THE POINTER, within reach of a curve: the nearest by the points it is laid out by. What a
 /// tool that cuts or stretches a curve takes when no line and no circle is under the pointer - an ellipse, an arc of one,
 /// a spline.

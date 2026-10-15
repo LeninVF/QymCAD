@@ -1003,7 +1003,7 @@ impl App {
             self.project.update_pattern(si, pi, kind);
             self.status = Notice::info(crate::i18n::tr("g-array-updated"));
         } else {
-            let eids: Vec<Id> = self.tools.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
+            let eids = shapes_chosen(&self.project, si, &self.tools.sel_sk);
             if eids.is_empty() {
                 self.status = Notice::info(crate::i18n::tr("g-select-for-array"));
                 return;

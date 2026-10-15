@@ -2370,6 +2370,7 @@ sk-profiles-n = Профильдер: { $n } — тағы шертіңіз; Ente
 sk-r-all-corners = Барлық бұрыштардың R
 sk-filleted-n = Дөңгелектелген бұрыштар: { $n }
 sk-fillet-too-big = Орындалмады: мәнді азайтыңыз (бұрыш қырларына сыймайды)
+sk-length-short = Ұ
 sk-width-short = Е
 sk-height-short = Б
 sk-dim-conflict = Өлшемдер қайшылығы: мән геометрияға қайшы — оны өзгертіңіз не артығын алып тастаңыз

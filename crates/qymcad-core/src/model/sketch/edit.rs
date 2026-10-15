@@ -26,6 +26,49 @@ impl Project {
             }
         }
     }
+    /// THE TWO POINTS A SIZE OF THE SLOT WITH CURVE `curve` IS MEASURED BETWEEN: the centres of its ends for its length,
+    /// the two points its sides touch its first end at - twice its radius apart - for its width. `None` when the curve
+    /// is no slot's.
+    fn slot_size_ends(&self, si: usize, curve: Id, which: crate::model::SlotSize) -> Option<[Id; 2]> {
+        let s = self.sketches.get(si)?;
+        let f = s.figures.iter().find(|f| f.shape == FigureShape::Slot && f.curves.contains(&curve))?;
+        let ends: Vec<[Id; 3]> = f
+            .curves
+            .iter()
+            .filter_map(|c| match s.entity(*c)?.kind {
+                EntityKind::Arc { center, a, b, .. } => Some([center, a, b]),
+                _ => None,
+            })
+            .collect();
+        let [[c1, a, b], [c2, ..]] = ends[..] else { return None };
+        Some(match which {
+            crate::model::SlotSize::Length => [c1, c2],
+            crate::model::SlotSize::Width => [a, b],
+        })
+    }
+    /// A SIZE OF THE SLOT WITH CURVE `curve` as it stands.
+    pub fn slot_size(&self, si: usize, curve: Id, which: crate::model::SlotSize) -> Option<f64> {
+        let [a, b] = self.slot_size_ends(si, curve, which)?;
+        let s = self.sketches.get(si)?;
+        let at = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y));
+        Some(at(a)?.dist(at(b)?))
+    }
+    /// A SIZE OF THE SLOT WITH CURVE `curve` SET TO `v`: its dimension laid when it has none, set when it has, and the
+    /// sketch solved - the slot follows, its sides touching both ends. Answers whether the curve is a slot's.
+    pub fn set_slot_size(&mut self, si: usize, curve: Id, which: crate::model::SlotSize, v: f64) -> bool {
+        let Some([x, y]) = self.slot_size_ends(si, curve, which) else { return false };
+        let s = &mut self.sketches[si];
+        let held = s.constraints.iter_mut().find_map(|c| match c {
+            Constraint::Distance { a, b, axis: 0, d, .. } if (*a == x && *b == y) || (*a == y && *b == x) => Some(d),
+            _ => None,
+        });
+        match held {
+            Some(d) => *d = v,
+            None => s.constraints.push(Constraint::Distance { a: x, b: y, d: v, off: 0.0, expr: String::new(), driven: false, axis: 0, at: None }),
+        }
+        self.solve_sketch(si);
+        true
+    }
     /// THE WIDTH AND THE HEIGHT OF THE RECTANGLE WITH SIDE `side` LAID AS DIMENSIONS, at the lengths its first two sides
     /// stand at, each led out a fifth of the shorter side beyond its side (a positive offset is to the right of a side
     /// run from its first corner, and the corners go round anticlockwise - the dimensions stand outside). Returns
@@ -427,16 +470,22 @@ impl Project {
     /// once. Made again after each copy, a pattern of 200 lines across 200 others made a growing grid 199 times - 29 s,
     /// the last grid of 40 000 cells.
     pub(crate) fn dup_entities_unbuilt<F: Fn(f64, f64) -> (f64, f64)>(&mut self, si: usize, eids: &[Id], f: F, with_constraints: bool) -> Vec<Id> {
-        let pids = self.entity_point_ids(si, eids);
+        // a rectangle, a polygon, a slot taken whole is copied as one, a rectangle with its diagonals and its centre
+        let whole = self.wholes_among(si, eids);
+        let mut taken: Vec<Id> = eids.to_vec();
+        taken.extend(whole.carried().filter(|id| !eids.contains(id)).collect::<Vec<Id>>());
+        let eids_taken = &taken[..];
+        let pids = self.entity_point_ids(si, eids_taken);
         let coords: Vec<(Id, f64, f64)> = {
             let Some(s) = self.sketches.get(si) else { return Vec::new() };
             s.points.iter().filter(|p| pids.contains(&p.id)).map(|p| (p.id, p.x, p.y)).collect()
         };
         let ents: Vec<SketchEntity> = {
             let Some(s) = self.sketches.get(si) else { return Vec::new() };
-            s.entities.iter().filter(|e| eids.contains(&e.id)).cloned().collect()
+            s.entities.iter().filter(|e| eids_taken.contains(&e.id)).cloned().collect()
         };
         let mut map: std::collections::HashMap<Id, Id> = std::collections::HashMap::new();
+        let mut curves: std::collections::HashMap<Id, Id> = std::collections::HashMap::new();
         for (old, x, y) in coords {
             let (nx, ny) = f(x, y);
             let nid = self.alloc_id();
@@ -451,7 +500,8 @@ impl Project {
         let flips = (ex - ox) * (fy - oy) - (ey - oy) * (fx - ox) < 0.0;
         let mut new_ids = Vec::new();
         // the tangents of a spline go through the map without its shift: along X to where X went, along Y to where Y went
-        let turn = |v: Option<[f64; 2]>| v.map(|[x, y]| [x * (ex - ox) + y * (fx - ox), x * (ey - oy) + y * (fy - oy)]);
+        let along = |[x, y]: [f64; 2]| [x * (ex - ox) + y * (fx - ox), x * (ey - oy) + y * (fy - oy)];
+        let turn = |v: Option<[f64; 2]>| v.map(along);
         for e in ents {
             let nk = match e.kind {
                 EntityKind::Line { a, b } => EntityKind::Line { a: m(a), b: m(b) },
@@ -466,15 +516,25 @@ impl Project {
             };
             let id = self.alloc_id();
             self.sketches[si].entities.push(SketchEntity { id, kind: nk, construction: e.construction });
+            curves.insert(e.id, id);
             new_ids.push(id);
         }
+        // a point named among the set is a shape of its own, and its copy is one of the new shapes
+        new_ids.extend(eids.iter().filter_map(|id| map.get(id).copied()));
         if with_constraints {
             // The internal constraints of the set are re-pointed at the new points, so the copy keeps its
             // shape but not its anchor or its links to the axes.
             let inside: std::collections::HashSet<Id> = map.keys().copied().collect();
-            let cons: Vec<Constraint> = self.internal_constraints(si, &inside).iter().map(|c| remap_constraint_via(c, &map)).collect();
+            let maps = CopyMaps { points: &map, curves: &curves, turn: &along };
+            let cons: Vec<Constraint> = self.internal_constraints(si, &inside).iter().map(|c| copied_constraint(c, &maps)).collect();
             self.sketches[si].constraints.extend(cons);
         }
+        let maps = CopyMaps { points: &map, curves: &curves, turn: &along };
+        if !with_constraints {
+            let own = self.copied_own_constraints(si, &whole, &maps);
+            self.sketches[si].constraints.extend(own);
+        }
+        self.lay_copied_records(si, &whole, &maps);
         new_ids
     }
     /// Capture the selected geometry of sketch `si` into the clipboard, for pasting into this sketch or

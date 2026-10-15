@@ -110,6 +110,23 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
             }
         }
     }
+    // THE PLACE A LINE BEING DRAWN TOUCHES A CURVE, nearer the pointer than any vertex, before the vertex: on a closed
+    // spline the place a line from above touched it stood 1.2 mm off a node, and the node 7 px off the pointer took the
+    // end of the line
+    let start = (sk.armed.draw_kind() == 1).then(|| sk.tool.pts.last().copied()).flatten();
+    if let (Some(from), Some(si)) = (start, qymcad_ui_state::edit_si(&*sk.project, &*sk.sketch_ses)) {
+        let reach = f64::from(qymcad_ui_state::grab::grab(sk.set, Grab::Snap)) / f64::from(sk.view.scale);
+        let touch = curve_snaps(&sk.project.sketches[si], CurveSnapAsk { at: Point2::new(w.x, w.y), start: Some(from), reach, dragged: None })
+            .into_iter()
+            .filter(|f| f.rank == 2)
+            .map(|snap| Offered { off: sd(snap.at, &*sk.view), snap })
+            .filter(|o| o.off <= qymcad_ui_state::grab::grab(sk.set, Grab::Snap) && best.is_none_or(|(bd, _, _)| o.off < bd))
+            .min_by(|a, b| a.off.total_cmp(&b.off));
+        if let Some(o) = touch {
+            *sk.snap_hint = Some((o.snap.at, o.snap.kind));
+            return o.snap.at;
+        }
+    }
     if let Some((d, p, ty)) = best {
         if d <= qymcad_ui_state::grab::grab(sk.set, Grab::Snap) {
             *sk.snap_hint = Some((p, ty));
@@ -123,6 +140,7 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
     // the inference snaps of the active sketch: a midpoint, then an intersection, then a point on an edge.
     // `cand` holds (the screen distance, the point, the type); a smaller (type, distance) wins.
     let mut cand: Option<(f32, Point2, u8)> = None;
+    let mut curve_cand: Option<Offered> = None;
     if let Some(si) = qymcad_ui_state::edit_si(&*sk.project, &*sk.sketch_ses) {
         let qymcad_ui_state::ActiveEdges { lines, circles: circs } = qymcad_ui_state::active_edges(&sk.draw(), si);
         // ONLY WHAT RUNS NEAR THE POINTER: every point offered below - a midpoint, an intersection, a point on an
@@ -220,6 +238,41 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
                 }
             }
         }
+        // 2d) THE CENTRE LINES OF THE CIRCLES cross the rims and the lines of the sketch, and carry the pointer along them.
+        // Not tied to the grid along them as a line of the sketch is: lying over an axis, a centre line would then offer a
+        // node of the grid beside the crossing of the axis and a circle.
+        let grab_snap = qymcad_ui_state::grab::grab(sk.set, Grab::Snap);
+        let view = *sk.view;
+        let mut offer = |rank: u8, p: Point2| {
+            let d = sd(p, &view);
+            if d <= grab_snap && cand.is_none_or(|(bd, _, bty)| rank.cmp(&bty).then(d.total_cmp(&bd)).is_lt()) {
+                cand = Some((d, p, rank));
+            }
+        };
+        for cl in qymcad_ui_state::circle_centre_lines(&*sk.project, si).iter().filter(|cl| near_seg(cl.from, cl.to)) {
+            // a crossing ranks as one (5)
+            let rims = circs.iter().flat_map(|rim| qymcad_ui_state::seg_circle_intersect(cl.from, cl.to, rim.centre, rim.radius).into_iter().filter(|p| rim.holds(*p)));
+            for p in rims.chain(lines.iter().filter_map(|(a, b)| qymcad_ui_state::seg_seg_intersect(cl.from, cl.to, *a, *b))) {
+                offer(5, p);
+            }
+            // a point along it as a point on an edge (6) - only within it: its ends, a quarter of the radius past the rim,
+            // are no places to snap to, and a centre of a circle clicked 0.5 mm past one was pulled onto it
+            let (u, v) = (w - cl.from, cl.to - cl.from);
+            let t = (u.x * v.x + u.y * v.y) / (v.x * v.x + v.y * v.y);
+            if (0.0..=1.0).contains(&t) {
+                offer(6, Point2::new(cl.from.x + v.x * t, cl.from.y + v.y * t));
+            }
+        }
+        // 2c) THE CURVES OF ANY KIND near the pointer (`curve_snaps`), the nearest of the best rank; weighed against the
+        // rest once they are all found, by its rank and not by what it says
+        let start = (sk.armed.draw_kind() == 1).then(|| sk.tool.pts.last().copied()).flatten();
+        let dragged = sk.drag.pt().and_then(|(dsi, pi)| sk.project.sketches.get(dsi)?.points.get(pi).map(|q| q.id));
+        for found in curve_snaps(&sk.project.sketches[si], CurveSnapAsk { at: w, start, reach: f64::from(reach) / f64::from(sk.view.scale), dragged }) {
+            let d = sd(found.at, &*sk.view);
+            if d <= qymcad_ui_state::grab::grab(sk.set, Grab::Snap) && curve_cand.as_ref().is_none_or(|b| found.rank.cmp(&b.snap.rank).then(d.total_cmp(&b.off)).is_lt()) {
+                curve_cand = Some(Offered { off: d, snap: found });
+            }
+        }
         for rim in &circs {
             let (c, r) = (rim.centre, rim.radius);
             let dir = Point2::new(w.x - c.x, w.y - c.y);
@@ -234,6 +287,11 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
                     cand = Some((d, p, 6));
                 }
             }
+        }
+    }
+    if let Some(Offered { off: d, snap: found }) = curve_cand {
+        if cand.is_none_or(|(bd, _, bty)| found.rank.cmp(&bty).then(d.total_cmp(&bd)).is_lt()) {
+            cand = Some((d, found.at, found.kind));
         }
     }
     if let Some((_, p, ty)) = cand {
@@ -277,4 +335,116 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
     }
     *sk.snap_hint = None;
     w
+}
+
+/// WHAT THE SNAPS OF CURVES ARE ASKED: where the pointer is, where a line being drawn starts, and how far around the
+/// pointer to look, in millimetres.
+struct CurveSnapAsk {
+    at: Point2,
+    start: Option<Point2>,
+    reach: f64,
+    /// a point being dragged: the curves standing on it go with it, and offer nothing - the middle of a lone spline
+    /// caught the node it was dragged by
+    dragged: Option<Id>,
+}
+
+/// A PLACE A CURVE OFFERS to snap to: what the snap says of it (`kind`, as every snap does - 5 a crossing, 6 a point on a
+/// curve, the tie a click there lays read from it) and where it stands among the snaps (`rank`, a smaller one first):
+/// the place a line being drawn touches a curve 2, before all; a crossing of two curves 4, before a point of a line tied
+/// to the grid that stands nearer the pointer on the same line; a middle and a quadrant 5, among the crossings of lines
+/// and the nearer of them taken.
+struct CurveSnap {
+    at: Point2,
+    kind: u8,
+    rank: u8,
+}
+
+/// A SNAP OF A CURVE OFFERED, and how far from the pointer on the screen.
+struct Offered {
+    off: f32,
+    snap: CurveSnap,
+}
+
+/// THE PLACES THE CURVES OF SKETCH `s` NEAR THE POINTER OFFER: the middle of each open curve but a line - half way along
+/// it - and the quadrants of a circle, an arc or an ellipse, the ends of its axes, where the curve runs; the place a line
+/// drawn from `start` touches each; where any two of them meet.
+fn curve_snaps(s: &qymcad_core::model::Sketch, ask: CurveSnapAsk) -> Vec<CurveSnap> {
+    use qymcad_core::model::curve::Curve;
+    let moves = |e: &qymcad_core::model::SketchEntity| ask.dragged.is_some_and(|p| qymcad_core::model::entity_points(e).contains(&p));
+    let near: Vec<Curve> = s.entities.iter().filter(|e| !moves(e)).filter_map(|e| Curve::of(s, e)).filter(|c| c.nearest(ask.at).off <= ask.reach).collect();
+    let mut out = Vec::new();
+    for c in &near {
+        let on = |q: Point2| c.nearest(q).off < 1e-9;
+        match c {
+            Curve::Line { .. } => {}
+            Curve::Round { centre, r, .. } => {
+                out.extend([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]].map(|[x, y]| Point2::new(centre.x + r * x, centre.y + r * y)).into_iter().filter(|q| on(*q)).map(|at| CurveSnap {
+                    at,
+                    kind: 6,
+                    rank: 5,
+                }));
+            }
+            Curve::Oval { centre, major, minor, .. } => {
+                out.extend([*major, *minor].into_iter().flat_map(|v| [*centre + v, *centre - v]).filter(|q| on(*q)).map(|at| CurveSnap { at, kind: 6, rank: 5 }));
+            }
+            Curve::Spline { .. } => {}
+        }
+        if !c.closed() && !matches!(c, Curve::Line { .. }) {
+            out.push(CurveSnap { at: half_way(c), kind: 6, rank: 5 });
+        }
+        if let Some(from) = ask.start {
+            out.extend(touch_from(c, [from, ask.at]).map(|at| CurveSnap { at, kind: 6, rank: 2 }));
+        }
+    }
+    for (k, a) in near.iter().enumerate() {
+        for b in &near[k + 1..] {
+            out.extend(a.meet(b).into_iter().map(|m| CurveSnap { at: m.at, kind: 5, rank: 4 }));
+        }
+    }
+    out
+}
+
+/// The point half way along a curve by its length: on an arc the middle of its sweep, on any other the place its laid
+/// out points put half way, taken onto the curve.
+fn half_way(c: &qymcad_core::model::curve::Curve) -> Point2 {
+    if let qymcad_core::model::curve::Curve::Round { .. } = c {
+        return c.at(0.5);
+    }
+    let line = c.polyline();
+    let total: f64 = line.windows(2).map(|w| w[0].dist(w[1])).sum();
+    let mut left = total / 2.0;
+    for w in line.windows(2) {
+        let l = w[0].dist(w[1]);
+        if l >= left && l > 0.0 {
+            let k = left / l;
+            return c.nearest(Point2::new(w[0].x + (w[1].x - w[0].x) * k, w[0].y + (w[1].y - w[0].y) * k)).point;
+        }
+        left -= l;
+    }
+    c.at(0.5)
+}
+
+/// WHERE A LINE FROM `from` TOUCHES CURVE `c` near `near`: the place where the way from `from` runs along the curve, by
+/// Newton's steps from the place nearest `near`; `None` where there is none there.
+fn touch_from(c: &qymcad_core::model::curve::Curve, [from, near]: [Point2; 2]) -> Option<Point2> {
+    let lean = |t: f64| {
+        let (q, u) = (c.at(t), c.tangent(t));
+        (q.x - from.x) * u.y - (q.y - from.y) * u.x
+    };
+    let held = |t: f64| if c.closed() { t.rem_euclid(1.0) } else { t.clamp(0.0, 1.0) };
+    let (mut t, h) = (c.nearest(near).t, 1e-7);
+    for _ in 0..30 {
+        let f = lean(t);
+        let df = (lean(held(t + h)) - lean(held(t - h))) / (2.0 * h);
+        if df.abs() < 1e-15 {
+            return None;
+        }
+        let next = held(t - f / df);
+        if (next - t).abs() < 1e-14 {
+            t = next;
+            break;
+        }
+        t = next;
+    }
+    (lean(t).abs() < 1e-9 && c.at(t).dist(from) > 1e-6).then(|| c.at(t))
 }

@@ -1059,5 +1059,7 @@ mod pieces;
 mod crossings;
 mod blends;
 mod touch;
+mod copies;
+pub(crate) use copies::{copied_constraint, CopyMaps};
 pub use crossings::Crossing;
 pub use pieces::LayAs;

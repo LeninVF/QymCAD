@@ -2,6 +2,12 @@
 
 use super::*;
 
+/// A FIELD OF THE TOP BAR OF THE TEXT TOOL: where its caption stands, and what is typed into the field beside it.
+struct Field {
+    caption: egui::Rect,
+    words: String,
+}
+
 impl Hand<'_> {
     /// CHOOSE A FONT FROM A FILE: the list of fonts is opened by the button of the top bar that names the font of
     /// the text tool, the file chooser behind "From a file..." answers with `path`, and the list is closed with
@@ -91,13 +97,11 @@ impl Hand<'_> {
         let word =
             |hand: &Self, w: &str, near: egui::Pos2| hand.win.drawn.iter().filter(|(t, _)| t == w).map(|(_, r)| *r).min_by(|a, b| a.center().distance(near).total_cmp(&b.center().distance(near)));
         let named = word(self, &qymcad_i18n::tr("tool-text"), egui::Pos2::new(700.0, 0.0)).expect("the top bar of the text tool names no string field");
-        for (field, typed) in [
-            (named, text.to_string()),
-            (word(self, &qymcad_i18n::tr("opt-height-short"), named.center()).expect("the top bar of the text tool names no height"), format!("{height}")),
-        ] {
-            self.press_screen(egui::pos2(field.right() + 24.0, field.center().y));
+        let height_at = word(self, &qymcad_i18n::tr("opt-height-short"), named.center()).expect("the top bar of the text tool names no height");
+        for field in [Field { caption: named, words: text.to_string() }, Field { caption: height_at, words: format!("{height}") }] {
+            self.press_screen(egui::pos2(field.caption.right() + 24.0, field.caption.center().y));
             self.chord(egui::Modifiers::COMMAND, egui::Key::A);
-            self.type_text(&typed);
+            self.type_text(&field.words);
         }
         self.key(egui::Key::Tab);
         self.close_window()

@@ -72,3 +72,21 @@ mod every_tool_takes_every_curve;
 
 #[cfg(test)]
 mod two_fillets_meet_on_a_side;
+
+#[cfg(test)]
+mod a_figure_is_carried_whole;
+
+#[cfg(test)]
+mod a_figure_opens_its_size;
+
+#[cfg(test)]
+mod a_circle_shows_its_centre_lines;
+
+#[cfg(test)]
+mod a_trim_preview_shows_any_curve;
+
+#[cfg(test)]
+mod a_curve_under_the_pointer_is_the_one_cut;
+
+#[cfg(test)]
+mod a_picked_curve_of_any_kind_is_lit;

@@ -274,9 +274,12 @@ pub(crate) fn draw_extend_preview(pn: &Painting, painter: &egui::Painter, rect: 
     }
 }
 
+/// THE PREVIEW OF TRIM, BREAK AND EXTEND under the pointer, for a curve of any kind, from the functions of the core the
+/// tools cut and stretch by: in red the piece a trim takes away (`trim_span`), in green the places a break cuts at
+/// (`break_at`) and the curve as an extension leaves it (`extended`). Each kind had a preview of its own, and an
+/// ellipse, an arc of one and a spline had none.
 pub fn draw_trim_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
     let sh = qymcad_ui_state::Sheet { view: pn.view, rect };
-    use qymcad_core::model::EntityKind;
     if pn.armed.click_op() == 0 {
         return;
     }
@@ -287,108 +290,30 @@ pub fn draw_trim_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
         draw_extend_preview(pn, painter, rect, ExtendHeld { si, line: held, pos });
         return;
     }
-    let Some(eid) = qymcad_pick::nearest_line_eid(&PickCtx { project: pn.project, set: pn.set, view: &pn.view }, rect, pos, si)
-        .or_else(|| qymcad_pick::nearest_circle_entity(&PickCtx { project: pn.project, set: pn.set, view: &pn.view }, rect, pos, si))
-    else {
-        return;
-    };
+    let pick = PickCtx { project: pn.project, set: pn.set, view: &pn.view };
+    let Some(eid) = qymcad_pick::edit_target(&pick, rect, pos, si) else { return };
     let Some(s) = pn.project.sketches.get(si) else { return };
-    let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) else { return };
-    let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
-    let pt = |id: Id| points_by_id.get(&id).copied().map(|q| Point2::new(q.x, q.y));
-    let red = pn.scheme.pal.error();
-    let green = pn.scheme.pal.add();
-    let inter = pn.project.entity_intersections(si, eid);
+    let Some(curve) = s.entity(eid).and_then(|e| qymcad_core::model::curve::Curve::of(s, e)) else { return };
+    let (red, green) = (pn.scheme.pal.error(), pn.scheme.pal.add());
+    let on_screen = |c: &qymcad_core::model::curve::Curve| c.polyline().into_iter().map(|p| sh.at(p)).collect::<Vec<Pos2>>();
     match pn.armed.click_op() {
         1 => {
-            // TRIM: light the span that will be removed in red
-            match kind {
-                // a spline takes no part in the crossings the preview is cut at
-                EntityKind::Spline { .. } => {}
-                EntityKind::Line { a, b } => {
-                    let (Some(pa), Some(pb)) = (pt(a), pt(b)) else { return };
-                    let (dx, dy) = (pb.x - pa.x, pb.y - pa.y);
-                    let len2 = dx * dx + dy * dy;
-                    if len2 < 1e-9 {
-                        return;
-                    }
-                    let param = |x: f64, y: f64| ((x - pa.x) * dx + (y - pa.y) * dy) / len2;
-                    let mut ts: Vec<f64> = inter.iter().map(|&(x, y)| param(x, y)).filter(|t| *t > 1e-6 && *t < 1.0 - 1e-6).collect();
-                    ts.push(0.0);
-                    ts.push(1.0);
-                    ts.sort_by(|x, y| x.total_cmp(y));
-                    ts.dedup_by(|x, y| (*x - *y).abs() < 1e-6);
-                    let tc = param(cur.x, cur.y).clamp(0.0, 1.0);
-                    for w in ts.windows(2) {
-                        if tc >= w[0] - 1e-9 && tc <= w[1] + 1e-9 {
-                            let p0 = sh.at(Point2::new(pa.x + dx * w[0], pa.y + dy * w[0]));
-                            let p1 = sh.at(Point2::new(pa.x + dx * w[1], pa.y + dy * w[1]));
-                            painter.line_segment([p0, p1], Stroke::new(3.0, red));
-                            break;
-                        }
-                    }
-                }
-                EntityKind::Circle { center, r } => {
-                    let Some(c) = pt(center) else { return };
-                    let mut angs: Vec<f64> = inter.iter().map(|&(x, y)| (y - c.y).atan2(x - c.x)).collect();
-                    draw_curve_trim_span(&PickCtx { project: pn.project, set: pn.set, view: &pn.view }, painter, rect, TrimArc { c, r, span: None }, &mut angs, cur, red);
-                }
-                EntityKind::Arc { center, a, b, ccw } => {
-                    let (Some(c), Some(pa), Some(pb)) = (pt(center), pt(a), pt(b)) else { return };
-                    let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
-                    let a0 = (pa.y - c.y).atan2(pa.x - c.x);
-                    let a1 = (pb.y - c.y).atan2(pb.x - c.x);
-                    let mut angs: Vec<f64> = inter.iter().map(|&(x, y)| (y - c.y).atan2(x - c.x)).collect();
-                    draw_curve_trim_span(&PickCtx { project: pn.project, set: pn.set, view: &pn.view }, painter, rect, TrimArc { c, r, span: Some((a0, a1, ccw)) }, &mut angs, cur, red);
-                }
-                EntityKind::Ellipse { .. } => {}
+            if let Some(span) = pn.project.trim_span(si, eid, cur) {
+                painter.add(egui::Shape::line(on_screen(&span), Stroke::new(3.0, red)));
             }
         }
         2 => {
-            // EXTEND: in green, the end that will be pulled (the one nearest the cursor)
-            let ends = match kind {
-                EntityKind::Line { a, b } => vec![pt(a), pt(b)],
-                EntityKind::Arc { a, b, .. } => vec![pt(a), pt(b)],
-                _ => vec![],
-            };
-            if let Some(end) = ends.into_iter().flatten().min_by(|p, q| {
-                let dp = (p.x - cur.x).powi(2) + (p.y - cur.y).powi(2);
-                let dq = (q.x - cur.x).powi(2) + (q.y - cur.y).powi(2);
-                dp.total_cmp(&dq)
-            }) {
+            // the end that will be pulled - the one nearest the pointer - and, for a curve, the curve as it will run
+            if let Some(end) = (!curve.closed()).then(|| curve.ends()).and_then(|ends| ends.into_iter().min_by(|p, q| p.dist(cur).total_cmp(&q.dist(cur)))) {
                 painter.circle_stroke(sh.at(end), 6.0, Stroke::new(2.0, green));
+            }
+            if let Some(longer) = pn.project.extended(si, eid, cur) {
+                painter.add(egui::Shape::dashed_line(&on_screen(&longer), Stroke::new(2.0, green), 6.0, 4.0));
             }
         }
         3 => {
-            // BREAK: a marker at the cut point (the cursor projected onto the entity)
-            let split = match kind {
-                EntityKind::Spline { .. } => None,
-                EntityKind::Line { a, b } => {
-                    if let (Some(pa), Some(pb)) = (pt(a), pt(b)) {
-                        let (dx, dy) = (pb.x - pa.x, pb.y - pa.y);
-                        let len2 = (dx * dx + dy * dy).max(1e-9);
-                        let t = (((cur.x - pa.x) * dx + (cur.y - pa.y) * dy) / len2).clamp(0.05, 0.95);
-                        Some(Point2::new(pa.x + dx * t, pa.y + dy * t))
-                    } else {
-                        None
-                    }
-                }
-                EntityKind::Circle { center, r } => pt(center).map(|c| {
-                    let ang = (cur.y - c.y).atan2(cur.x - c.x);
-                    Point2::new(c.x + r * ang.cos(), c.y + r * ang.sin())
-                }),
-                EntityKind::Arc { center, a, .. } => match (pt(center), pt(a)) {
-                    (Some(c), Some(pa)) => {
-                        let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
-                        let ang = (cur.y - c.y).atan2(cur.x - c.x);
-                        Some(Point2::new(c.x + r * ang.cos(), c.y + r * ang.sin()))
-                    }
-                    _ => None,
-                },
-                EntityKind::Ellipse { .. } => None,
-            };
-            if let Some(p) = split {
-                let sp = sh.at(p);
+            for t in pn.project.break_at(si, eid, cur) {
+                let sp = sh.at(curve.at(t));
                 painter.circle_filled(sp, 4.0, green);
                 painter.circle_stroke(sp, 7.0, Stroke::new(1.5, green));
             }
@@ -408,7 +333,7 @@ pub fn draw_pattern_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) 
     let eids: Vec<Id> = if let Some(pi) = pn.pat.edit {
         pn.project.sketches.get(si).and_then(|s| s.patterns.get(pi)).map(|p| p.source.clone()).unwrap_or_default()
     } else {
-        pn.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect()
+        qymcad_ui_state::shapes_chosen(pn.project, si, pn.sel_sk)
     };
     if eids.is_empty() {
         return;
@@ -517,7 +442,7 @@ pub fn draw_move_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
             let (px, py) = (x - base.x, y - base.y);
             (base.x + px * cs - py * sn, base.y + px * sn + py * cs)
         };
-        for id in pn.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id) {
+        for id in qymcad_ui_state::shapes_chosen(pn.project, si, pn.sel_sk) {
             draw_entity_xform(&PickCtx { project: pn.project, set: pn.set, view: &pn.view }, painter, rect, si, id, &f, stroke);
         }
         draw_texts_xform(pn, painter, rect, si, &f, stroke);
@@ -531,8 +456,7 @@ pub fn draw_move_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
     let col = if pn.armed.move_op() == 2 { pn.scheme.pal.clip() } else { pn.scheme.pal.highlight() };
     let stroke = Stroke::new(1.4, col);
     let f = move |x: f64, y: f64| (x + dx, y + dy);
-    for (k, id) in pn.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).enumerate() {
-        let _ = k;
+    for id in qymcad_ui_state::shapes_chosen(pn.project, si, pn.sel_sk) {
         draw_entity_xform(&PickCtx { project: pn.project, set: pn.set, view: &pn.view }, painter, rect, si, id, &f, stroke);
     }
     draw_texts_xform(pn, painter, rect, si, &f, stroke);

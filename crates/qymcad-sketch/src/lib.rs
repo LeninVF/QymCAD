@@ -199,8 +199,11 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
     if let Some((_, id)) = best_pt.or(best_sys) {
         return Some((0u8, id));
     }
-    // 2) the nearest entity (an ordinary one takes priority over construction geometry)
-    let mut best_e: Option<(u8, f32, Id)> = None;
+    // 2) the nearest entity; construction geometry yields to an ordinary curve only where the two are as near, within
+    // `CONSTRUCTION_YIELDS` pixels. Yielding over the whole grab radius (8 px), the construction circle of a hexagon
+    // R7 - 0.94 mm, 5.6 px at 6 px/mm from its sides at most - could not be clicked anywhere.
+    const CONSTRUCTION_YIELDS: f32 = 2.0;
+    let mut best_e: Option<(f32, Id)> = None;
     for e in &s.entities {
         let d = match e.kind {
             // a spline and an arc of an ellipse by the points they are laid out by
@@ -248,13 +251,13 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
             },
         };
         if d <= qymcad_ui_state::grab::grab(pick.set, Grab::Curve) {
-            let tier = if e.construction { 1u8 } else { 0u8 };
-            if best_e.is_none_or(|(bt, bd, _)| (tier, d) < (bt, bd)) {
-                best_e = Some((tier, d, e.id));
+            let weighed = if e.construction { d + CONSTRUCTION_YIELDS } else { d };
+            if best_e.is_none_or(|(bd, _)| weighed < bd) {
+                best_e = Some((weighed, e.id));
             }
         }
     }
-    best_e.map(|(_, _, id)| (1u8, id))
+    best_e.map(|(_, id)| (1u8, id))
 }
 
 /// FINISH THE SPLINE - what a double click does.

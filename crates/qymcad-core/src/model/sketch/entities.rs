@@ -727,7 +727,8 @@ impl Project {
             }
         }
     }
-    /// Unique points referenced by the given entities, centres included.
+    /// Unique points referenced by the given entities, centres included. An id naming a point stands for the point
+    /// itself: a point drawn alone is a shape of its own, which Move, Rotate, Copy, Mirror and the patterns take.
     pub fn entity_point_ids(&self, si: usize, eids: &[Id]) -> Vec<Id> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let mut out: Vec<Id> = Vec::new();
@@ -739,6 +740,11 @@ impl Project {
                 if !out.contains(&id) {
                     out.push(id);
                 }
+            }
+        }
+        for p in &s.points {
+            if eids.contains(&p.id) && !out.contains(&p.id) {
+                out.push(p.id);
             }
         }
         out
@@ -800,7 +806,8 @@ impl Project {
             let broken: Vec<crate::model::SketchRect> = s.rects.iter().filter(|r| r.sides.iter().chain(r.diagonals.iter().flatten()).any(|e| eids.contains(e))).cloned().collect();
             s.rects.retain(|r| !broken.contains(r));
             for r in &broken {
-                eids.extend(r.diagonals.into_iter().flatten());
+                // the centre is a point of the rectangle no curve stands on: named, it goes, as a point drawn alone does not
+                eids.extend(r.diagonals.into_iter().flatten().chain([r.centre]));
                 let [c0, c1, c2, c3] = r.corners;
                 let own = rect_own_constraints(c0, c1, c2, c3, r.centre, 0.0);
                 s.constraints.retain(|c| !own.iter().any(|o| same_rect_constraint(o, c)));
@@ -821,14 +828,22 @@ impl Project {
                     _ => None,
                 })
                 .collect();
-            s.entities.retain(|e| !eids.contains(&e.id));
+            // A POINT DRAWN ALONE STAYS unless it is named among what goes: it is no end that a deleted curve orphans.
+            // Swept with the orphans, a point drawn by the point tool went whenever any curve of the sketch was deleted.
+            // The middle of a line is a place on it, not a point drawn alone.
+            let lone_before: std::collections::HashSet<Id> = {
+                let middles = s.constraints.iter().filter_map(|c| if let Constraint::Midpoint { p, .. } = c { Some(*p) } else { None });
+                let used: std::collections::HashSet<Id> = s.entities.iter().flat_map(entity_points).chain(middles).collect();
+                s.points.iter().map(|p| p.id).filter(|id| !used.contains(id) && !eids.contains(id)).collect()
+            };
             // Drop the constraints attached to a deleted line (horizontal, vertical, parallel, perpendicular,
             // equal, collinear, tangent, midpoint — those referencing its pair of endpoints), or dangling
             // glyphs remain.
             if !dead_lines.is_empty() {
                 s.constraints.retain(|c| !constraint_uses_line(c, &dead_lines));
             }
-            let used: std::collections::HashSet<Id> = s.entities.iter().flat_map(entity_points).collect();
+            s.entities.retain(|e| !eids.contains(&e.id));
+            let used: std::collections::HashSet<Id> = s.entities.iter().flat_map(entity_points).chain(lone_before).collect();
             // Protected free points: the system ones (origin and axes) and materialised midpoints. They must
             // not be dropped as orphaned endpoints, or the axes and the dimensions measured from them are
             // lost.
@@ -847,8 +862,10 @@ impl Project {
     pub fn toggle_construction(&mut self, si: usize, eids: &[Id]) -> bool {
         let mut now_construction = false;
         if let Some(s) = self.sketches.get_mut(si) {
-            // The target state is the inverse of the first selected entity.
-            let target = !s.entities.iter().find(|e| eids.contains(&e.id)).is_some_and(|e| e.construction);
+            // ONE STATE FOR THE WHOLE SET: construction while any of it is ordinary, ordinary once all of it is construction.
+            // Taken as the inverse of the first one chosen, a polygon - six sides and its construction circle - turned
+            // ordinary or construction by the order it was picked in.
+            let target = s.entities.iter().filter(|e| eids.contains(&e.id)).any(|e| !e.construction);
             for e in s.entities.iter_mut() {
                 if eids.contains(&e.id) {
                     e.construction = target;
@@ -860,13 +877,22 @@ impl Project {
         now_construction
     }
     /// Delete the selected sketch points together with the entities incident to them and the constraints they
-    /// orphan. Every other point, the origin included, is kept.
+    /// orphan. The other points of those entities go with them where nothing else stands on them; every other point,
+    /// the origin included, is kept.
     pub fn delete_points(&mut self, si: usize, ids: &[Id]) {
         {
             let Some(s) = self.sketches.get_mut(si) else { return };
-            let set: std::collections::HashSet<Id> = ids.iter().copied().collect();
+            let mut set: std::collections::HashSet<Id> = ids.iter().copied().collect();
             // Entities incident to the deleted points go as well.
-            s.entities.retain(|e| !entity_points(e).iter().any(|p| set.contains(p)));
+            let incident = |e: &SketchEntity| entity_points(e).iter().any(|p| set.contains(p));
+            let going: Vec<SketchEntity> = s.entities.iter().filter(|e| incident(e)).cloned().collect();
+            s.entities.retain(|e| !incident(e));
+            // THE FAR END OF A CURVE TAKEN AWAY GOES WITH IT: kept, it stood as a point of its own that nobody drew, and
+            // the end of a line deleted left the other end behind as a dot.
+            let used: std::collections::HashSet<Id> = s.entities.iter().flat_map(entity_points).collect();
+            let protected: std::collections::HashSet<Id> =
+                s.system_ids().into_iter().chain(s.constraints.iter().filter_map(|c| if let Constraint::Midpoint { p, .. } = c { Some(*p) } else { None })).collect();
+            set.extend(going.iter().flat_map(entity_points).filter(|p| !used.contains(p) && !protected.contains(p)));
             s.points.retain(|p| !set.contains(&p.id));
             let alive: std::collections::HashSet<Id> = s.points.iter().map(|p| p.id).collect();
             s.constraints.retain(|c| constraint_point_ids(c).iter().all(|id| alive.contains(id)));

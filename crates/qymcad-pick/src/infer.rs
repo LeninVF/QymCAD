@@ -101,6 +101,8 @@ pub fn snap_infer_glyph(pn: &Painting) -> Option<(Gly, Point2)> {
         0 | 3 | 4 => Gly::Coincident, // a vertex, a midpoint or a centre
         // where two curves cross the point is tied to both; on one, at a line of the grid, it is a point on that curve
         5 if curves_through(pn, p).total() >= 2 => Gly::Coincident,
+        // a point of an ellipse or a spline: no tie is laid there, and none is promised
+        5 | 6 if curves_through(pn, p).total() == 0 => return None,
         5 | 6 if curves_through(pn, p).rims > 0 => Gly::PointOnCircle,
         5 | 6 => Gly::PointOnLine,                        // on an edge
         2 if p.x == 0.0 && p.y == 0.0 => Gly::Coincident, // the origin, where the two axes meet

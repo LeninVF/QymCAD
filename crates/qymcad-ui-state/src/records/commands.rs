@@ -135,6 +135,14 @@ impl Placing {
         }
     }
 
+    /// A slot drawn or reopened for its length and width: a curve of it.
+    pub fn slot(&self) -> Option<Id> {
+        match &self.shape {
+            PlacingShape::Slot(curve) => Some(*curve),
+            _ => None,
+        }
+    }
+
     /// A rectangle drawn from its centre: the centre plus the corner under the pointer.
     pub fn rect_center(&self) -> Option<(Point2, Point2, Vec<Id>)> {
         match &self.shape {

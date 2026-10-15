@@ -398,7 +398,7 @@ pub fn dim_click_inner(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
                 sk.dim.fresh = Some((ci, sk.edits.undo.len() + 1));
                 *sk.inline = qymcad_ui_state::InlineEdit::Dim(ci);
                 sk.dim.focus = true;
-                *sk.status = qymcad_i18n::tr("sk-dim-placed");
+                *sk.status = Notice::info(qymcad_i18n::tr("sk-dim-placed"));
                 return true;
             }
         }
@@ -461,9 +461,9 @@ pub fn dim_click_inner(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
                             let ci = sk.project.sketches[si].constraints.len() - 1;
                             qymcad_ui_state::finish_dim(&mut *sk.project, &mut *sk.regen, si, ci);
                             sk.place.dim = Some(ci);
-                            *sk.status = qymcad_i18n::tr("sk-size-hint");
+                            *sk.status = Notice::info(qymcad_i18n::tr("sk-size-hint"));
                         }
-                        None => *sk.status = qymcad_i18n::tr("sk-curve-picked"),
+                        None => *sk.status = Notice::info(qymcad_i18n::tr("sk-curve-picked")),
                     }
                 }
             },

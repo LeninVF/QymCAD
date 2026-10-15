@@ -125,7 +125,9 @@ const CASES: &[Case] = &[
     Case { name: "the crossing of a closed spline and a line", first: closed_spline, second: upright, feature: Feature::Crossing },
     Case { name: "the crossing of two circles", first: circle, second: far_circle, feature: Feature::Crossing },
     Case { name: "a line touching a circle", first: circle, second: nothing, feature: Feature::Touch(p([40.0, 46.0])) },
-    Case { name: "a line touching an arc", first: arc, second: nothing, feature: Feature::Touch(p([40.0, 44.0])) },
+    // from the right: from (40, 44) the line touching the circle of the arc on the left touches it at 155.7 deg, past the
+    // end of the arc at 135
+    Case { name: "a line touching an arc", first: arc, second: nothing, feature: Feature::Touch(p([52.0, 40.0])) },
     Case { name: "a line touching an ellipse", first: ellipse, second: nothing, feature: Feature::Touch(p([40.0, 44.0])) },
     Case { name: "a line touching a closed spline", first: closed_spline, second: nothing, feature: Feature::Touch(p([40.0, 46.0])) },
 ];
@@ -221,16 +223,25 @@ fn snapped(case: &Case) -> Result<(), String> {
             if off_path(end, &first.path) > NEAR {
                 return Err(format!("the end of the line stands {:.3} off the curve", off_path(end, &first.path)));
             }
-            // where the line touches, the curve runs along it: its points nearest the end lie on the line
+            // where the line touches, the curve runs along it: the way of the curve there - square to the radius of the
+            // circle through its three points about the end - is the way of the line. Read as how far its points within
+            // 0.6 mm rise off the line, a touching where the curve bends at 1 mm read 0.18 off
             let way = end - from;
-            let l = way.len();
-            let rise = first.path.iter().filter(|q| q.dist(end) < 0.6).map(|q| ((q.x - from.x) * way.y - (q.y - from.y) * way.x).abs() / l).fold(0.0, f64::max);
-            if rise > NEAR {
-                return Err(format!("the line crosses the curve where it ends, {rise:.3} off touching"));
+            let n = first.path.len();
+            let k = (0..n).min_by(|x, y| first.path[*x].dist(end).total_cmp(&first.path[*y].dist(end))).unwrap_or(0).clamp(1, n - 2);
+            let m = centre_of([first.path[k - 1], first.path[k], first.path[k + 1]]);
+            let radial = end - m;
+            let turn = ((radial.x * way.x + radial.y * way.y) / (radial.len() * way.len())).abs().min(1.0).asin().to_degrees();
+            if turn > 1.0 {
+                return Err(format!("the line meets the curve where it ends at {turn:.2} deg, not touching"));
             }
             Ok(())
         }
+        // the feature where it stands once the line is made: the automatic constraints of the line may move the shape - a
+        // line as long as a side of a rectangle is made as long, and the corner it starts at moved 0.056 - and the line
+        // starts on the feature still
         _ => {
+            let at = feature_at(case, &after, &shapes)?;
             let off = a.dist(at).min(b.dist(at));
             if off > NEAR {
                 return Err(format!("the line starts {off:.3} off the feature at ({:.3}, {:.3}); the status line says {:?}", at.x, at.y, hand.app.status));

@@ -573,6 +573,13 @@ pub struct RectDims {
     pub height: usize,
 }
 
+/// A SIZE OF A SLOT: its length between the centres of its ends, or its width across an end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotSize {
+    Length,
+    Width,
+}
+
 /// What stays put when the width or the height of a rectangle changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RectAnchor {

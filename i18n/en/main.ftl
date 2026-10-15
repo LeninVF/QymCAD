@@ -2376,6 +2376,7 @@ sk-profiles-n = Profiles: { $n } — click more; Enter sets the size; Esc cancel
 sk-r-all-corners = R of every corner
 sk-filleted-n = Corners filleted: { $n }
 sk-fillet-too-big = It did not work: make the value smaller (it does not fit the corner edges)
+sk-length-short = L
 sk-width-short = W
 sk-height-short = H
 sk-dim-conflict = Dimension conflict: the value contradicts the geometry — change it or remove the extra one

@@ -91,9 +91,9 @@ pub(crate) fn extend_apply(sk: &mut qymcad_ui_state::SketchCtx, at: ExtendAt, he
             sk.tool.extend = None;
             sk.sel_sk.clear();
             qymcad_ui_state::invalidate(&mut *sk.regen);
-            *sk.status = qymcad_i18n::tr("sk-done");
+            *sk.status = Notice::info(qymcad_i18n::tr("sk-done"));
         } else {
-            *sk.status = qymcad_i18n::tr("sk-op-failed-no-intersection");
+            *sk.status = Notice::refusal(qymcad_i18n::tr("sk-op-failed-no-intersection"));
         }
         return;
     }

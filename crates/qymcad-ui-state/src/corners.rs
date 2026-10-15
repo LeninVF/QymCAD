@@ -165,7 +165,7 @@ pub fn modify_button(mut ed: Editing, t: &mut Tools, sk_pat: SketchPattern, tool
     // PRESSED AGAIN WITH THE TOOL IN HAND it is put down, as every tool button does - except the mirror with
     // geometry selected, where the press is the way on to the axis (see below)
     let held = t.sel_sk.modify == Some(op);
-    let mirror_forward = op == EditTool::Mirror && t.sel_sk.items.iter().any(|(k, _)| *k == 1);
+    let mirror_forward = op == EditTool::Mirror && matches!(*ed.sel, Sel::Sketch(si) if !shapes_chosen(&*ed.project, si, t.sel_sk).is_empty());
     exit_draw_tools(&mut t.reborrow());
     if held && !mirror_forward {
         return;
@@ -177,7 +177,7 @@ pub fn modify_button(mut ed: Editing, t: &mut Tools, sk_pat: SketchPattern, tool
     // selected answers the first and asks the second; pressing it with a selection made while the tool was
     // already in hand does the same, which is why the button is the way forward rather than a stray click.
     if op == EditTool::Mirror {
-        let eids: Vec<Id> = sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
+        let eids = if let Sel::Sketch(si) = *ed.sel { shapes_chosen(&*ed.project, si, sel_sk) } else { Vec::new() };
         if !eids.is_empty() {
             // THE SELECTION STAYS ON SCREEN. It used to be moved into the tool and cleared, so the person
             // saw nothing selected, could not tell what was about to be reflected, and read the next click
@@ -280,10 +280,10 @@ pub(crate) fn mirror_about_in(ed: Editing, sel_sk: &mut SketchSelection, about: 
     *ed.status = Notice::info(qymcad_i18n::tr("sk-mirror-done"));
 }
 
-/// THE MIRROR TAKES WHAT IS CHOSEN as what it reflects: the curves of the selection, which stays lit on screen. The
+/// THE MIRROR TAKES WHAT IS CHOSEN as what it reflects: the shapes of the selection, which stays lit on screen. The
 /// first click with the tool in hand and nothing held, a Shift + click and a box all choose through here.
-pub fn mirror_takes_the_choice(sel_sk: &mut SketchSelection, status: &mut Notice) {
-    sel_sk.mirror_of = sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
+pub fn mirror_takes_the_choice(project: &Project, si: usize, sel_sk: &mut SketchSelection, status: &mut Notice) {
+    sel_sk.mirror_of = shapes_chosen(project, si, sel_sk);
     *status = Notice::info(qymcad_i18n::tr(if sel_sk.mirror_of.is_empty() { "sk-mirror-pick-what" } else { "sk-mirror-pick-axis" }));
 }
 

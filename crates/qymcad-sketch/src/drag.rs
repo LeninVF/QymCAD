@@ -240,10 +240,9 @@ pub fn power_trim_sweep(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, prev: P
         let t = k as f32 / steps as f32;
         let at = egui::pos2(prev.x + (now.x - prev.x) * t, prev.y + (now.y - prev.y) * t);
         let w = qymcad_ui_state::to_world(&*sk.view, rect, at);
-        let hit = qymcad_pick::nearest_line_eid(&sk.pick(), rect, at, si)
-            .map(|e| (e, true))
-            .or_else(|| qymcad_pick::nearest_circle_entity(&sk.pick(), rect, at, si).or_else(|| qymcad_pick::nearest_curve_eid(&sk.pick(), rect, at, si)).map(|e| (e, false)));
-        let Some((eid, is_line)) = hit else { continue };
+        // the curve nearest the trail, of whatever kind, as a click takes it
+        let Some(eid) = qymcad_pick::edit_target(&sk.pick(), rect, at, si) else { continue };
+        let is_line = sk.project.sketches[si].entity(eid).is_some_and(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. }));
         // ONE SPAN, ONE CUT PER DRAG: the key is the entity plus the span that was hit. Without it a
         // trembling cursor standing still would go on trimming the neighbouring pieces.
         let span = trim_span_key(&*sk.project, si, eid, w.x, w.y);
@@ -597,8 +596,8 @@ pub fn sketch_drag_update(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Conte
                     // what to do next, not how many were chosen
                 }
                 // the box chooses what the mirror reflects, in either of its steps, as its Shift + click does
-                if sk.sel_sk.modify == Some(qymcad_ui_state::EditTool::Mirror) {
-                    qymcad_ui_state::mirror_takes_the_choice(&mut *sk.sel_sk, &mut *sk.status);
+                if let (Some(qymcad_ui_state::EditTool::Mirror), qymcad_ui_state::Sel::Sketch(si)) = (sk.sel_sk.modify, *sk.sel) {
+                    qymcad_ui_state::mirror_takes_the_choice(&*sk.project, si, &mut *sk.sel_sk, &mut *sk.status);
                 }
             }
             sk.tree_sel.box_start = None;
