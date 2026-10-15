@@ -1140,7 +1140,10 @@ pub(super) fn hermite_seg_adaptive(seg: HermiteSeg, t0: f64, t1: f64, a: Point2,
     let m = hermite_pt(p0, m0, p1, m1, tm);
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     let len2 = dx * dx + dy * dy;
-    let dev = if len2 < 1e-18 { m.dist(a) } else { (dx * (m.y - a.y) - dy * (m.x - a.x)).abs() / len2.sqrt() };
+    // the sag at a quarter, a half and three quarters of the piece: the middle alone is a blind spot at a turn of the
+    // curvature, where an S-shaped piece crosses its chord - measured 0.29 mm off on a span of 7 mm laid out by middles
+    let off = |q: Point2| if len2 < 1e-18 { q.dist(a) } else { (dx * (q.y - a.y) - dy * (q.x - a.x)).abs() / len2.sqrt() };
+    let dev = [0.25, 0.5, 0.75].iter().map(|k| off(hermite_pt(p0, m0, p1, m1, t0 + (t1 - t0) * k))).fold(0.0, f64::max);
     if depth == 0 || dev <= tol {
         out.push(b);
     } else {

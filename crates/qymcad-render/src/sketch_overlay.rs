@@ -8,7 +8,8 @@ pub fn draw_entity_xform(pick: &PickCtx, painter: &egui::Painter, rect: Rect, si
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
     use qymcad_core::model::EntityKind;
     let Some(s) = pick.project.sketches.get(si) else { return };
-    let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) else { return };
+    let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return };
+    let kind = e.kind.clone();
     let pt = |id: Id| {
         s.points.iter().find(|q| q.id == id).map(|q| {
             let (x, y) = f(q.x, q.y);
@@ -18,7 +19,7 @@ pub fn draw_entity_xform(pick: &PickCtx, painter: &egui::Painter, rect: Rect, si
     match kind {
         // a spline or an arc of an ellipse laid out where it stands, each of its points taken through the map
         EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
-            let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, &kind).iter().map(|p| f(p.x, p.y)).map(|(x, y)| sh.at(Point2::new(x, y))).collect();
+            let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).iter().map(|p| f(p.x, p.y)).map(|(x, y)| sh.at(Point2::new(x, y))).collect();
             painter.add(egui::Shape::line(line, stroke));
         }
         EntityKind::Line { a, b } => {
@@ -461,7 +462,7 @@ pub fn draw_sketch_constraints(pn: &Painting, painter: &egui::Painter, rect: Rec
         let hl = if sel { Stroke::new(2.5, pn.scheme.pal.emphasis()) } else { Stroke::new(2.0, pn.scheme.pal.preview()) };
         match e.kind {
             EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
-                let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, &e.kind).iter().map(|p| sh.at(*p)).collect();
+                let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).iter().map(|p| sh.at(*p)).collect();
                 painter.add(egui::Shape::line(line, hl));
             }
             EntityKind::Line { a, b } => {

@@ -794,17 +794,19 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                     };
                     // not a line (or the line did not work) - try a circle or an arc
                     let ok = ok
-                        || qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si).is_some_and(|eid| match sk.armed.click_op() {
-                            1 => sk.project.trim_curve(si, eid, w.x, w.y),
-                            2 => sk.project.extend_curve(si, eid, w.x, w.y),
-                            3 => sk.project.break_curve(si, eid, w.x, w.y),
-                            _ => false,
+                        || qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si).or_else(|| qymcad_pick::nearest_curve_eid(&sk.pick(), rect, pos, si)).is_some_and(|eid| {
+                            match sk.armed.click_op() {
+                                1 => sk.project.trim_curve(si, eid, w.x, w.y),
+                                2 => sk.project.extend_curve(si, eid, w.x, w.y),
+                                3 => sk.project.break_curve(si, eid, w.x, w.y),
+                                _ => false,
+                            }
                         });
                     if ok {
                         sk.sel_sk.clear(); // the selection and whatever was waiting for it
                         qymcad_ui_state::invalidate(&mut *sk.regen);
                         *sk.status = Notice::info(qymcad_i18n::tr("sk-done"));
-                    } else if line_eid.is_none() && qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si).is_none() {
+                    } else if line_eid.is_none() && qymcad_pick::nearest_curve_eid(&sk.pick(), rect, pos, si).is_none() {
                         *sk.status = Notice::info(qymcad_i18n::tr("sk-click-curve"));
                     } else {
                         *sk.status = Notice::refusal(qymcad_i18n::tr("sk-op-failed-no-intersection"));

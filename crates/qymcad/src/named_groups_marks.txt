@@ -129,7 +129,7 @@ crates/qymcad-core/src/model/bodies.rs 3 0 0
 crates/qymcad-core/src/model/comp_pattern.rs 1 6 0
 crates/qymcad-core/src/model/components.rs 7 3 0
 crates/qymcad-core/src/model/contours.rs 1 0 0
-crates/qymcad-core/src/model/curves.rs 18 6 1
+crates/qymcad-core/src/model/curves.rs 16 6 1
 crates/qymcad-core/src/model/drag.rs 1 3 0
 crates/qymcad-core/src/model/features.rs 8 1 2
 crates/qymcad-core/src/model/hash_ser.rs 0 0 1

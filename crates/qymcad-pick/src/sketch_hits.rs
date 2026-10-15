@@ -228,6 +228,24 @@ pub fn nearest_circle_entity(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -
     best.map(|(_, id)| id)
 }
 
+/// THE CURVE OF ANY KIND UNDER THE POINTER, within reach of a curve: the nearest by the points it is laid out by. What a
+/// tool that cuts or stretches a curve takes when no line and no circle is under the pointer - an ellipse, an arc of one,
+/// a spline.
+pub fn nearest_curve_eid(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
+    let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
+    let s = pick.project.sketches.get(si)?;
+    s.entities
+        .iter()
+        .map(|e| {
+            let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).into_iter().map(|p| sh.at(p)).collect();
+            let d = line.windows(2).map(|w| screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min);
+            (d, e.id)
+        })
+        .filter(|(d, _)| *d <= grab(pick.set, Grab::Curve))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, id)| id)
+}
+
 /// The circle or arc that the segment p1-p2 is ALMOST TANGENT to (the distance from the centre to the
 /// line is about the radius, and the point of tangency lies inside the segment). Returns (the Id of the
 /// centre, the radius). For the automatic tangency.

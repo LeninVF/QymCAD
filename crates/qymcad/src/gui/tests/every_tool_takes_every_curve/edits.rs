@@ -39,7 +39,10 @@ fn stretch(kind: &Kind) -> Option<Stretch> {
     match kind.name {
         "line" => Some(Stretch { end: Point2::new(8.0, 4.0), to: up }),
         "arc" => Some(Stretch { end: Point2::new(7.0, -3.0), to: [Point2::new(-4.0, -8.0), Point2::new(16.0, -8.0)] }),
-        "open spline" | "arc of an ellipse" => Some(Stretch { end: Point2::new(8.0, 1.0), to: up }),
+        "open spline" => Some(Stretch { end: Point2::new(8.0, 1.0), to: up }),
+        // the right end of the arc of the ellipse 8 by 4, where the line a millimetre below its centre cut it, round
+        // below to a level line 3 below the centre
+        "arc of an ellipse" => Some(Stretch { end: Point2::new(8.0 * (15.0f64 / 16.0).sqrt(), -1.0), to: [Point2::new(-4.0, -3.0), Point2::new(16.0, -3.0)] }),
         _ => None,
     }
 }
@@ -155,8 +158,8 @@ fn break_at(hand: &mut Hand, before: &Drawing) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether `p` lies on the way the curve goes on past its end: the line itself, the circle of the arc, the tangent of the
-/// end of a spline.
+/// Whether `p` lies on the way the curve goes on past its end: the line itself, the circle of the arc, the straight on
+/// from the end of a spline.
 fn on_the_way(kind: &Kind, path: &[Point2], p: Point2) -> bool {
     let (n, end) = (path.len(), path[path.len() - 1]);
     match kind.name {
@@ -165,10 +168,15 @@ fn on_the_way(kind: &Kind, path: &[Point2], p: Point2) -> bool {
             let c = centre_of([path[0], path[n / 2], end]);
             (p.dist(c) - path[0].dist(c)).abs() < NEAR
         }
+        // an arc of an ellipse goes on round its ellipse: 8 by 4 about the place of the kind
+        "arc of an ellipse" => (((p.x - AT.x) / 8.0).powi(2) + ((p.y - AT.y) / 4.0).powi(2) - 1.0).abs() < 2.0 * NEAR / 4.0,
+        // a spline goes on straight: the point lies on the line from its end, which leaves it the way its last piece
+        // runs - within the turn of that piece, the points of a spline being laid out 0.005 mm off it
         _ => {
-            let dir = end - path[n - 2];
-            let far = Point2::new(end.x + dir.x * 1e4, end.y + dir.y * 1e4);
-            off_path(p, &[end, far]) < NEAR
+            let run = p - end;
+            let last = end - path[n - 2];
+            let cross = (run.x * last.y - run.y * last.x).abs() / (run.len() * last.len()).max(1e-12);
+            run.x * last.x + run.y * last.y > 0.0 && cross < 0.1
         }
     }
 }

@@ -457,13 +457,9 @@ impl Project {
                 EntityKind::Line { a, b } => EntityKind::Line { a: m(a), b: m(b) },
                 EntityKind::Arc { center, a, b, ccw } => EntityKind::Arc { center: m(center), a: m(a), b: m(b), ccw: ccw != flips },
                 EntityKind::Circle { center, r } => EntityKind::Circle { center: m(center), r },
-                // an arc of an ellipse turns the other way through a mirror, as an arc of a circle does
-                EntityKind::Ellipse { c, ma, mi, span } => EntityKind::Ellipse {
-                    c: m(c),
-                    ma: m(ma),
-                    mi: m(mi),
-                    span: span.map(|s| EllipseSpan { from: m(s.from), to: m(s.to), winding: if flips { s.winding.reversed() } else { s.winding } }),
-                },
+                // an arc of an ellipse runs by the eccentric angle in the frame of its own axes: a mirror turns the frame over,
+                // and the arc with it, so its winding stays
+                EntityKind::Ellipse { c, ma, mi, span } => EntityKind::Ellipse { c: m(c), ma: m(ma), mi: m(mi), span: span.map(|s| EllipseSpan { from: m(s.from), to: m(s.to), winding: s.winding }) },
                 EntityKind::Spline { nodes, handles, ends } => {
                     EntityKind::Spline { nodes: nodes.iter().map(|id| m(*id)).collect(), handles: handles.iter().map(|h| Handle { arrive: turn(h.arrive), leave: turn(h.leave) }).collect(), ends }
                 }

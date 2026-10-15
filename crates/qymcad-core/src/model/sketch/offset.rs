@@ -1,6 +1,36 @@
 //! THE OFFSET OF CURVES of a sketch.
 
 use super::*;
+use crate::model::curve::Curve;
+
+/// THE OFFSETS OF THE CURVES OF `ents` THAT NO LOOP OR CHAIN OF LINES AND ARCS TAKES - an ellipse, an arc of one, a
+/// spline - by `dist`: outwards of a closed curve, as a circle grows by it, to the left of an open one; construction
+/// geometry left out, as the lines and arcs leave it.
+fn free_offsets(s: &Sketch, ents: &[SketchEntity], dist: f64) -> Vec<Curve> {
+    ents.iter()
+        .filter(|e| !e.construction)
+        .filter_map(|e| Curve::of(s, e))
+        .filter(|c| matches!(c, Curve::Oval { .. } | Curve::Spline { .. }))
+        .flat_map(|c| {
+            // a closed curve running counter-clockwise has its inside on its left
+            let left = if !c.closed() {
+                dist
+            } else if winds_counter_clockwise(&c) {
+                -dist
+            } else {
+                dist
+            };
+            c.offset(left)
+        })
+        .collect()
+}
+
+/// Whether a closed curve runs counter-clockwise: the area its laid out points enclose is positive.
+fn winds_counter_clockwise(c: &Curve) -> bool {
+    let p = c.polyline();
+    let n = p.len();
+    (0..n).map(|i| p[i].x * p[(i + 1) % n].y - p[(i + 1) % n].x * p[i].y).sum::<f64>() > 0.0
+}
 
 impl Project {
     /// Offset the selected entities: their closed loops are moved by `dist`, inwards or outwards, and added as
@@ -25,6 +55,7 @@ impl Project {
         for ch in entity_bulge_chains(&s.points, &ents) {
             out.extend(crate::offset::offset_bulge_open(&ch, dist).iter().map(|v| crate::offset::bulge_points(v, false)));
         }
+        out.extend(free_offsets(s, &ents, dist).iter().map(Curve::polyline));
         out
     }
 
@@ -164,6 +195,13 @@ impl Project {
                 self.sketches[si].constraints.extend(held);
                 count += 1;
             }
+        }
+        // AN ELLIPSE, AN ARC OF ONE, A SPLINE: each offset alone, as a spline within 0.01 mm of the true offset
+        // (`Curve::offset`)
+        let free = free_offsets(&self.sketches[si], &ents, dist);
+        for c in &free {
+            self.lay_curve(si, c, LayAs::default());
+            count += 1;
         }
         if count > 0 {
             self.regen_sketch(si);

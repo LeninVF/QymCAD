@@ -82,8 +82,21 @@ pub(crate) fn extend_click(sk: &mut qymcad_ui_state::SketchCtx, at: ExtendAt) {
     extend_apply(sk, at, held);
 }
 
-/// THE EXTENSION OF LINE `held` MADE as the pointer at `at` asks, and the line let go.
+/// THE EXTENSION OF CURVE `held` MADE as the pointer at `at` asks, and the curve let go: a line by its preview, a curve of
+/// another kind from its end nearer the pointer to the nearest curve on its way (`Project::extend_curve`).
 pub(crate) fn extend_apply(sk: &mut qymcad_ui_state::SketchCtx, at: ExtendAt, held: Id) {
+    if !sk.project.is_straight(at.si, held) {
+        let w = qymcad_ui_state::to_world(&*sk.view, at.rect, at.pos);
+        if sk.project.extend_curve(at.si, held, w.x, w.y) {
+            sk.tool.extend = None;
+            sk.sel_sk.clear();
+            qymcad_ui_state::invalidate(&mut *sk.regen);
+            *sk.status = qymcad_i18n::tr("sk-done");
+        } else {
+            *sk.status = qymcad_i18n::tr("sk-op-failed-no-intersection");
+        }
+        return;
+    }
     let ask = extend_ask(sk, at.rect, at.pos, at.si);
     let ext = sk.project.line_extension(at.si, held, &ask);
     if sk.project.extend_line_by(at.si, held, ext) {

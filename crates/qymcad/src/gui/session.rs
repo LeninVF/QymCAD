@@ -476,7 +476,7 @@ fn box_of_sketch(sk: &qymcad_core::model::Sketch, system: &std::collections::Has
             // a spline and an arc of an ellipse by the points they are laid out by: a handle pulls a spline past the box of
             // its nodes
             EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
-                for q in qymcad_ui_state::entity_outline(sk, &e.kind) {
+                for q in qymcad_ui_state::entity_outline(sk, e) {
                     take(q.x, q.y);
                 }
             }

@@ -1056,4 +1056,6 @@ mod solve;
 mod contours;
 mod profiles;
 mod pieces;
+mod crossings;
+pub use crossings::Crossing;
 pub use pieces::LayAs;

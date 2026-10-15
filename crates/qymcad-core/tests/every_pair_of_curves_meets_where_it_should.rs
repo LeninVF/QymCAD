@@ -328,14 +328,15 @@ fn every_kind_offset_stands_at_its_distance() {
         // an offset past it folds into a loop, whose points stand nearer the curve than the distance
         for d in [0.4, -0.3] {
             let label = format!("{} offset {d}", k.name);
-            let Some(off) = k.curve.offset(d) else {
-                failures.push(format!("{label}: no offset"));
+            let offsets = k.curve.offset(d);
+            let [off] = offsets.as_slice() else {
+                failures.push(format!("{label}: {} offsets, not one", offsets.len()));
                 continue;
             };
             let exact = matches!(k.curve, Curve::Line { .. } | Curve::Round { .. });
             let want_kind = if exact { kind_of(&k.curve) } else { "spline" };
-            if kind_of(&off) != want_kind || off.closed() != k.curve.closed() {
-                failures.push(format!("{label}: a {} (closed {}) came out, not a {want_kind}", kind_of(&off), off.closed()));
+            if kind_of(off) != want_kind || off.closed() != k.curve.closed() {
+                failures.push(format!("{label}: a {} (closed {}) came out, not a {want_kind}", kind_of(off), off.closed()));
             }
             // every point of the offset stands |d| from the curve, on the side asked for
             let tol = if exact { 1e-9 } else { OFFSET_TOLERANCE };
@@ -348,4 +349,41 @@ fn every_kind_offset_stands_at_its_distance() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn a_turned_ellipse_meets_its_axis_at_its_ends_and_misses_what_passes_by() {
+    let mut p = Project::default();
+    let si = p.new_sketch("s");
+    // the major axis along (1, 1), its end at (3, 3); the minor semi-axis 1
+    p.add_ellipse_entity(si, p2([0.0, 0.0]), 18f64.sqrt(), 1.0, std::f64::consts::FRAC_PI_4, Purpose::Real);
+    let ellipse = last(&p, si);
+    let axis = Curve::Line { a: p2([-4.0, -4.0]), b: p2([4.0, 4.0]) };
+    let found = axis.meet(&ellipse);
+    let hit = |at: Point2| found.iter().any(|m| m.at.dist(at) < 1e-9);
+    assert!(found.len() == 2 && hit(p2([3.0, 3.0])) && hit(p2([-3.0, -3.0])), "the axis meets the turned ellipse at {:?}", found.iter().map(|m| m.at).collect::<Vec<_>>());
+    // a line past it, and a circle inside it, meet it nowhere
+    let past = Curve::Line { a: p2([-5.0, 5.0]), b: p2([5.0, 15.0]) };
+    let inside = Curve::Round { centre: p2([0.0, 0.0]), r: 0.5, from: 0.0, sweep: std::f64::consts::TAU };
+    assert!(past.meet(&ellipse).is_empty() && inside.meet(&ellipse).is_empty(), "a line past the ellipse or a circle inside it meets it");
+}
+
+#[test]
+fn an_offset_past_the_bend_of_a_spline_has_its_loop_cut_away() {
+    use qymcad_core::model::curve::OFFSET_TOLERANCE;
+    let mut p = Project::default();
+    let si = p.new_sketch("s");
+    // the S of the matrix: its bends are tighter than 3 mm, where an offset of 3 folds into a loop
+    p.add_spline(si, vec![p2([-8.0, 0.0]), p2([-3.0, 4.0]), p2([3.0, -4.0]), p2([8.0, 1.0])], Ends::Open, Purpose::Real);
+    let s_curve = last(&p, si);
+    for d in [3.0, -3.0] {
+        let pieces = s_curve.offset(d);
+        assert!(pieces.len() >= 2, "offset {d}: the loop was not cut - {} piece", pieces.len());
+        // the pieces meet end to end at the corners, and no point of them stands nearer the curve than the distance
+        for w in pieces.windows(2) {
+            assert!(w[0].at(1.0).dist(w[1].at(0.0)) < 1e-9, "offset {d}: the pieces do not meet at their corner");
+        }
+        let nearest = pieces.iter().flat_map(|c| (0..=200).map(move |k| c.at(k as f64 / 200.0))).map(|q| s_curve.nearest(q).off).fold(f64::MAX, f64::min);
+        assert!(nearest > d.abs() - OFFSET_TOLERANCE, "offset {d}: a point of it stands {nearest:.3} from the curve");
+    }
 }

@@ -99,3 +99,38 @@ fn an_end_joined_to_other_geometry_is_not_extended() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// AN ARC WHOSE END IS JOINED TO OTHER GEOMETRY IS NOT EXTENDED from that end, as a line is not: a line (0, 0) - (20, 0)
+/// held at 20 long, an arc about (5, -15) starting on the line's left end, and a line at y = 0.5 across the way of the
+/// arc. Reported behaviour: Extend near the joined end answered "Done", moved the line to (0.936, 0.260) - (20.936,
+/// 0.260) and the centre to (5.006, -15.019), and the end of the arc stopped at y = 0.260, short of the line it was
+/// extended to.
+#[test]
+fn an_arc_whose_end_is_joined_to_a_line_is_not_extended() {
+    use qymcad_core::feature::Winding;
+    use qymcad_core::model::{Constraint, EndKept};
+    let mut p = Project::default();
+    p.new_document();
+    let si = p.new_sketch("S");
+    let line = p.add_line_entity(si, 0.0, 0.0, 20.0, 0.0, Purpose::Real);
+    let Some(qymcad_core::model::LineParts { a, b }) = p.sketches[si].entities.iter().find(|e| e.id == line).expect("the line").kind.as_line() else { panic!("a line") };
+    p.sketches[si].constraints.push(Constraint::Distance { a, b, d: 20.0, off: 3.0, expr: String::new(), driven: false, axis: 0, at: None });
+    p.add_line_entity(si, -30.0, 0.5, 30.0, 0.5, Purpose::Real);
+    let r = 250f64.sqrt();
+    p.add_arc_entity(si, Point2::new(5.0, -15.0), Point2::new(0.0, 0.0), Point2::new(5.0 - r, -15.0), Winding::Ccw, Purpose::Real);
+    let arc = p.sketches[si].entities.last().expect("the arc").id;
+    let Some(parts) = p.sketches[si].entities.iter().find(|e| e.id == arc).expect("the arc").kind.as_arc() else { panic!("an arc") };
+    assert!(parts.a == a || parts.b == a, "the arc does not start on the end of the line: the case is not joined");
+    let places = |p: &Project| p.sketches[si].points.iter().map(|q| (q.id, q.x.to_bits(), q.y.to_bits())).collect::<Vec<_>>();
+    let before = places(&p);
+    let ask = ExtendAsk { pointer: Point2::new(-0.5, -0.3), over: None, sides: ExtendSides::Nearer };
+    let ext = p.curve_extension(si, arc, &ask).expect("the arc is open");
+    let mut failures = Vec::new();
+    if !ext.goes.is_empty() || ext.kept != EndKept::Joined {
+        failures.push(format!("the joined end is asked to go {:?}, kept {:?}", ext.goes, ext.kept));
+    }
+    if p.extend_curve_by(si, arc, &ext) || places(&p) != before {
+        failures.push("extending the joined end of the arc moved the sketch".to_string());
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

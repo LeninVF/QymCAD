@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// The sketch `si` of the project; called only with an index the caller has just found a sketch at.
+fn s_of(p: &Project, si: usize) -> &Sketch {
+    &p.sketches[si]
+}
+
 impl Project {
     /// Trim segment `eid` at the clicked point: the segment is divided by its intersections with other
     /// entities and the piece containing the click is removed.
@@ -15,49 +20,9 @@ impl Project {
         if dlen2 < 1e-12 {
             return false;
         }
-        // Cut points from the intersections, as the parameter t along a to b.
-        let ents = self.sketches[si].entities.clone();
-        let mut cuts: Vec<f64> = Vec::new();
-        for e in &ents {
-            if e.id == eid {
-                continue; // Construction geometry is a valid trim boundary.
-            }
-            match e.kind {
-                // a spline takes no part in these crossings
-                EntityKind::Spline { .. } => {}
-                EntityKind::Line { a: c, b: d } => {
-                    if let (Some((cx, cy)), Some((dx, dy))) = (self.point_xy(si, c), self.point_xy(si, d)) {
-                        if let Some(t) = seg_seg_t([pax, pay], [pbx, pby], [cx, cy], [dx, dy]) {
-                            cuts.push(t);
-                        }
-                    }
-                }
-                EntityKind::Circle { center, r } => {
-                    if let Some((cx, cy)) = self.point_xy(si, center) {
-                        cuts.extend(seg_circle_t(pax, pay, pbx, pby, cx, cy, r));
-                    }
-                }
-                EntityKind::Ellipse { c, ma, mi, .. } => {
-                    if let (Some((ex, ey)), Some((mx, my)), Some((nx, ny))) = (self.point_xy(si, c), self.point_xy(si, ma), self.point_xy(si, mi)) {
-                        let (ux, uy, major, minor) = ellipse_axes(ex, ey, mx, my, nx, ny);
-                        cuts.extend(seg_ellipse_t([pax, pay], [pbx, pby], [ex, ey], [ux, uy], major, minor));
-                    }
-                }
-                EntityKind::Arc { center, a: aa, b: bb, ccw } => {
-                    if let (Some((cx, cy)), Some((sx, sy)), Some((ex, ey))) = (self.point_xy(si, center), self.point_xy(si, aa), self.point_xy(si, bb)) {
-                        let r = ((sx - cx).powi(2) + (sy - cy).powi(2)).sqrt();
-                        let a0 = (sy - cy).atan2(sx - cx);
-                        let a1 = (ey - cy).atan2(ex - cx);
-                        for t in seg_circle_t(pax, pay, pbx, pby, cx, cy, r) {
-                            let (ix, iy) = (pax + (pbx - pax) * t, pay + (pby - pay) * t);
-                            if angle_in_arc((iy - cy).atan2(ix - cx), a0, a1, ccw) {
-                                cuts.push(t);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Cut points from the intersections, as the parameter t along a to b: the places the other curves of the
+        // sketch meet it, construction geometry a boundary as well
+        let mut cuts: Vec<f64> = self.crossings_on(si, eid).into_iter().map(|x| x.t).filter(|t| *t > 1e-9 && *t < 1.0 - 1e-9).collect();
         if cuts.is_empty() {
             return self.trim_away_whole(si, eid);
         }
@@ -336,6 +301,10 @@ impl Project {
     /// was extended.
     pub fn extend_curve(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
         use std::f64::consts::TAU;
+        // a curve of another kind is stretched along its own way (`extend_piece`)
+        if !self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).is_some_and(|e| matches!(e.kind, EntityKind::Arc { .. })) {
+            return self.extend_piece(si, eid, Point2::new(clickx, clicky));
+        }
         // Arc geometry; the coordinates are copied to release the borrow before calling
         // `curve_cut_angles`.
         let (center, a, b, ccw, cx, cy, ax, ay, bx, by) = {
@@ -495,138 +464,21 @@ impl Project {
             _ => None,
         })
     }
-    /// Angles, about centre (cx, cy) with radius r, of the intersections with the other non-construction
-    /// entities of the sketch, excluding `eid_self`. These are the cut points of a circle or an arc.
+    /// Angles, about centre (cx, cy) with radius r, of the places the other curves of the sketch, construction geometry
+    /// included, meet the whole circle there, excluding `eid_self`. These are the cut points of a circle or an arc.
     pub(crate) fn curve_cut_angles(&self, si: usize, eid_self: Id, cx: f64, cy: f64, r: f64) -> Vec<f64> {
-        let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        let p = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-        let mut pts: Vec<(f64, f64)> = Vec::new();
-        for e in &s.entities {
-            if e.id == eid_self {
-                continue; // Construction geometry is a valid cut boundary for a curve.
-            }
-            match e.kind {
-                // a spline takes no part in these crossings
-                EntityKind::Spline { .. } => {}
-                EntityKind::Line { a, b } => {
-                    if let (Some((ax, ay)), Some((bx, by))) = (p(a), p(b)) {
-                        for t in seg_circle_t(ax, ay, bx, by, cx, cy, r) {
-                            pts.push((ax + (bx - ax) * t, ay + (by - ay) * t));
-                        }
-                    }
-                }
-                EntityKind::Circle { center, r: r2 } => {
-                    if let Some((c2x, c2y)) = p(center) {
-                        pts.extend(circle_circle_pts(cx, cy, r, c2x, c2y, r2));
-                    }
-                }
-                EntityKind::Arc { center, a, b, ccw } => {
-                    if let (Some((c2x, c2y)), Some((ax, ay)), Some((bx, by))) = (p(center), p(a), p(b)) {
-                        let r2 = ((ax - c2x).powi(2) + (ay - c2y).powi(2)).sqrt();
-                        let (a0, a1) = ((ay - c2y).atan2(ax - c2x), (by - c2y).atan2(bx - c2x));
-                        for (ix, iy) in circle_circle_pts(cx, cy, r, c2x, c2y, r2) {
-                            if angle_in_arc((iy - c2y).atan2(ix - c2x), a0, a1, ccw) {
-                                pts.push((ix, iy));
-                            }
-                        }
-                    }
-                }
-                EntityKind::Ellipse { c, ma, mi, .. } => {
-                    if let (Some((ex, ey)), Some((mx, my)), Some((nx, ny))) = (p(c), p(ma), p(mi)) {
-                        let (ux, uy, major, minor) = ellipse_axes(ex, ey, mx, my, nx, ny);
-                        pts.extend(circle_ellipse_pts([cx, cy], r, [ex, ey], [ux, uy], major, minor));
-                    }
-                }
-            }
-        }
-        let mut angs: Vec<f64> = pts.iter().map(|(x, y)| (y - cy).atan2(x - cx)).collect();
+        let full = crate::model::curve::Curve::Round { centre: Point2::new(cx, cy), r, from: 0.0, sweep: std::f64::consts::TAU };
+        let mut angs: Vec<f64> = self.meetings(si, &full, eid_self).iter().map(|x| (x.at.y - cy).atan2(x.at.x - cx)).collect();
         angs.sort_by(|a, b| a.total_cmp(b));
         angs.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
         angs
     }
-    /// Intersections of entity `eid` with the other entities (construction included) that lie on `eid`, in
-    /// world coordinates. Used for the hover preview of trim and break.
+    /// Intersections of entity `eid` with the other entities (construction included) that lie on `eid` - inside it for an
+    /// open curve - in world coordinates. Used for the hover preview of trim and break.
     pub fn entity_intersections(&self, si: usize, eid: Id) -> Vec<(f64, f64)> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) else { return Vec::new() };
-        let p = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-        let mut out: Vec<(f64, f64)> = Vec::new();
-        match kind {
-            // a spline takes no part in these crossings
-            EntityKind::Spline { .. } => {}
-            EntityKind::Line { a, b } => {
-                let (Some((ax, ay)), Some((bx, by))) = (p(a), p(b)) else { return out };
-                for o in &s.entities {
-                    if o.id == eid {
-                        continue;
-                    }
-                    match o.kind {
-                        // a spline takes no part in these crossings
-                        EntityKind::Spline { .. } => {}
-                        EntityKind::Line { a: c, b: d } => {
-                            if let (Some((cx, cy)), Some((dx, dy))) = (p(c), p(d)) {
-                                if let Some(t) = seg_seg_t([ax, ay], [bx, by], [cx, cy], [dx, dy]) {
-                                    if t > 1e-6 && t < 1.0 - 1e-6 {
-                                        out.push((ax + (bx - ax) * t, ay + (by - ay) * t));
-                                    }
-                                }
-                            }
-                        }
-                        EntityKind::Circle { center, r } => {
-                            if let Some((cx, cy)) = p(center) {
-                                for t in seg_circle_t(ax, ay, bx, by, cx, cy, r) {
-                                    if t > 1e-6 && t < 1.0 - 1e-6 {
-                                        out.push((ax + (bx - ax) * t, ay + (by - ay) * t));
-                                    }
-                                }
-                            }
-                        }
-                        EntityKind::Arc { center, a: aa, b: bb, ccw } => {
-                            if let (Some((cx, cy)), Some((sx, sy)), Some((ex, ey))) = (p(center), p(aa), p(bb)) {
-                                let r = ((sx - cx).powi(2) + (sy - cy).powi(2)).sqrt();
-                                let (a0, a1) = ((sy - cy).atan2(sx - cx), (ey - cy).atan2(ex - cx));
-                                for t in seg_circle_t(ax, ay, bx, by, cx, cy, r) {
-                                    let (ix, iy) = (ax + (bx - ax) * t, ay + (by - ay) * t);
-                                    if t > 1e-6 && t < 1.0 - 1e-6 && angle_in_arc((iy - cy).atan2(ix - cx), a0, a1, ccw) {
-                                        out.push((ix, iy));
-                                    }
-                                }
-                            }
-                        }
-                        EntityKind::Ellipse { c, ma, mi, .. } => {
-                            if let (Some((ex, ey)), Some((mx, my)), Some((nx, ny))) = (p(c), p(ma), p(mi)) {
-                                let (ux, uy, major, minor) = ellipse_axes(ex, ey, mx, my, nx, ny);
-                                for t in seg_ellipse_t([ax, ay], [bx, by], [ex, ey], [ux, uy], major, minor) {
-                                    if t > 1e-6 && t < 1.0 - 1e-6 {
-                                        out.push((ax + (bx - ax) * t, ay + (by - ay) * t));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            EntityKind::Circle { center, r } => {
-                if let Some((cx, cy)) = p(center) {
-                    for ang in self.curve_cut_angles(si, eid, cx, cy, r) {
-                        out.push((cx + r * ang.cos(), cy + r * ang.sin()));
-                    }
-                }
-            }
-            EntityKind::Arc { center, a, b, ccw } => {
-                if let (Some((cx, cy)), Some((ax, ay)), Some((bx, by))) = (p(center), p(a), p(b)) {
-                    let r = ((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt();
-                    let (a0, a1) = ((ay - cy).atan2(ax - cx), (by - cy).atan2(bx - cx));
-                    for ang in self.curve_cut_angles(si, eid, cx, cy, r) {
-                        if angle_in_arc(ang, a0, a1, ccw) {
-                            out.push((cx + r * ang.cos(), cy + r * ang.sin()));
-                        }
-                    }
-                }
-            }
-            EntityKind::Ellipse { .. } => {}
-        }
-        out
+        let closed = s.entities.iter().find(|e| e.id == eid).and_then(|e| crate::model::curve::Curve::of(s, e)).is_some_and(|c| c.closed());
+        self.crossings_on(si, eid).into_iter().filter(|x| closed || (x.t > 1e-6 && x.t < 1.0 - 1e-6)).map(|x| (x.at.x, x.at.y)).collect()
     }
     /// TRIM THAT LEAVES NOTHING: the click lay on an entity with no crossing inside it - a piece bounded by its own
     /// ends, or one crossing nothing at all. The whole of it is the piece under the click, so it goes, with what it
@@ -644,6 +496,10 @@ impl Project {
     }
     pub(crate) fn trim_curve_here(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
         use std::f64::consts::TAU;
+        // an ellipse, an arc of one, a spline: the piece under the click goes (`trim_piece`)
+        if !self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).is_some_and(|e| round_entity(s_of(self, si), e).is_some()) {
+            return self.trim_piece(si, eid, Point2::new(clickx, clicky));
+        }
         let Some(s) = self.sketches.get(si) else { return false };
         let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return false };
         let con = e.construction;
@@ -738,6 +594,10 @@ impl Project {
         self.cut_projection(si, eid, |p| p.break_curve_here(si, eid, clickx, clicky))
     }
     pub(crate) fn break_curve_here(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
+        // an ellipse, an arc of one, a spline: cut where it was clicked (`break_piece`)
+        if !self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).is_some_and(|e| round_entity(s_of(self, si), e).is_some()) {
+            return self.break_piece(si, eid, Point2::new(clickx, clicky));
+        }
         let Some(s) = self.sketches.get(si) else { return false };
         let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return false };
         let con = e.construction;

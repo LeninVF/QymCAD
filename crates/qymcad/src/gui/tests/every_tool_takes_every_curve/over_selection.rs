@@ -224,12 +224,21 @@ fn left(tool: Tool, change: &Change) -> Result<(), String> {
         Tool::LinearPattern => wanted(change, &[&same, &|p: Point2| p + Point2::new(20.0, 0.0), &|p: Point2| p + Point2::new(40.0, 0.0)]),
         Tool::CircularPattern => wanted(change, &[&same, &turned(CENTRE, 120.0), &turned(CENTRE, 240.0)]),
         Tool::Offset => {
-            let new = added(change);
-            let mut want: Vec<&str> = before.curves.iter().filter(|c| !c.construction).map(|c| offset_kind(c.kind)).collect();
-            let mut got: Vec<&str> = new.iter().map(|c| c.kind).collect();
+            // a construction curve gives a construction copy, not counted; a spline bending tighter than the distance
+            // gives several pieces, its loop cut away at the corner where they meet
+            let new: Vec<Curve> = added(change).into_iter().filter(|c| !c.construction).collect();
+            let mut want: Vec<&'static str> = before.curves.iter().filter(|c| !c.construction).map(|c| offset_kind(c.kind)).collect();
+            let mut got: Vec<&'static str> = new.iter().map(|c| c.kind).collect();
             want.sort_unstable();
             got.sort_unstable();
-            if want != got {
+            let pieces = |of: &[&'static str]| -> Vec<&'static str> {
+                let mut kinds: Vec<&'static str> = of.iter().copied().filter(|k| k.ends_with("spline")).collect();
+                kinds.dedup();
+                kinds
+            };
+            let others = |of: &[&'static str]| -> Vec<&'static str> { of.iter().copied().filter(|k| !k.ends_with("spline")).collect() };
+            let splines_enough = got.iter().filter(|k| k.ends_with("spline")).count() >= want.iter().filter(|k| k.ends_with("spline")).count();
+            if others(&want) != others(&got) || pieces(&want) != pieces(&got) || !splines_enough {
                 return Err(format!("the offset added {got:?}, not {want:?}"));
             }
             // the middle of each copy stands at the distance from the source; its ends, where copies meet past a sharp

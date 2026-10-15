@@ -49,32 +49,11 @@ pub fn sketch_plane_words(project: &qymcad_core::model::Project, plane: qymcad_c
     }
 }
 
-/// THE LENGTH OF CURVE `eid` of sketch `si`, mm: a line end to end, an arc along its span, a circle and an ellipse round
-/// their circle (the ellipse by Ramanujan's formula), a spline and an arc of an ellipse along the points they are laid
-/// out by.
+/// THE LENGTH OF CURVE `eid` of sketch `si`, mm: along the curve whatever its kind (`Curve::length`) - exact for a line
+/// and a round curve, along its laid out points otherwise.
 fn curve_length(project: &Project, si: usize, eid: Id) -> f64 {
-    use qymcad_core::model::EntityKind as EK;
     let Some(s) = project.sketches.get(si) else { return 0.0 };
-    let at = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).unwrap_or_default();
-    let dist = |p: (f64, f64), q: (f64, f64)| (q.0 - p.0).hypot(q.1 - p.1);
-    match s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) {
-        Some(EK::Line { a, b }) => dist(at(a), at(b)),
-        Some(EK::Arc { center, a, b, ccw }) => {
-            let (c, pa, pb) = (at(center), at(a), at(b));
-            let (a0, a1) = ((pa.1 - c.1).atan2(pa.0 - c.0), (pb.1 - c.1).atan2(pb.0 - c.0));
-            let sweep = if ccw { (a1 - a0).rem_euclid(std::f64::consts::TAU) } else { (a0 - a1).rem_euclid(std::f64::consts::TAU) };
-            dist(c, pa) * sweep
-        }
-        Some(EK::Circle { r, .. }) => std::f64::consts::TAU * r,
-        Some(kind @ EK::Ellipse { span: Some(_), .. }) => qymcad_ui_state::entity_outline(s, &kind).windows(2).map(|w| w[0].dist(w[1])).sum(),
-        Some(EK::Ellipse { c, ma, mi, span: None }) => {
-            let (x, y) = (dist(at(c), at(ma)), dist(at(c), at(mi)));
-            let h = ((x - y) / (x + y)).powi(2);
-            std::f64::consts::PI * (x + y) * (1.0 + 3.0 * h / (10.0 + (4.0 - 3.0 * h).sqrt()))
-        }
-        Some(kind @ EK::Spline { .. }) => qymcad_ui_state::entity_outline(s, &kind).windows(2).map(|w| w[0].dist(w[1])).sum(),
-        None => 0.0,
-    }
+    s.entities.iter().find(|e| e.id == eid).and_then(|e| qymcad_core::model::curve::Curve::of(s, e)).map_or(0.0, |c| c.length())
 }
 
 /// THE NAME OF A SKETCH ENTITY FOR A PERSON: "Line 3", "Circle 1".
@@ -123,31 +102,11 @@ pub fn sketch_export_edges(project: &qymcad_core::model::Project, si: usize) -> 
 /// intersections). It tells "the same segment we already cut" from "the next one" - without it, dragging
 /// along one line would trim only its first piece.
 pub fn trim_span_key(project: &qymcad_core::model::Project, si: usize, eid: Id, x: f64, y: f64) -> u32 {
-    let inter = project.entity_intersections(si, eid);
     let Some(s) = project.sketches.get(si) else { return 0 };
-    let Some(kind) = s.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()) else { return 0 };
-    let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
-    let pt = |id: Id| points_by_id.get(&id).copied().map(|q| (q.x, q.y));
-    match kind {
-        qymcad_core::model::EntityKind::Line { a, b } => {
-            let (Some((ax, ay)), Some((bx, by))) = (pt(a), pt(b)) else { return 0 };
-            let (dx, dy) = (bx - ax, by - ay);
-            let len2 = dx * dx + dy * dy;
-            if len2 < 1e-12 {
-                return 0;
-            }
-            let param = |px: f64, py: f64| ((px - ax) * dx + (py - ay) * dy) / len2;
-            let tc = param(x, y);
-            inter.iter().filter(|(ix, iy)| param(*ix, *iy) < tc).count() as u32
-        }
-        qymcad_core::model::EntityKind::Circle { center, .. } | qymcad_core::model::EntityKind::Arc { center, .. } => {
-            let Some((cx, cy)) = pt(center) else { return 0 };
-            let ang = |px: f64, py: f64| (py - cy).atan2(px - cx).rem_euclid(std::f64::consts::TAU);
-            let ac = ang(x, y);
-            inter.iter().filter(|(ix, iy)| ang(*ix, *iy) < ac).count() as u32
-        }
-        _ => 0,
-    }
+    let Some(c) = s.entities.iter().find(|e| e.id == eid).and_then(|e| qymcad_core::model::curve::Curve::of(s, e)) else { return 0 };
+    // the span is told by how many crossings stand before the place of the point along the curve
+    let tc = c.nearest(Point2::new(x, y)).t;
+    project.crossings_on(si, eid).iter().filter(|x| x.t < tc).count() as u32
 }
 
 /// READ WHAT WAS TYPED INTO A SKETCH FIELD: a number OR an expression over the global variables.
@@ -246,7 +205,7 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
         let d = match e.kind {
             // a spline and an arc of an ellipse by the points they are laid out by
             EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
-                let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, &e.kind).into_iter().map(|p| sh.at(p)).collect();
+                let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).into_iter().map(|p| sh.at(p)).collect();
                 line.windows(2).map(|w| qymcad_ui_state::screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min)
             }
             EntityKind::Line { a, b } => match (pt(a), pt(b)) {

@@ -126,9 +126,10 @@ pub enum EntityKind {
     Spline { nodes: Vec<Id>, handles: Vec<Handle>, ends: crate::feature::Ends },
 }
 
-/// THE STRETCH OF AN ELLIPSE AN ARC OF IT TAKES: from point `from` to point `to`, both held on the ellipse, the way
-/// `winding` goes round its centre. The points stand anywhere on the ellipse; the arc runs between their eccentric
-/// angles - the angle `t` of the point `c + a cos t u + b sin t v` of an ellipse of semi-axes `a`, `b` along `u`, `v`.
+/// THE STRETCH OF AN ELLIPSE AN ARC OF IT TAKES: from point `from` to point `to`, both held on the ellipse. The arc runs
+/// between their eccentric angles - the angle `t` of the point `c + a cos t u + b sin t v` of an ellipse of semi-axes
+/// `a`, `b` along `u` (to its major end) and `v` (to its minor end) - the way `winding` goes: `Ccw` the way `t` grows,
+/// from the major end towards the minor one. Taken through a mirror the axes turn over, and the arc with them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EllipseSpan {
     pub from: Id,
@@ -334,59 +335,6 @@ pub(crate) fn line_ellipse_roots(a: [f64; 2], b: [f64; 2], c: [f64; 2], u: [f64;
     }
     let sq = disc.sqrt();
     vec![(-bb - sq) / (2.0 * aa), (-bb + sq) / (2.0 * aa)]
-}
-
-/// Parameters t along the segment `a-b`, within [0,1] plus an endpoint tolerance, where it crosses an
-/// ellipse.
-pub(crate) fn seg_ellipse_t(a: [f64; 2], b: [f64; 2], c: [f64; 2], u: [f64; 2], major: f64, minor: f64) -> Vec<f64> {
-    line_ellipse_roots(a, b, c, u, major, minor).into_iter().filter(|&t| t > -1e-9 && t < 1.0 + 1e-9).collect()
-}
-
-/// Intersection points of a circle (cx, cy, r) with an ellipse (centre ce, major-axis unit vector u,
-/// semi-axes `major` and `minor`).
-///
-/// There is no closed form (the equation is a quartic), so the roots of f(t) = |E(t) - c|^2 - r^2 are
-/// found numerically over the ellipse parameter, refining each sign-change interval by bisection. Up to
-/// four points.
-pub(crate) fn circle_ellipse_pts(c: [f64; 2], r: f64, ce: [f64; 2], u: [f64; 2], major: f64, minor: f64) -> Vec<(f64, f64)> {
-    let ([cx, cy], [cex, cey], [ux, uy]) = (c, ce, u);
-    use std::f64::consts::TAU;
-    let (vx, vy) = (-uy, ux);
-    let e = |th: f64| {
-        let (ct, st) = (th.cos(), th.sin());
-        (cex + major * ct * ux + minor * st * vx, cey + major * ct * uy + minor * st * vy)
-    };
-    let f = |th: f64| {
-        let (ex, ey) = e(th);
-        (ex - cx).powi(2) + (ey - cy).powi(2) - r * r
-    };
-    let n = 256;
-    let mut out: Vec<(f64, f64)> = Vec::new();
-    let mut prev_th = 0.0_f64;
-    let mut prev = f(0.0);
-    for k in 1..=n {
-        let th = TAU * k as f64 / n as f64;
-        let cur = f(th);
-        if prev == 0.0 {
-            out.push(e(prev_th));
-        } else if prev * cur < 0.0 {
-            let (mut lo, mut hi, mut flo) = (prev_th, th, prev);
-            for _ in 0..60 {
-                let mid = 0.5 * (lo + hi);
-                let fm = f(mid);
-                if flo * fm <= 0.0 {
-                    hi = mid;
-                } else {
-                    lo = mid;
-                    flo = fm;
-                }
-            }
-            out.push(e(0.5 * (lo + hi)));
-        }
-        prev_th = th;
-        prev = cur;
-    }
-    out
 }
 
 /// Intersection points of two circles (cx1, cy1, r1) and (cx2, cy2, r2): zero, one or two points.

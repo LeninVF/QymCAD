@@ -375,48 +375,11 @@ pub fn lineage_of(project: &qymcad_core::model::Project, id: Option<Id>) -> Line
     Lineage { built_on, dependents: project.dependents_of(id).into_iter().map(name_of).collect() }
 }
 
-/// THE OUTLINE OF A SKETCH ENTITY as a polyline in sketch coordinates: a line its two ends, a circle, an arc and an
-/// ellipse 48 pieces of themselves, a spline the points it is laid out by - enough for a box to tell touched from missed
-/// at any zoom a box is drawn at.
-pub fn entity_outline(s: &qymcad_core::model::Sketch, kind: &qymcad_core::model::EntityKind) -> Vec<Point2> {
-    use qymcad_core::model::EntityKind;
-    let pt = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y));
-    let ring = |c: Point2, u: (f64, f64), v: (f64, f64), a0: f64, sweep: f64| -> Vec<Point2> {
-        (0..=48)
-            .map(|i| {
-                let t = a0 + sweep * i as f64 / 48.0;
-                Point2::new(c.x + u.0 * t.cos() + v.0 * t.sin(), c.y + u.1 * t.cos() + v.1 * t.sin())
-            })
-            .collect()
-    };
-    match *kind {
-        EntityKind::Spline { ref nodes, ref handles, ends } => match nodes.iter().map(|id| pt(*id)).collect::<Option<Vec<Point2>>>() {
-            Some(at) => qymcad_core::model::spline_line(&at, handles, ends),
-            None => Vec::new(),
-        },
-        EntityKind::Line { a, b } => [pt(a), pt(b)].into_iter().flatten().collect(),
-        EntityKind::Circle { center, r } => pt(center).map(|c| ring(c, (r, 0.0), (0.0, r), 0.0, std::f64::consts::TAU)).unwrap_or_default(),
-        EntityKind::Arc { center, a, b, ccw } => match (pt(center), pt(a), pt(b)) {
-            (Some(c), Some(pa), Some(pb)) => {
-                let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
-                let (a0, a1) = ((pa.y - c.y).atan2(pa.x - c.x), (pb.y - c.y).atan2(pb.x - c.x));
-                let mut sweep = (a1 - a0).rem_euclid(std::f64::consts::TAU);
-                if !ccw {
-                    sweep -= std::f64::consts::TAU;
-                }
-                ring(c, (r, 0.0), (0.0, r), a0, sweep)
-            }
-            _ => Vec::new(),
-        },
-        EntityKind::Ellipse { c, ma, mi, span: None } => match (pt(c), pt(ma), pt(mi)) {
-            (Some(c), Some(pa), Some(pi)) => ring(c, (pa.x - c.x, pa.y - c.y), (pi.x - c.x, pi.y - c.y), 0.0, std::f64::consts::TAU),
-            _ => Vec::new(),
-        },
-        EntityKind::Ellipse { c, ma, mi, span: Some(s) } => match (pt(c), pt(ma), pt(mi), pt(s.from), pt(s.to)) {
-            (Some(c), Some(pa), Some(pi), Some(from), Some(to)) => qymcad_core::model::ellipse_arc_line([c, pa, pi], [from, to], s.winding),
-            _ => Vec::new(),
-        },
-    }
+/// THE OUTLINE OF A SKETCH ENTITY as a polyline in sketch coordinates: the points its curve is laid out by
+/// (`Curve::polyline`), within 0.005 mm of it - a line its two ends - enough for a box to tell touched from missed at any
+/// zoom, and for a curve to be drawn and picked where it lies.
+pub fn entity_outline(s: &qymcad_core::model::Sketch, e: &qymcad_core::model::SketchEntity) -> Vec<Point2> {
+    qymcad_core::model::curve::Curve::of(s, e).map(|c| c.polyline()).unwrap_or_default()
 }
 
 /// Does the segment p-q cross the box [x0, x1] x [y0, y1] (screen)? Tested against the four sides; an end inside is
@@ -445,7 +408,7 @@ pub fn box_select_sketch(ed: Editing, sel_sk: &mut SketchSelection, rect: Rect, 
         let Some(s) = ed.project.sketches.get(si) else { return };
         // THE SHAPE ITSELF IS TESTED, not its ends: a line that crosses the box with both ends outside is touched, and
         // a circle is inside only when all of it is, not its centre alone
-        let pts_of = |e: &qymcad_core::model::SketchEntity| -> Vec<Pos2> { entity_outline(s, &e.kind).into_iter().map(|p| sh.at(p)).collect() };
+        let pts_of = |e: &qymcad_core::model::SketchEntity| -> Vec<Pos2> { entity_outline(s, e).into_iter().map(|p| sh.at(p)).collect() };
         for e in &s.entities {
             let pts = pts_of(e);
             if pts.is_empty() {

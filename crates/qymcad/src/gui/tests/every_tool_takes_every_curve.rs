@@ -102,7 +102,27 @@ pub(super) const KINDS: &[Kind] = &[
         }),
         curves: 1,
     },
-    Kind { name: "arc of an ellipse", draw: None, curves: 1 },
+    // no tool draws an arc of an ellipse: a person draws the ellipse, a line across it a millimetre below its centre, trims
+    // the smaller piece below the line away and deletes the line
+    Kind {
+        name: "arc of an ellipse",
+        draw: Some(|h, c| {
+            h.sk_tool(8);
+            clicks(h, c, &[Point2::new(0.0, 0.0), Point2::new(8.0, 0.0), Point2::new(0.0, 4.0)]);
+            h.key(egui::Key::Escape);
+            h.sk_tool(1);
+            clicks(h, c, &[Point2::new(-12.0, -1.0), Point2::new(12.0, -1.0)]);
+            h.key(egui::Key::Escape).key(egui::Key::Escape);
+            assert!(h.press_hint(&crate::i18n::tr("tb-trim-hint")), "no trim button");
+            h.close_window();
+            h.click2d(c.x, c.y - 4.0);
+            h.key(egui::Key::Escape);
+            h.sk_tool(0);
+            h.click2d(c.x + 11.0, c.y - 1.0);
+            h.key(egui::Key::Delete);
+        }),
+        curves: 1,
+    },
     Kind {
         name: "open spline",
         draw: Some(|h, c| {
@@ -208,14 +228,14 @@ pub(super) fn drawing(app: &App) -> Drawing {
                     let sweep = if ccw { (tb - ta).rem_euclid(std::f64::consts::TAU) } else { -(ta - tb).rem_euclid(std::f64::consts::TAU) };
                     ("arc", round(Turn { centre: c, radii: Point2::new(r, r), rot: 0.0, from: ta, sweep }))
                 }
-                EntityKind::Ellipse { span: Some(_), .. } => ("arc of an ellipse", qymcad_ui_state::entity_outline(s, &e.kind)),
+                EntityKind::Ellipse { span: Some(_), .. } => ("arc of an ellipse", qymcad_ui_state::entity_outline(s, e)),
                 EntityKind::Ellipse { c, ma, mi, span: None } => {
                     let (pc, pa, pi) = (at(c), at(ma), at(mi));
                     let turn = Turn { centre: pc, radii: Point2::new(pc.dist(pa), pc.dist(pi)), rot: (pa.y - pc.y).atan2(pa.x - pc.x), from: 0.0, sweep: std::f64::consts::TAU };
                     ("ellipse", round(turn))
                 }
                 EntityKind::Spline { ends, .. } => {
-                    let mut line = qymcad_ui_state::entity_outline(s, &e.kind);
+                    let mut line = qymcad_ui_state::entity_outline(s, e);
                     let closed = ends == qymcad_core::feature::Ends::Closed;
                     if closed {
                         line.extend(line.first().copied());

@@ -223,7 +223,7 @@ pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: 
                 }
             }
             qymcad_core::model::EntityKind::Spline { .. } | qymcad_core::model::EntityKind::Ellipse { span: Some(_), .. } => {
-                let pts: Vec<Pos2> = qymcad_ui_state::entity_outline(s, &e.kind).iter().map(|p| sh.at(*p)).collect();
+                let pts: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).iter().map(|p| sh.at(*p)).collect();
                 if pts.len() >= 2 {
                     painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, aux_col), 6.0, 4.0));
                 }

@@ -110,12 +110,14 @@ impl Curve {
         }
     }
 
-    /// The span of a spline place `t` lies in, and the share of that span's parameter.
+    /// The span of a spline place `t` lies in, and the share of that span's parameter. The end of the curve is the end
+    /// of its last span: `n - 1e-15` rounds back to `n` past 8 spans, and a 4 096-span offset answered the start of its
+    /// last span at `t = 1`, 0.3 mm short of its end.
     fn span_of(&self, t: f64) -> SpanAt {
         let n = self.spans().max(1);
-        let x = (t.clamp(0.0, 1.0) * n as f64).min(n as f64 - 1e-15);
-        let k = x.floor() as usize;
-        SpanAt { span: k.min(n - 1), s: x - k as f64 }
+        let x = t.clamp(0.0, 1.0) * n as f64;
+        let k = (x.floor() as usize).min(n - 1);
+        SpanAt { span: k, s: x - k as f64 }
     }
 
     /// The Hermite segment of span `k` of a spline.
@@ -328,20 +330,24 @@ impl Curve {
     }
 
     /// The place `t` near `start` where the curve is nearest to `p`, by Newton's steps on the derivative of the squared
-    /// distance, held within the curve.
+    /// distance, held within the curve - on a closed curve going on round past its start: a point 0.001 of the way
+    /// before the start of a closed spline, held at 0 by the end of the curve, was answered 0.025 mm off it.
     fn polish(&self, p: Point2, start: f64) -> f64 {
+        let closed = self.closed();
+        let hold = |t: f64| if closed { t.rem_euclid(1.0) } else { t.clamp(0.0, 1.0) };
         let mut t = start;
         let h = 1e-6;
         for _ in 0..30 {
             let f = |t: f64| {
-                let (q, v) = (self.at(t), self.velocity(t));
+                let (q, v) = (self.at(hold(t)), self.velocity(hold(t)));
                 (q.x - p.x) * v.x + (q.y - p.y) * v.y
             };
-            let (g, dg) = (f(t), (f((t + h).min(1.0)) - f((t - h).max(0.0))) / (2.0 * h));
+            let (lo, hi) = if closed { (t - h, t + h) } else { ((t - h).max(0.0), (t + h).min(1.0)) };
+            let (g, dg) = (f(t), (f(hi) - f(lo)) / (hi - lo));
             if dg.abs() < 1e-18 {
                 break;
             }
-            let next = (t - g / dg).clamp(0.0, 1.0);
+            let next = hold(t - g / dg);
             if (next - t).abs() < 1e-14 {
                 t = next;
                 break;

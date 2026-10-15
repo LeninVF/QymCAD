@@ -239,7 +239,9 @@ pub fn power_trim_sweep(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, prev: P
         let t = k as f32 / steps as f32;
         let at = egui::pos2(prev.x + (now.x - prev.x) * t, prev.y + (now.y - prev.y) * t);
         let w = qymcad_ui_state::to_world(&*sk.view, rect, at);
-        let hit = qymcad_pick::nearest_line_eid(&sk.pick(), rect, at, si).map(|e| (e, true)).or_else(|| qymcad_pick::nearest_circle_entity(&sk.pick(), rect, at, si).map(|e| (e, false)));
+        let hit = qymcad_pick::nearest_line_eid(&sk.pick(), rect, at, si)
+            .map(|e| (e, true))
+            .or_else(|| qymcad_pick::nearest_circle_entity(&sk.pick(), rect, at, si).or_else(|| qymcad_pick::nearest_curve_eid(&sk.pick(), rect, at, si)).map(|e| (e, false)));
         let Some((eid, is_line)) = hit else { continue };
         // ONE SPAN, ONE CUT PER DRAG: the key is the entity plus the span that was hit. Without it a
         // trembling cursor standing still would go on trimming the neighbouring pieces.
