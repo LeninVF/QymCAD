@@ -64,6 +64,7 @@ pub fn sketch_drag_start(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Contex
                             | Some(qymcad_core::model::Constraint::Diameter { .. })
                             | Some(qymcad_core::model::Constraint::ArcLength { .. })
                             | Some(qymcad_core::model::Constraint::EdgeDistance { .. })
+                            | Some(qymcad_core::model::Constraint::CurveDistance { .. })
                             | Some(qymcad_core::model::Constraint::Angle { .. })
                             | Some(qymcad_core::model::Constraint::AngleLines { .. })
                     ) {
@@ -326,18 +327,10 @@ pub fn resolve_dim_ref(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
     if let Some((a, b)) = qymcad_pick::nearest_line_entity(&sk.pick(), rect, pos, si) {
         return Some(qymcad_ui_state::DimRef::Line(a, b));
     }
-    // 2b) a circle or arc under the cursor (a click on the rim) resolves to its CENTRE as a point
-    // reference, openly rather than silently: the dimension is taken from the centre. The status line
-    // says so.
-    if let Some(eid) = qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si) {
-        let center = sk.project.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).and_then(|e| match e.kind {
-            qymcad_core::model::EntityKind::Circle { center, .. } | qymcad_core::model::EntityKind::Arc { center, .. } => Some(center),
-            _ => None,
-        });
-        if let Some(c) = center {
-            *sk.status = Notice::info(qymcad_i18n::tr("g-dim-from-centre"));
-            return Some(qymcad_ui_state::DimRef::Point(c));
-        }
+    // 2b) a curve of any other kind under the cursor - a circle, an arc, an ellipse, a spline - is the curve itself: a
+    // distance to it is the least one, to its rim, as the person sees it measured
+    if let Some(eid) = qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si).or_else(|| qymcad_pick::nearest_curve_eid(&sk.pick(), rect, pos, si)) {
+        return Some(qymcad_ui_state::DimRef::Curve(eid));
     }
     // 3) a coordinate axis
     let o = (qymcad_ui_state::Sheet { view: *sk.view, rect }).at(Point2::new(0.0, 0.0));
@@ -485,6 +478,16 @@ pub fn sketch_drag_update(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Conte
                                 _ => 0.0,
                             }
                         }
+                        // a distance to a curve: `off` runs square to the line between the places it is measured at
+                        Some(c @ Constraint::CurveDistance { .. }) => {
+                            if let Some([p1, p2]) = sk.project.curve_distance_ends(si, &c) {
+                                let dir = (sh.at(p2) - sh.at(p1)).normalized();
+                                let perp = egui::vec2(-dir.y, dir.x);
+                                (dl.x * perp.x + dl.y * perp.y) as f64
+                            } else {
+                                0.0
+                            }
+                        }
                         // a tangent distance: `off` runs along the perpendicular to the line of centres c1-c2
                         Some(Constraint::EdgeDistance { c1, c2, .. }) => {
                             if let (Some(p1), Some(p2)) = (qymcad_ui_state::sketch_pt(&*sk.project, si, c1), qymcad_ui_state::sketch_pt(&*sk.project, si, c2)) {
@@ -501,8 +504,10 @@ pub fn sketch_drag_update(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Conte
                                                             // THE TEXT GOES ALONG THE LINE TOO: the part of the move along the dimension line carries the text
                                                             // there, past an arrow onto a shelf, while the part across it moves the line
                     let led = qymcad_ui_state::linear_text_led(&*sk.project, si, ci, &sh, sk.set, dl);
-                    if let Some(Constraint::Distance { off, at, .. }) | Some(Constraint::DistancePL { off, at, .. }) | Some(Constraint::EdgeDistance { off, at, .. }) =
-                        sk.project.sketches[si].constraints.get_mut(ci)
+                    if let Some(Constraint::Distance { off, at, .. })
+                    | Some(Constraint::DistancePL { off, at, .. })
+                    | Some(Constraint::EdgeDistance { off, at, .. })
+                    | Some(Constraint::CurveDistance { off, at, .. }) = sk.project.sketches[si].constraints.get_mut(ci)
                     {
                         *off += dadd;
                         if led.is_some() {

@@ -749,6 +749,14 @@ fn remap_point_id(s: &mut Sketch, from: Id, to: Id) {
                 r(ma);
                 r(mi);
             }
+            Constraint::PointOnCurve { p, on } => {
+                r(p);
+                on.each_point_mut(&r);
+            }
+            Constraint::TangentCurves { one, other, .. } | Constraint::CurveDistance { from: one, to: other, .. } => {
+                one.each_point_mut(&r);
+                other.each_point_mut(&r);
+            }
             Constraint::Concentric { c1, c2 } => {
                 r(c1);
                 r(c2);

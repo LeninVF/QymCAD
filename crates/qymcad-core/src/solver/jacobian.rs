@@ -282,6 +282,9 @@ pub(crate) fn con_jac(c: &Constraint, x: &[f64], x0: &[f64], idx: &HashMap<Id, u
                 (vy(cc), -(dp.1 + dma.1 + dmi.1)),
             ]);
         }
+        Constraint::PointOnCurve { .. } | Constraint::TangentCurves { .. } | Constraint::CurveDistance { .. } => {
+            out.push(curve_rows::numeric_row(c, &curve_rows::Now { x, idx, ridx }).iter().map(|s| (s.var, s.by)).collect())
+        }
         Constraint::ArcLength { c: cc, a, b, ccw, .. } => {
             let ((cx, cy), (ax, ay), (bx, by)) = (g(cc), g(a), g(b));
             let (rx, ry) = (ax - cx, ay - cy);
@@ -529,6 +532,9 @@ pub(crate) fn con_rows(c: &Constraint, x: &[f64], x0: &[f64], idx: &HashMap<Id, 
                 let (s, t) = ((d.0 * a.0 + d.1 * a.1) / a2, (d.0 * b.0 + d.1 * b.1) / b2);
                 r.push(ellipse_scale(x0, [idx[&c], idx[&ma], idx[&mi]]) * (s * s + t * t - 1.0));
             }
+            Constraint::PointOnCurve { p, ref on } => r.push(curve_rows::point_off(&curve_rows::Now { x, idx, ridx }, p, on)),
+            Constraint::CurveDistance { ref from, ref to, d, .. } => r.push(curve_rows::distance_row(&curve_rows::Now { x, idx, ridx }, [from, to], d)),
+            Constraint::TangentCurves { ref one, ref other, near, end } => r.push(curve_rows::touch_row(&curve_rows::Now { x, idx, ridx }, [one, other], near, end)),
             Constraint::ArcLength { c, a, b, ccw, len, .. } => {
                 // arc length = R·θ, with R = |c→a| and θ the angle swept from a to b in the `ccw` direction
                 let (cx, cy) = g(c);
@@ -576,6 +582,15 @@ fn ellipse_scale(x0: &[f64], at: [usize; 3]) -> f64 {
 /// does not see it, and the degree-of-freedom count does not drop. Rejecting it outright is better than
 /// accepting it and not counting it.
 pub(crate) fn cons_ok(c: &Constraint, has: &impl Fn(Id) -> bool, is_center: &impl Fn(Id) -> bool) -> bool {
+    // a curve of a constraint can be read: its points there, a circle's centre the centre of one, a spline of two nodes
+    let curve_ok = |on: &crate::model::CurveRef| {
+        let readable = match on {
+            crate::model::CurveRef::Round { c } | crate::model::CurveRef::Arc { c, .. } => is_center(*c),
+            crate::model::CurveRef::Spline { nodes, .. } => nodes.len() >= 2,
+            _ => true,
+        };
+        readable && on.points().into_iter().all(has)
+    };
     match *c {
         Constraint::Fixed { p } => has(p),
         Constraint::Horizontal { a, b } | Constraint::Vertical { a, b } | Constraint::Orientation { a, b, .. } | Constraint::Coincident { a, b } | Constraint::Distance { a, b, .. } => {
@@ -596,6 +611,8 @@ pub(crate) fn cons_ok(c: &Constraint, has: &impl Fn(Id) -> bool, is_center: &imp
         Constraint::CircleTangent { c1, c2, .. } => has(c1) && has(c2),
         Constraint::PointOnCircle { p, c } => has(p) && has(c) && is_center(c),
         Constraint::PointOnEllipse { p, c, ma, mi } => has(p) && has(c) && has(ma) && has(mi),
+        Constraint::PointOnCurve { p, ref on } => has(p) && curve_ok(on),
+        Constraint::TangentCurves { ref one, ref other, .. } | Constraint::CurveDistance { from: ref one, to: ref other, .. } => curve_ok(one) && curve_ok(other),
         Constraint::Concentric { c1, c2 } => has(c1) && has(c2),
         Constraint::ArcLength { c, a, b, .. } => has(c) && has(a) && has(b),
         Constraint::AngleLines { a, b, c, d, .. } => has(a) && has(b) && has(c) && has(d),

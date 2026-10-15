@@ -314,6 +314,16 @@ pub fn constraint_glyphs(pick: &PickCtx, rect: Rect, si: usize) -> Vec<(usize, P
             }
             Constraint::PointOnCircle { p, .. } => push(&mut out, ci, pt(p).map(|q| sh.at(q) + egui::vec2(8.0, 8.0)), Gly::PointOnCircle),
             Constraint::Concentric { c1, .. } => push(&mut out, ci, pt(c1).map(|q| sh.at(q) + egui::vec2(8.0, 8.0)), Gly::Concentric),
+            // a point on a curve of any kind shows as a point on a circle does; two curves touching show the sign of a
+            // touching at the end they touch at, or half way between the first points of the two, as two circles
+            // touching show it half way between their centres
+            Constraint::PointOnCurve { p, .. } | Constraint::PointOnEllipse { p, .. } => push(&mut out, ci, pt(p).map(|q| sh.at(q) + egui::vec2(8.0, 8.0)), Gly::PointOnCircle),
+            Constraint::TangentCurves { end: Some(p), .. } => push(&mut out, ci, pt(p).map(|q| sh.at(q) + egui::vec2(8.0, -8.0)), Gly::Tangent),
+            Constraint::TangentCurves { ref one, ref other, .. } => {
+                if let (Some(&a), Some(&b)) = (one.points().first(), other.points().first()) {
+                    push(&mut out, ci, mid(a, b), Gly::Tangent);
+                }
+            }
             _ => {}
         }
     }

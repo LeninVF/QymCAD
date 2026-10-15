@@ -124,6 +124,7 @@ impl Project {
             Constraint::Diameter { c: c1, .. } => vec![*c1],
             Constraint::DistancePL { p, a, b, .. } => vec![*p, *a, *b],
             Constraint::EdgeDistance { c1, c2, .. } => vec![*c1, *c2],
+            Constraint::CurveDistance { from, to, .. } => from.points().into_iter().chain(to.points()).collect(),
             Constraint::ArcLength { c: c1, a, b, .. } => vec![*c1, *a, *b],
             _ => return None,
         })
@@ -132,7 +133,7 @@ impl Project {
     /// Value of a dimensional constraint (length, angle, diameter). `None` when it is not a dimension.
     pub fn dim_value_of(c: &Constraint) -> Option<f64> {
         Some(match c {
-            Constraint::Distance { d, .. } | Constraint::Diameter { d, .. } | Constraint::DistancePL { d, .. } | Constraint::EdgeDistance { d, .. } => *d,
+            Constraint::Distance { d, .. } | Constraint::Diameter { d, .. } | Constraint::DistancePL { d, .. } | Constraint::EdgeDistance { d, .. } | Constraint::CurveDistance { d, .. } => *d,
             Constraint::Angle { deg, .. } | Constraint::AngleLines { deg, .. } => *deg,
             Constraint::ArcLength { len, .. } => *len,
             _ => return None,
@@ -155,7 +156,10 @@ impl Project {
                 // An entered value overrides the expression: a typed number has to stay, instead of losing
                 // to the previous formula on the next evaluation.
                 match self.sketches[si].constraints.get_mut(ci) {
-                    Some(Constraint::Distance { d, expr, .. }) | Some(Constraint::Diameter { d, expr, .. }) | Some(Constraint::EdgeDistance { d, expr, .. }) => {
+                    Some(Constraint::Distance { d, expr, .. })
+                    | Some(Constraint::Diameter { d, expr, .. })
+                    | Some(Constraint::EdgeDistance { d, expr, .. })
+                    | Some(Constraint::CurveDistance { d, expr, .. }) => {
                         *d = v;
                         expr.clear();
                     }
@@ -366,7 +370,7 @@ impl Project {
                         Ok(v) => *d = if *d < 0.0 { -v.abs() } else { v.abs() }, // keep the side
                         Err(e) => errs.push((expr.clone(), e)),
                     },
-                    Constraint::Diameter { d, expr, .. } if !expr.trim().is_empty() => match eval(expr, &vars) {
+                    Constraint::Diameter { d, expr, .. } | Constraint::CurveDistance { d, expr, .. } if !expr.trim().is_empty() => match eval(expr, &vars) {
                         Ok(v) => *d = v,
                         Err(e) => errs.push((expr.clone(), e)),
                     },
@@ -401,7 +405,12 @@ impl Project {
     /// follows the pointer and constrained geometry resists.
     pub fn solve_sketch_drag(&mut self, si: usize, drag: Option<(Id, f64, f64)>) -> f64 {
         self.eval_parameters(); // Parametric dimensions become values before the solve.
-        self.solve_sketch_inner(si, drag, crate::solver::Budget::FULL, sketch::Rebuild::Whole)
+        let resid = self.solve_sketch_inner(si, drag, crate::solver::Budget::FULL, sketch::Rebuild::Whole);
+        // a touching the solve carried past an end of a line or a spline is held at that end, and solved again
+        if self.touchings_held_at_ends(si) {
+            return self.solve_sketch_inner(si, drag, crate::solver::Budget::FULL, sketch::Rebuild::Whole);
+        }
+        resid
     }
 
     /// Solve a sketch within `budget`: what is left when its time is out stands as it stood and is counted in

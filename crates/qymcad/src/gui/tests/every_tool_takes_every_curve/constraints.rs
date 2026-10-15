@@ -56,6 +56,9 @@ enum Holds {
     OneLine,
     /// the point stands in the middle of the curve
     Middle,
+    /// the constraint makes no sense on what is picked - a level spline, two parallel circles: none is laid, the
+    /// drawing stays, and the status line refuses in words
+    Refused,
 }
 
 /// A SHAPE DRAWN BY HAND for a constraint case.
@@ -323,6 +326,14 @@ const CASES: &[Case] = &[
         holds: Holds::Middle,
         drag: p([52.0, 29.0]),
     },
+    // no sense on these: the window refuses, in words, and the drawing stays
+    Case { name: "an open spline", code: 1, first: spline_right, second: nothing, picks: &[Pick::First], holds: Holds::Refused, drag: p([56.0, 26.0]) },
+    Case { name: "a circle", code: 2, first: circle_left, second: nothing, picks: &[Pick::First], holds: Holds::Refused, drag: p([30.0, 30.0]) },
+    Case { name: "two circles", code: 3, first: circle_left, second: circle_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([52.0, 31.0]) },
+    Case { name: "a line and an arc", code: 4, first: line_left, second: arc_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([52.0, 29.0]) },
+    Case { name: "two lines", code: 8, first: line_left, second: line_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([58.0, 40.0]) },
+    Case { name: "a line and an open spline", code: 5, first: line_left, second: spline_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([56.0, 26.0]) },
+    Case { name: "two arcs", code: 7, first: arc_left, second: arc_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([52.0, 29.0]) },
 ];
 
 /// THE SHAPES OF A CASE DRAWN BY HAND, and what of them a cell reads: the curves of each shape and the points picked.
@@ -409,13 +420,15 @@ fn way_of(c: &Curve) -> Point2 {
 }
 
 /// THE WHOLE CURVE A CONSTRAINT TIES TO: the circle of an arc - a point put on an arc, or a line made to touch it, may
-/// stand past its ends, as in every sketcher - and the curve itself for any other kind.
+/// stand past its ends, as in every sketcher - and the curve itself for any other kind. A round curve is read at 720
+/// points: read at the 96 it is drawn by, the place two touching circles meet was a 96th of a turn off, and the ways of
+/// the two there 2.6 deg apart.
 fn whole(c: &Curve) -> Vec<Point2> {
-    if c.kind != "arc" {
+    if !matches!(c.kind, "arc" | "circle") {
         return c.path.clone();
     }
     let (m, r) = (centre(c), centre(c).dist(c.path[0]));
-    (0..=96).map(|k| f64::from(k) / 96.0 * std::f64::consts::TAU).map(|t| Point2::new(m.x + r * t.cos(), m.y + r * t.sin())).collect()
+    (0..=720).map(|k| f64::from(k) / 720.0 * std::f64::consts::TAU).map(|t| Point2::new(m.x + r * t.cos(), m.y + r * t.sin())).collect()
 }
 
 /// The distance from `p` to the whole line through a straight.
@@ -424,14 +437,27 @@ fn off_line(p: Point2, c: &Curve) -> f64 {
     ((p.x - a.x) * w.y - (p.y - a.y) * w.x).abs()
 }
 
-/// The direction of a curve at `p`: square to the radius of a round curve, along the segment of any other.
+/// The direction of a curve at `p`: square to the radius of a round curve, along a line, and on any other curve square to
+/// the radius of the circle through the three points of it about `p` - along one segment it tilted by half the turn of
+/// the curve over the segment, 10 deg at the end of an ellipse 14 by 4.
 fn tangent_of(c: &Curve, p: Point2) -> Point2 {
+    let square_to = |m: Point2| {
+        let r = m.dist(p);
+        Point2::new(-(p.y - m.y) / r, (p.x - m.x) / r)
+    };
     if matches!(c.kind, "arc" | "circle") {
-        let (m, r) = (centre(c), centre(c).dist(p));
-        return Point2::new(-(p.y - m.y) / r, (p.x - m.x) / r);
+        return square_to(centre(c));
     }
+    let n = c.path.len();
     let k = c.path.windows(2).enumerate().min_by(|a, b| off_path(p, a.1).total_cmp(&off_path(p, b.1))).map_or(0, |(k, _)| k);
-    let (a, b) = (c.path[k], c.path[(k + 1).min(c.path.len() - 1)]);
+    if c.kind != "line" && n >= 3 {
+        let k = (0..n).min_by(|a, b| c.path[*a].dist(p).total_cmp(&c.path[*b].dist(p))).unwrap_or(0).clamp(1, n - 2);
+        let [a, m, b] = [c.path[k - 1], c.path[k], c.path[k + 1]];
+        if ((m.x - a.x) * (b.y - a.y) - (m.y - a.y) * (b.x - a.x)).abs() > 1e-12 {
+            return square_to(centre_of([a, m, b]));
+        }
+    }
+    let (a, b) = (c.path[k], c.path[(k + 1).min(n - 1)]);
     let l = a.dist(b).max(1e-12);
     Point2::new((b.x - a.x) / l, (b.y - a.y) / l)
 }
@@ -510,6 +536,7 @@ fn holds(case: &Case, laid: &Laid, d: &Drawing) -> Result<(), String> {
             let (p, c) = (pt(0)?, b()?);
             close(p.dist(share_along(&c.path, 0.5)), "the point from the middle")
         }
+        Holds::Refused => Ok(()),
     }
 }
 
@@ -529,6 +556,8 @@ fn place_of(hand: &mut Hand, laid: &Laid, pick: Pick) -> Result<Point2, String> 
 /// ONE CASE LAID ONE WAY: the constraint holds, and holds again with a point of the geometry dragged.
 fn tie(case: &Case, way: Way) -> Result<(), String> {
     let Ready { mut app, laid } = lay(case)?;
+    let constraints = |a: &App| a.project.sketches.iter().map(|s| s.constraints.len()).sum::<usize>();
+    let (laid_before, drawn_before) = (constraints(&app), drawing(&app));
     let mut hand = Hand::new(&mut app);
     let places = case.picks.iter().map(|k| place_of(&mut hand, &laid, *k)).collect::<Result<Vec<_>, _>>()?;
     hand.sk_tool(0);
@@ -546,6 +575,14 @@ fn tie(case: &Case, way: Way) -> Result<(), String> {
         hand.constraint(case.code);
     }
     let said = |hand: &Hand, why: String| format!("{why}; the status line says {:?}", hand.app.status);
+    if matches!(case.holds, Holds::Refused) {
+        let (laid_now, drawn_now) = (constraints(hand.app), drawing(hand.app));
+        let moved = drawn_before.curves.iter().zip(&drawn_now.curves).any(|(x, y)| x.path.iter().zip(&y.path).any(|(p, q)| p.dist(*q) > NEAR));
+        return match (laid_now == laid_before, moved, hand.app.status.tone == qymcad_ui_state::Tone::Refusal) {
+            (true, false, true) => Ok(()),
+            _ => Err(said(&hand, format!("laid {} constraints, the drawing moved {moved}", laid_now - laid_before))),
+        };
+    }
     holds(case, &laid, &drawing(hand.app)).map_err(|why| said(&hand, why))?;
     // a point of the geometry dragged: what the constraint ties goes with it
     let d = drawing(hand.app);

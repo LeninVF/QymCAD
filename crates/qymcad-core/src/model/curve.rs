@@ -81,12 +81,14 @@ impl Curve {
                 };
                 Curve::Oval { centre: pc, major, minor, from, sweep }
             }
-            EntityKind::Spline { nodes, handles, ends } => {
-                let pts: Vec<Point2> = nodes.iter().map(|id| at(*id)).collect::<Option<_>>()?;
-                let tangents = (0..pts.len()).map(|i| tess::spline_tangents_at(&pts, handles, i, *ends)).collect();
-                Curve::Spline { nodes: pts, tangents, ends: *ends }
-            }
+            EntityKind::Spline { nodes, handles, ends } => Curve::spline(nodes.iter().map(|id| at(*id)).collect::<Option<_>>()?, handles, *ends),
         })
+    }
+
+    /// THE SPLINE THROUGH `nodes` with `handles`, open or closed, as the sketch draws it.
+    pub fn spline(nodes: Vec<Point2>, handles: &[Handle], ends: crate::feature::Ends) -> Curve {
+        let tangents = (0..nodes.len()).map(|i| tess::spline_tangents_at(&nodes, handles, i, ends)).collect();
+        Curve::Spline { nodes, tangents, ends }
     }
 
     /// Whether the curve closes on itself: a whole circle, a whole ellipse, a closed spline.

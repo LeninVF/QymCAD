@@ -157,10 +157,14 @@ pub fn sketch_select_click(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos:
             }
         }
     }
-    // a deferred constraint or operation: apply it as soon as the selection is enough
+    // a deferred constraint or operation: apply it as soon as the selection is enough; a pick it can never take is let go
+    // and said, the constraint still waiting
     if let Some(code) = sk.sel_sk.constraint {
         if try_constraint(sk, code) {
             sk.sel_sk.constraint = None;
+        } else if !pick_could_take(&*sk.project, si, &*sk.sel_sk, code) {
+            sk.sel_sk.items.pop();
+            *sk.status = Notice::refusal(qymcad_i18n::tr1("sk-constraint-not-for-pick", "takes", &qymcad_i18n::tr(constraint_hint_key(code))));
         }
     }
     // THE OFFSET GATHERS ITS CURVES: a click adds to what it will offset, and Enter offsets them (`sketch_tool_keys`)

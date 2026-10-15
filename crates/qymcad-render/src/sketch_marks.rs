@@ -323,6 +323,27 @@ pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: 
                 let _ = d;
                 linear_text(ci, label.clone(), dim_col);
             }
+            Constraint::CurveDistance { off: doff, .. } => {
+                // a distance to a curve of any kind: between the places the two come nearest, led off square to it
+                let Some([e1, e2]) = pn.project.curve_distance_ends(si, c) else { continue };
+                let (sa, sb) = (sh.at(e1), sh.at(e2));
+                let dir = (sb - sa).normalized();
+                let perp = egui::vec2(-dir.y, dir.x);
+                let off = perp * (16.0 + doff as f32 * sc);
+                let (la, lb) = (sa + off, sb + off);
+                painter.line_segment([sa, la], Stroke::new(0.7, dim_col));
+                painter.line_segment([sb, lb], Stroke::new(0.7, dim_col));
+                painter.line_segment([la, lb], Stroke::new(1.2, dim_col));
+                let along = (lb - la).normalized();
+                let arrow = |at: egui::Pos2, way: egui::Vec2| {
+                    let t = way * 6.0;
+                    painter.line_segment([at, at - t + perp * 2.5], Stroke::new(1.0, dim_col));
+                    painter.line_segment([at, at - t - perp * 2.5], Stroke::new(1.0, dim_col));
+                };
+                arrow(la, along);
+                arrow(lb, -along);
+                linear_text(ci, label.clone(), dim_col);
+            }
             Constraint::DistancePL { p, a, b, d, off: doff, .. } => {
                 // the distance from point p to the line a->b: a perpendicular from p to its foot on the line
                 let (Some(pp), Some(pa)) = (qymcad_ui_state::sketch_pt(pn.project, si, p), qymcad_ui_state::sketch_pt(pn.project, si, a)) else { continue };

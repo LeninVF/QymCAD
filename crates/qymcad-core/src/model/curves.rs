@@ -377,6 +377,7 @@ impl Constraint {
             | Constraint::DistancePL { expr, .. }
             | Constraint::Diameter { expr, .. }
             | Constraint::EdgeDistance { expr, .. }
+            | Constraint::CurveDistance { expr, .. }
             | Constraint::Angle { expr, .. }
             | Constraint::AngleLines { expr, .. }
             | Constraint::ArcLength { expr, .. } => Some(expr).filter(|e| !e.is_empty()).map(|e| e.as_str()),
@@ -393,6 +394,7 @@ impl Constraint {
             | Constraint::DistancePL { expr, .. }
             | Constraint::Diameter { expr, .. }
             | Constraint::EdgeDistance { expr, .. }
+            | Constraint::CurveDistance { expr, .. }
             | Constraint::Angle { expr, .. }
             | Constraint::AngleLines { expr, .. }
             | Constraint::ArcLength { expr, .. } => Some(expr),
@@ -439,6 +441,8 @@ pub fn constraint_point_ids(c: &Constraint) -> Vec<Id> {
         Constraint::CircleTangent { c1, c2, .. } => vec![c1, c2],
         Constraint::PointOnCircle { p, c } => vec![p, c],
         Constraint::PointOnEllipse { p, c, ma, mi } => vec![p, c, ma, mi],
+        Constraint::PointOnCurve { p, ref on } => std::iter::once(p).chain(on.points()).collect(),
+        Constraint::TangentCurves { ref one, ref other, .. } | Constraint::CurveDistance { from: ref one, to: ref other, .. } => one.points().into_iter().chain(other.points()).collect(),
         Constraint::Concentric { c1, c2 } => vec![c1, c2],
         Constraint::ArcLength { c, a, b, .. } => vec![c, a, b],
     }
@@ -469,6 +473,43 @@ pub fn entity_ends(e: &SketchEntity) -> Option<[Id; 2]> {
         EntityKind::Ellipse { span: Some(s), .. } => Some([s.from, s.to]),
         EntityKind::Spline { nodes, ends: crate::feature::Ends::Open, .. } => Some([*nodes.first()?, *nodes.last()?]),
         _ => None,
+    }
+}
+
+/// THE CENTRE OF A ROUND CURVE OR OF AN ELLIPSE: a circle's, an arc's, an ellipse's or an arc of one's.
+pub fn entity_centre(e: &SketchEntity) -> Option<Id> {
+    match &e.kind {
+        EntityKind::Circle { center, .. } | EntityKind::Arc { center, .. } => Some(*center),
+        EntityKind::Ellipse { c, .. } => Some(*c),
+        _ => None,
+    }
+}
+
+/// THE FRAME OF AN ELLIPSE OR OF AN ARC OF ONE: its centre, the end of its major axis, the end of its minor axis.
+pub fn ellipse_frame(e: &SketchEntity) -> Option<[Id; 3]> {
+    match &e.kind {
+        EntityKind::Ellipse { c, ma, mi, .. } => Some([*c, *ma, *mi]),
+        _ => None,
+    }
+}
+
+/// THE CURVE OF AN ENTITY AS A CONSTRAINT SEES IT: a line by its ends, a circle or an arc by its centre, an ellipse or an
+/// arc of one by its frame - whole, as a constraint ties to the whole curve - a spline by its nodes and handles.
+pub fn curve_ref_of(e: &SketchEntity) -> CurveRef {
+    match &e.kind {
+        EntityKind::Line { a, b } => CurveRef::Line { a: *a, b: *b },
+        EntityKind::Circle { center, .. } | EntityKind::Arc { center, .. } => CurveRef::Round { c: *center },
+        EntityKind::Ellipse { c, ma, mi, .. } => CurveRef::Oval { c: *c, ma: *ma, mi: *mi },
+        EntityKind::Spline { nodes, handles, ends } => CurveRef::Spline { nodes: nodes.clone(), handles: handles.clone(), ends: *ends },
+    }
+}
+
+/// THE CURVE OF AN ENTITY AS IT IS DRAWN, for a dimension measuring to it: an arc between its ends, any other as a
+/// constraint sees it (`curve_ref_of`).
+pub fn curve_ref_drawn(e: &SketchEntity) -> CurveRef {
+    match &e.kind {
+        EntityKind::Arc { center, a, b, ccw } => CurveRef::Arc { c: *center, a: *a, b: *b, winding: if *ccw { crate::feature::Winding::Ccw } else { crate::feature::Winding::Cw } },
+        _ => curve_ref_of(e),
     }
 }
 
@@ -560,6 +601,14 @@ pub(crate) fn remap_constraint_point(c: &mut Constraint, from: Id, to: Id) {
             fix(c);
             fix(ma);
             fix(mi);
+        }
+        Constraint::PointOnCurve { p, on } => {
+            fix(p);
+            on.each_point_mut(fix);
+        }
+        Constraint::TangentCurves { one, other, .. } | Constraint::CurveDistance { from: one, to: other, .. } => {
+            one.each_point_mut(fix);
+            other.each_point_mut(fix);
         }
         Constraint::ArcLength { c, a, b, .. } => {
             fix(c);

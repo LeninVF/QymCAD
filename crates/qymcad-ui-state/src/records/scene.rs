@@ -329,12 +329,14 @@ pub enum TreeClip {
     Feature { nid: Id },
 }
 
-/// A reference for the dimension tool: a point or a straight line (a line or an axis). A dimension between two
-/// references: point to point, point to line (a perpendicular), line to a parallel line, or to an axis.
+/// A reference for the dimension tool: a point, a straight line (a line or an axis), or a curve of any other kind by its
+/// entity. A dimension between two references: point to point, point to line (a perpendicular), line to a parallel
+/// line, or to an axis, and the least distance to a curve.
 #[derive(Clone, Copy, PartialEq)]
 pub enum DimRef {
     Point(Id),
     Line(Id, Id),
+    Curve(Id),
 }
 
 /// A base edge for building tangents (a tangent arc or a tangent circle): either a straight line (with ends a

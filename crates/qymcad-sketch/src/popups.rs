@@ -873,9 +873,10 @@ pub fn dim_editor(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context, rect
     let (cur_val, cur_expr, is_driven, is_angle) = match sk.project.sketches[si].constraints.get(ci) {
         // `DistancePL` stores a SIGNED d (which side); the magnitude is what gets shown and edited
         Some(Constraint::DistancePL { d, expr, driven, .. }) => (d.abs(), expr.clone(), driven, false),
-        Some(Constraint::Distance { d, expr, driven, .. }) | Some(Constraint::Diameter { d, expr, driven, .. }) | Some(Constraint::EdgeDistance { d, expr, driven, .. }) => {
-            (*d, expr.clone(), driven, false)
-        }
+        Some(Constraint::Distance { d, expr, driven, .. })
+        | Some(Constraint::Diameter { d, expr, driven, .. })
+        | Some(Constraint::EdgeDistance { d, expr, driven, .. })
+        | Some(Constraint::CurveDistance { d, expr, driven, .. }) => (*d, expr.clone(), driven, false),
         Some(Constraint::ArcLength { len, expr, driven, .. }) => (*len, expr.clone(), driven, false),
         Some(Constraint::Angle { deg, expr, driven, .. }) | Some(Constraint::AngleLines { deg, expr, driven, .. }) => (*deg, expr.clone(), driven, true),
         _ => {
@@ -1081,7 +1082,8 @@ pub fn dim_editor(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context, rect
                 | Constraint::Diameter { driven, .. }
                 | Constraint::AngleLines { driven, .. }
                 | Constraint::ArcLength { driven, .. }
-                | Constraint::EdgeDistance { driven, .. } => *driven = !*driven,
+                | Constraint::EdgeDistance { driven, .. }
+                | Constraint::CurveDistance { driven, .. } => *driven = !*driven,
                 _ => {}
             }
             changed = true;

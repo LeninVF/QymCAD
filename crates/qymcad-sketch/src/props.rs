@@ -116,6 +116,7 @@ pub fn sketch_props(pr: &mut qymcad_ui_state::PropsCtx, ui: &mut egui::Ui, si: u
                         | Constraint::ArcLength { .. }
                         | Constraint::Diameter { .. }
                         | Constraint::EdgeDistance { .. }
+                        | Constraint::CurveDistance { .. }
                 );
                 // which redundant ones to mark is decided by ONE rule, shared with the canvas glyphs
                 let redun_geom = flagged.contains(&ci);

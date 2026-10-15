@@ -454,11 +454,11 @@ fn middles_for(project: &mut Project, si: usize, sel_sk: &mut qymcad_ui_state::S
 /// Tangency alone touches the circle with the straight line the segment lies on: a line apart from the circle turned to
 /// it and stayed apart. Reported behaviour: "the line is not lengthened; with the centre of the line picked, the line is
 /// not carried onto the circle by its middle". None where the foot already falls on the line.
-fn touch_point(project: &mut Project, si: usize, sel_sk: &qymcad_ui_state::SketchSelection, (a, b): (Id, Id), centre: Id) -> Option<Id> {
+fn touch_point(project: &mut Project, si: usize, sel_sk: &qymcad_ui_state::SketchSelection, (a, b): (Id, Id), toward: Point2) -> Option<Id> {
     if sel_sk.at_middle.iter().any(|&e| line_ends_of(project, si, e) == Some((a, b))) {
         return Some(qymcad_ui_state::materialize_ref(project, si, qymcad_ui_state::SketchRef::Midpoint(a, b)));
     }
-    let (pa, pb, c) = (qymcad_ui_state::sketch_pt(project, si, a)?, qymcad_ui_state::sketch_pt(project, si, b)?, qymcad_ui_state::sketch_pt(project, si, centre)?);
+    let (pa, pb, c) = (qymcad_ui_state::sketch_pt(project, si, a)?, qymcad_ui_state::sketch_pt(project, si, b)?, toward);
     let (dx, dy) = (pb.x - pa.x, pb.y - pa.y);
     let len2 = dx * dx + dy * dy;
     if len2 < 1e-18 {

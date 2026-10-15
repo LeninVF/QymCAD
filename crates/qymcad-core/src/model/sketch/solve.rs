@@ -100,6 +100,8 @@ impl Project {
         let mut radii = self.entity_radii(si);
         let intrinsics = self.entity_intrinsics(si);
         let Some(s) = self.sketches.get_mut(si) else { return 0.0 };
+        splines_held_follow(s);
+        touchings_follow(s, &radii);
         // where the points stood before anything of this solve moved them, for what it rebuilds after it
         let at_start: Vec<(f64, f64)> = s.points.iter().map(|p| (p.x, p.y)).collect();
         // THE CENTRE OF A RECTANGLE DRAWN BY ITS CORNERS FOLLOWS THE CORNERS: it is put on the middle of the diagonal
@@ -374,14 +376,29 @@ impl Project {
     /// Update the values of the reference (driven) dimensions from the current geometry: they measure rather
     /// than constrain.
     pub(crate) fn update_driven_dims(&mut self, si: usize) {
+        let radii = self.entity_radii(si);
         let Some(s) = self.sketches.get_mut(si) else { return };
+        // a reference distance to a curve of any kind measures between the places the curves come nearest
+        let points = s.points.clone();
+        for c in &mut s.constraints {
+            if let Constraint::CurveDistance { from, to, d, driven: true, .. } = c {
+                if let Some([a, b]) = crate::solver::distance_ends(&points, &radii, [from, to]) {
+                    *d = a.dist(b);
+                }
+            }
+        }
         let pos: std::collections::HashMap<Id, (f64, f64)> = s.points.iter().map(|p| (p.id, (p.x, p.y))).collect();
-        // Circle radii by centre, for reference diameter and radius dimensions.
+        // The radii of the circles and the arcs by centre, for reference diameter and radius dimensions: an arc's from its
+        // first end. Of circles alone, a reference radius of an arc kept the value it was laid with.
         let crad: std::collections::HashMap<Id, f64> = s
             .entities
             .iter()
             .filter_map(|e| match e.kind {
                 EntityKind::Circle { center, r } => Some((center, r)),
+                EntityKind::Arc { center, a, .. } => {
+                    let ((cx, cy), (ax, ay)) = (pos.get(&center)?, pos.get(&a)?);
+                    Some((center, (ax - cx).hypot(ay - cy)))
+                }
                 _ => None,
             })
             .collect();
@@ -607,5 +624,42 @@ impl Project {
         let made = self.replace_contours(old, pairs, &near);
         self.sketches[si].contour_ids = kept.into_iter().chain(made).collect();
         self.laid_follows(si, laid, changed, gone);
+    }
+}
+
+/// THE SPLINES A CONSTRAINT HOLDS TO, AS THEY ARE NOW: a constraint keeps the handles and the ends of a spline it was laid
+/// with, and a handle dragged since would leave it holding the curve as it was. The spline is found by its nodes.
+fn splines_held_follow(s: &mut Sketch) {
+    let shapes: Vec<EntityKind> = s.entities.iter().filter(|e| matches!(e.kind, EntityKind::Spline { .. })).map(|e| e.kind.clone()).collect();
+    if shapes.is_empty() {
+        return;
+    }
+    let follow = |on: &mut CurveRef| {
+        if let CurveRef::Spline { nodes, handles, ends } = on {
+            if let Some(EntityKind::Spline { handles: now, ends: e, .. }) = shapes.iter().find(|k| matches!(k, EntityKind::Spline { nodes: n, .. } if n == nodes)) {
+                (*handles, *ends) = (now.clone(), *e);
+            }
+        }
+    };
+    for c in s.constraints.iter_mut() {
+        match c {
+            Constraint::PointOnCurve { on, .. } => follow(on),
+            Constraint::TangentCurves { one, other, .. } => {
+                follow(one);
+                follow(other);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// WHERE CURVES MADE TO TOUCH TOUCH NOW, written into their constraints before a solve: the solve takes the place of
+/// touching nearest it, and two curves that could touch at more places than one keep touching where they did.
+fn touchings_follow(s: &mut Sketch, radii: &[crate::solver::RadiusVar]) {
+    let points = s.points.clone();
+    for c in s.constraints.iter_mut() {
+        if let Constraint::TangentCurves { one, other, near, end: None } = c {
+            *near = crate::solver::touching_places(&points, radii, [one, other], *near).or(*near);
+        }
     }
 }

@@ -209,7 +209,8 @@ pub(super) fn along(seg: [Point2; 2], t: f64) -> Point2 {
 }
 
 /// A CURVE READ AT 512 EVEN PLACES ALONG IT, a closed one back to its start: the outline it is drawn by stands its
-/// points up to 0.95 mm apart along a spline, and the way of the curve read off three of them was 1.2 deg off.
+/// points up to 0.95 mm apart along a spline, and the way of the curve read off three of them was 1.2 deg off; an
+/// ellipse read at 96 stood them 0.9 mm apart round an end bending at 1.4 mm.
 fn dense(s: &qymcad_core::model::Sketch, e: &qymcad_core::model::SketchEntity) -> Vec<Point2> {
     qymcad_core::model::curve::Curve::of(s, e).map(|c| (0..=512).map(|k| c.at(k as f64 / 512.0)).collect()).unwrap_or_default()
 }
@@ -235,11 +236,7 @@ pub(super) fn drawing(app: &App) -> Drawing {
                     ("arc", round(Turn { centre: c, radii: Point2::new(r, r), rot: 0.0, from: ta, sweep }))
                 }
                 EntityKind::Ellipse { span: Some(_), .. } => ("arc of an ellipse", dense(s, e)),
-                EntityKind::Ellipse { c, ma, mi, span: None } => {
-                    let (pc, pa, pi) = (at(c), at(ma), at(mi));
-                    let turn = Turn { centre: pc, radii: Point2::new(pc.dist(pa), pc.dist(pi)), rot: (pa.y - pc.y).atan2(pa.x - pc.x), from: 0.0, sweep: std::f64::consts::TAU };
-                    ("ellipse", round(turn))
-                }
+                EntityKind::Ellipse { span: None, .. } => ("ellipse", dense(s, e)),
                 EntityKind::Spline { ends, .. } => {
                     let closed = ends == qymcad_core::feature::Ends::Closed;
                     (if closed { "closed spline" } else { "open spline" }, dense(s, e))

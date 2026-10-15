@@ -355,6 +355,7 @@ impl Project {
                 | Some(Constraint::ArcLength { .. })
                 | Some(Constraint::Diameter { .. })
                 | Some(Constraint::EdgeDistance { .. })
+                | Some(Constraint::CurveDistance { .. })
         ) {
             return false;
         }
@@ -472,7 +473,8 @@ impl Project {
             | Constraint::DistancePL { driven, .. }
             | Constraint::Diameter { driven, .. }
             | Constraint::ArcLength { driven, .. }
-            | Constraint::EdgeDistance { driven, .. },
+            | Constraint::EdgeDistance { driven, .. }
+            | Constraint::CurveDistance { driven, .. },
         ) = self.sketches.get_mut(si).and_then(|s| s.constraints.get_mut(ci))
         {
             *driven = true;
@@ -488,7 +490,8 @@ impl Project {
             | Constraint::Angle { driven, .. }
             | Constraint::DistancePL { driven, .. }
             | Constraint::Diameter { driven, .. }
-            | Constraint::ArcLength { driven, .. },
+            | Constraint::ArcLength { driven, .. }
+            | Constraint::CurveDistance { driven, .. },
         ) = self.sketches.get_mut(si).and_then(|s| s.constraints.get_mut(ci))
         {
             *driven = !*driven;

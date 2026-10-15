@@ -73,6 +73,7 @@ pub fn flagged_redundant(cache: &Caches, project: &qymcad_core::model::Project, 
                     | Constraint::ArcLength { .. }
                     | Constraint::Diameter { .. }
                     | Constraint::EdgeDistance { .. }
+                    | Constraint::CurveDistance { .. }
             );
             let virtual_corner = matches!(c, Constraint::PointOnLine { p, .. } if !entity_pts.contains(p));
             !is_dim && !tangency(c) && !virtual_corner

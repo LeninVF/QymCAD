@@ -319,11 +319,16 @@ impl Project {
                     }
                 }
             }
+            // a circle's radius, and an arc's from its first end (`update_driven_dims`)
+            let at = |id: Id| sess.place.get(&id).map(|&i| (s.points[i].x, s.points[i].y));
             for e in &s.entities {
-                if let EntityKind::Circle { center, r } = e.kind {
-                    if pos.contains_key(&center) {
-                        crad.insert(center, r);
-                    }
+                let radius = match e.kind {
+                    EntityKind::Circle { center, r } => Some((center, r)),
+                    EntityKind::Arc { center, a, .. } => at(center).zip(at(a)).map(|((cx, cy), (ax, ay))| (center, (ax - cx).hypot(ay - cy))),
+                    _ => None,
+                };
+                if let Some((center, r)) = radius.filter(|(c, _)| pos.contains_key(c)) {
+                    crad.insert(center, r);
                 }
             }
             for &ci in &sess.driven {
@@ -340,7 +345,10 @@ impl Project {
         let s = self.sketches.get(si)?;
         let origin_drawn = s.origin != 0 && s.entities.iter().any(|e| entity_points(e).contains(&s.origin));
         let frame_missing = (s.origin != 0 || s.axis_pts.iter().any(|g| *g != 0)) && s.frame == 0;
-        if s.entities.iter().any(|e| matches!(e.kind, EntityKind::Spline { .. })) || !s.texts.is_empty() || origin_drawn || frame_missing {
+        // a constraint on a curve of any kind reads where it touches anew before every solve, which a session holding its
+        // constraints from the first frame would not: dragged so, a circle made to touch an ellipse came away 10 deg off
+        let on_curves = s.constraints.iter().any(|c| matches!(c, Constraint::PointOnCurve { .. } | Constraint::TangentCurves { .. }));
+        if s.entities.iter().any(|e| matches!(e.kind, EntityKind::Spline { .. })) || !s.texts.is_empty() || origin_drawn || frame_missing || on_curves {
             return None;
         }
         let place: HashMap<Id, usize> = s.points.iter().enumerate().map(|(i, p)| (p.id, i)).collect();

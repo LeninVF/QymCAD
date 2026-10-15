@@ -658,6 +658,78 @@ pub struct SplineHandle {
     pub end: Point2,
 }
 
+/// A CURVE AS A CONSTRAINT SEES IT: by the points it stands on, so the solver moves the curve by moving them - a line by
+/// its ends, a circle or an arc by its centre (its radius is the variable of that centre), an ellipse by its centre and
+/// the ends of its axes, a spline by its nodes with the handles it has.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CurveRef {
+    /// a point, where a dimension is measured from a point to a curve
+    Point {
+        p: Id,
+    },
+    Line {
+        a: Id,
+        b: Id,
+    },
+    Round {
+        c: Id,
+    },
+    /// an arc as it is drawn, between its ends, where a dimension measures to the arc itself and not its circle
+    Arc {
+        c: Id,
+        a: Id,
+        b: Id,
+        winding: crate::feature::Winding,
+    },
+    Oval {
+        c: Id,
+        ma: Id,
+        mi: Id,
+    },
+    Spline {
+        nodes: Vec<Id>,
+        handles: Vec<Handle>,
+        ends: crate::feature::Ends,
+    },
+}
+
+impl CurveRef {
+    /// The points the curve stands on.
+    pub fn points(&self) -> Vec<Id> {
+        match self {
+            CurveRef::Point { p } => vec![*p],
+            CurveRef::Line { a, b } => vec![*a, *b],
+            CurveRef::Round { c } => vec![*c],
+            CurveRef::Arc { c, a, b, .. } => vec![*c, *a, *b],
+            CurveRef::Oval { c, ma, mi } => vec![*c, *ma, *mi],
+            CurveRef::Spline { nodes, .. } => nodes.clone(),
+        }
+    }
+
+    /// Every point the curve stands on, handed to `f` to read or change.
+    pub fn each_point_mut(&mut self, mut f: impl FnMut(&mut Id)) {
+        match self {
+            CurveRef::Point { p } => f(p),
+            CurveRef::Line { a, b } => {
+                f(a);
+                f(b);
+            }
+            CurveRef::Round { c } => f(c),
+            CurveRef::Arc { c, a, b, .. } => {
+                f(c);
+                f(a);
+                f(b);
+            }
+            CurveRef::Oval { c, ma, mi } => {
+                f(c);
+                f(ma);
+                f(mi);
+            }
+            CurveRef::Spline { nodes, .. } => nodes.iter_mut().for_each(f),
+        }
+    }
+}
+
 /// A sketch constraint or dimension, expressed through point ids. Solved by the sketch solver.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Constraint {
@@ -751,6 +823,21 @@ pub enum Constraint {
     /// Point `p` lies on the ellipse of centre `c`, major end `ma` and minor end `mi`. It keeps the ends of an arc of an
     /// ellipse on its ellipse, as `PointOnCircle` keeps those of an arc of a circle.
     PointOnEllipse { p: Id, c: Id, ma: Id, mi: Id },
+    /// Point `p` lies on curve `on`, any kind: a spline above all, which has no equation of its own a point satisfies.
+    PointOnCurve { p: Id, on: CurveRef },
+    /// Curves `one` and `other` touch: they meet at a place where they run the same way, on one side of each other.
+    /// `near` is where they touch, a place along each, as the last solve left it: the next takes the place of touching
+    /// nearest it, where two curves could touch at more places than one.
+    TangentCurves {
+        one: CurveRef,
+        other: CurveRef,
+        #[serde(default)]
+        near: Option<[f64; 2]>,
+        /// the end of one of them the two touch at, where they touch at an end: then the ways of the two there are held
+        /// alike, the end held on the other curve by a constraint of its own
+        #[serde(default)]
+        end: Option<Id>,
+    },
     /// Concentric: centres `c1` and `c2` coincide. A distinct kind with its own glyph, not to be confused
     /// with coincidence of ordinary points.
     Concentric { c1: Id, c2: Id },
@@ -830,6 +917,22 @@ pub enum Constraint {
         #[serde(default)]
         at: Option<f64>,
     },
+    /// THE LEAST DISTANCE between `from` - a point or a curve - and curve `to`, of any kind: to a line, to the whole
+    /// straight it lies on; between two curves, where they run the same way.
+    CurveDistance {
+        from: CurveRef,
+        to: CurveRef,
+        d: f64,
+        #[serde(default)]
+        off: f64,
+        #[serde(default)]
+        expr: String,
+        #[serde(default)]
+        driven: bool,
+        /// Where the text stands along the dimension line; see `Distance::at`.
+        #[serde(default)]
+        at: Option<f64>,
+    },
     /// Arc length dimension: the arc (centre `c`, endpoints `a` and `b`, direction `ccw`) has length `len`,
     /// equal to R * theta for radius R and swept angle theta. A driving one holds the length, a reference
     /// one measures it.
@@ -866,6 +969,8 @@ impl Constraint {
             Symmetric { a, b, la, lb } => vec![a, b, la, lb],
             PointOnCircle { p, c } => vec![p, c],
             PointOnEllipse { p, c, ma, mi } => vec![p, c, ma, mi],
+            PointOnCurve { p, ref on } => std::iter::once(p).chain(on.points()).collect(),
+            TangentCurves { ref one, ref other, .. } | CurveDistance { from: ref one, to: ref other, .. } => one.points().into_iter().chain(other.points()).collect(),
             Diameter { c, .. } => vec![c],
         }
     }
@@ -875,7 +980,9 @@ impl Constraint {
     pub fn label_place(&self) -> Option<[f64; 3]> {
         match *self {
             Constraint::Distance { off, axis, at, .. } => Some([off, at.unwrap_or(f64::NAN), axis as f64]),
-            Constraint::DistancePL { off, at, .. } | Constraint::Diameter { off, at, .. } | Constraint::EdgeDistance { off, at, .. } => Some([off, at.unwrap_or(f64::NAN), 0.0]),
+            Constraint::DistancePL { off, at, .. } | Constraint::Diameter { off, at, .. } | Constraint::EdgeDistance { off, at, .. } | Constraint::CurveDistance { off, at, .. } => {
+                Some([off, at.unwrap_or(f64::NAN), 0.0])
+            }
             Constraint::ArcLength { off, .. } => Some([off, f64::NAN, 0.0]),
             Constraint::Angle { off, at, .. } | Constraint::AngleLines { off, at, .. } => Some([off, at.unwrap_or(f64::NAN), 0.0]),
             _ => None,
@@ -885,7 +992,7 @@ impl Constraint {
     /// Numeric value of a dimensional constraint (for fingerprints and comparisons); `None` for the rest.
     pub fn dim_value(&self) -> Option<f64> {
         match *self {
-            Constraint::Distance { d, .. } | Constraint::DistancePL { d, .. } | Constraint::Diameter { d, .. } | Constraint::EdgeDistance { d, .. } => Some(d),
+            Constraint::Distance { d, .. } | Constraint::DistancePL { d, .. } | Constraint::Diameter { d, .. } | Constraint::EdgeDistance { d, .. } | Constraint::CurveDistance { d, .. } => Some(d),
             Constraint::Angle { deg, .. } | Constraint::AngleLines { deg, .. } => Some(deg),
             Constraint::ArcLength { len, .. } => Some(len),
             _ => None,
@@ -902,6 +1009,7 @@ impl Constraint {
             | Constraint::Diameter { expr, .. }
             | Constraint::DistancePL { expr, .. }
             | Constraint::EdgeDistance { expr, .. }
+            | Constraint::CurveDistance { expr, .. }
             | Constraint::ArcLength { expr, .. } => Some(expr),
             _ => None,
         }
@@ -918,6 +1026,7 @@ impl Constraint {
                 | Constraint::AngleLines { driven: true, .. }
                 | Constraint::ArcLength { driven: true, .. }
                 | Constraint::EdgeDistance { driven: true, .. }
+                | Constraint::CurveDistance { driven: true, .. }
         )
     }
 }
