@@ -1057,5 +1057,6 @@ mod contours;
 mod profiles;
 mod pieces;
 mod crossings;
+mod blends;
 pub use crossings::Crossing;
 pub use pieces::LayAs;

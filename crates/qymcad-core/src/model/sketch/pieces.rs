@@ -15,20 +15,25 @@ pub struct LayAs {
 }
 
 impl Project {
-    /// THE POINT OF SKETCH `si` STANDING AT `at` to 1e-9 mm, or a new one there.
-    fn point_exactly_at(&mut self, si: usize, at: Point2) -> Id {
-        if let Some(q) = self.sketches[si].points.iter().find(|q| (q.x - at.x).hypot(q.y - at.y) < 1e-9) {
-            return q.id;
-        }
-        let id = self.alloc_id();
-        self.sketches[si].points.push(SketchPoint { id, x: at.x, y: at.y });
-        id
+    /// THE POINT OF SKETCH `si` STANDING AT `at` to 1e-9 mm, or a new one there - never a point of the frame of reference
+    /// (`sketch_point_at`).
+    pub(crate) fn point_exactly_at(&mut self, si: usize, at: Point2) -> Id {
+        self.sketch_point_at(si, at.x, at.y, 1e-9)
     }
 
     /// LAY CURVE `c` INTO SKETCH `si` as an entity of its own kind, its ends on the points standing there (or new
     /// ones), its centre and axes on those of `how`. Answers the id of the entity.
     pub fn lay_curve(&mut self, si: usize, c: &Curve, how: LayAs) -> Id {
-        let kind = match c {
+        let kind = self.curve_kind(si, c, how);
+        let id = self.alloc_id();
+        self.sketches[si].entities.push(SketchEntity { id, kind, construction: how.construction });
+        id
+    }
+
+    /// THE ENTITY KIND OF CURVE `c` in sketch `si`, on the points standing at its ends (new ones where none stands) and
+    /// the centre and axes of `how`.
+    pub(crate) fn curve_kind(&mut self, si: usize, c: &Curve, how: LayAs) -> EntityKind {
+        match c {
             Curve::Line { a, b } => EntityKind::Line { a: self.point_exactly_at(si, *a), b: self.point_exactly_at(si, *b) },
             Curve::Round { centre, r, sweep, .. } => {
                 let centre_id = how.centre.unwrap_or_else(|| self.point_exactly_at(si, *centre));
@@ -61,10 +66,16 @@ impl Project {
                 let handles = tangents.iter().map(|t| Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect();
                 EntityKind::Spline { nodes: ids, handles, ends: *ends }
             }
-        };
-        let id = self.alloc_id();
-        self.sketches[si].entities.push(SketchEntity { id, kind, construction: how.construction });
-        id
+        }
+    }
+
+    /// How a piece of entity `e` is laid: as construction when it is, on its centre and the ends of its axes.
+    pub(crate) fn lay_as_of(e: &SketchEntity) -> LayAs {
+        match &e.kind {
+            EntityKind::Arc { center, .. } | EntityKind::Circle { center, .. } => LayAs { construction: e.construction, centre: Some(*center), axes: None },
+            EntityKind::Ellipse { c, ma, mi, .. } => LayAs { construction: e.construction, centre: Some(*c), axes: Some([*ma, *mi]) },
+            _ => LayAs { construction: e.construction, ..LayAs::default() },
+        }
     }
 
     /// CUT ENTITY `eid` OF SKETCH `si` AT `places` along it (`Curve` places, 0 to 1) and put its pieces in its stead: an
@@ -75,11 +86,7 @@ impl Project {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return Vec::new() };
         let Some(c) = Curve::of(s, e) else { return Vec::new() };
-        let how = match &e.kind {
-            EntityKind::Arc { center, .. } | EntityKind::Circle { center, .. } => LayAs { construction: e.construction, centre: Some(*center), axes: None },
-            EntityKind::Ellipse { c, ma, mi, .. } => LayAs { construction: e.construction, centre: Some(*c), axes: Some([*ma, *mi]) },
-            _ => LayAs { construction: e.construction, ..LayAs::default() },
-        };
+        let how = Self::lay_as_of(e);
         let mut at: Vec<f64> = places.iter().copied().filter(|t| (0.0..=1.0).contains(t)).collect();
         at.sort_by(f64::total_cmp);
         at.dedup_by(|x, y| (*x - *y).abs() < 1e-12);

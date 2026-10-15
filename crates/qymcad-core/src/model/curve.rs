@@ -11,9 +11,11 @@
 //! second of `n` spans.
 use super::*;
 
+mod blend;
 mod meet;
 mod shift;
 mod stretch;
+pub use blend::{chamfer, rounding, Arm, Rounding};
 pub use meet::Meet;
 pub use shift::{Map, OFFSET_TOLERANCE};
 pub use stretch::End;

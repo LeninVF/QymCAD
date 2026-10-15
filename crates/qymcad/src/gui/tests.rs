@@ -69,3 +69,6 @@ mod a_reference_lost_by_an_edit_is_shown;
 
 #[cfg(test)]
 mod every_tool_takes_every_curve;
+
+#[cfg(test)]
+mod two_fillets_meet_on_a_side;

@@ -208,6 +208,12 @@ pub(super) fn along(seg: [Point2; 2], t: f64) -> Point2 {
     Point2::new(seg[0].x + (seg[1].x - seg[0].x) * t, seg[0].y + (seg[1].y - seg[0].y) * t)
 }
 
+/// A CURVE READ AT 512 EVEN PLACES ALONG IT, a closed one back to its start: the outline it is drawn by stands its
+/// points up to 0.95 mm apart along a spline, and the way of the curve read off three of them was 1.2 deg off.
+fn dense(s: &qymcad_core::model::Sketch, e: &qymcad_core::model::SketchEntity) -> Vec<Point2> {
+    qymcad_core::model::curve::Curve::of(s, e).map(|c| (0..=512).map(|k| c.at(k as f64 / 512.0)).collect()).unwrap_or_default()
+}
+
 /// THE SKETCH OPEN FOR EDITING, read in words: the one place that knows how each kind of curve is kept.
 pub(super) fn drawing(app: &App) -> Drawing {
     use qymcad_core::model::EntityKind;
@@ -228,19 +234,15 @@ pub(super) fn drawing(app: &App) -> Drawing {
                     let sweep = if ccw { (tb - ta).rem_euclid(std::f64::consts::TAU) } else { -(ta - tb).rem_euclid(std::f64::consts::TAU) };
                     ("arc", round(Turn { centre: c, radii: Point2::new(r, r), rot: 0.0, from: ta, sweep }))
                 }
-                EntityKind::Ellipse { span: Some(_), .. } => ("arc of an ellipse", qymcad_ui_state::entity_outline(s, e)),
+                EntityKind::Ellipse { span: Some(_), .. } => ("arc of an ellipse", dense(s, e)),
                 EntityKind::Ellipse { c, ma, mi, span: None } => {
                     let (pc, pa, pi) = (at(c), at(ma), at(mi));
                     let turn = Turn { centre: pc, radii: Point2::new(pc.dist(pa), pc.dist(pi)), rot: (pa.y - pc.y).atan2(pa.x - pc.x), from: 0.0, sweep: std::f64::consts::TAU };
                     ("ellipse", round(turn))
                 }
                 EntityKind::Spline { ends, .. } => {
-                    let mut line = qymcad_ui_state::entity_outline(s, e);
                     let closed = ends == qymcad_core::feature::Ends::Closed;
-                    if closed {
-                        line.extend(line.first().copied());
-                    }
-                    (if closed { "closed spline" } else { "open spline" }, line)
+                    (if closed { "closed spline" } else { "open spline" }, dense(s, e))
                 }
             };
             Curve { key: Picked { kind: 1, id: e.id }, kind, construction: e.construction, path }

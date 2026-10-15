@@ -461,6 +461,17 @@ pub fn entity_points(e: &SketchEntity) -> Vec<Id> {
     }
 }
 
+/// THE TWO ENDS OF AN OPEN CURVE, its start first as `Curve` runs it: a line's, an arc's, an arc of an ellipse's, an open
+/// spline's first and last nodes. `None` for a curve with no ends - a circle, an ellipse, a closed spline.
+pub fn entity_ends(e: &SketchEntity) -> Option<[Id; 2]> {
+    match &e.kind {
+        EntityKind::Line { a, b } | EntityKind::Arc { a, b, .. } => Some([*a, *b]),
+        EntityKind::Ellipse { span: Some(s), .. } => Some([s.from, s.to]),
+        EntityKind::Spline { nodes, ends: crate::feature::Ends::Open, .. } => Some([*nodes.first()?, *nodes.last()?]),
+        _ => None,
+    }
+}
+
 /// Re-point one entity from one point to another.
 pub fn remap_entity_point(e: &mut SketchEntity, from: Id, to: Id) {
     let fix = |id: &mut Id| {

@@ -4,6 +4,14 @@
 use super::*;
 use crate::model::curve::{Curve, End};
 
+/// ONE CURVE OF A CROSSING TO CUT: the entity, its curve, the curve it crosses, and the crossing.
+struct CutThrough<'a> {
+    eid: Id,
+    me: &'a Curve,
+    them: &'a Curve,
+    at: Point2,
+}
+
 /// A PLACE WHERE ANOTHER CURVE MEETS A CURVE: the place along it (`Curve` places, 0 to 1), the point, and the curve met.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Crossing {
@@ -26,6 +34,71 @@ impl Project {
             .collect();
         out.sort_by(|a, b| a.t.total_cmp(&b.t));
         out
+    }
+
+    /// THE CROSSING OF TWO CURVES NEAREST `at`, within `reach` of it: two curves of the drawing (not construction) going
+    /// through each other where neither has a point the other ends at - or one ending on the middle of the other.
+    /// Where both end there, they already share a corner and there is no crossing to find. Only the curves passing
+    /// within `reach` of `at` are asked where they meet.
+    pub fn crossing_near(&self, si: usize, at: Point2, reach: f64) -> Option<LinesCrossing> {
+        let s = self.sketches.get(si)?;
+        let near: Vec<Id> = s.entities.iter().filter(|e| !e.construction).filter(|e| Curve::of(s, e).is_some_and(|c| c.nearest(at).off <= reach)).map(|e| e.id).collect();
+        near.iter()
+            .enumerate()
+            .flat_map(|(i, &one)| near[i + 1..].iter().filter_map(move |&other| self.crossing_of(si, [one, other], at)))
+            .filter(|c| c.at.dist(at) <= reach)
+            .min_by(|x, y| x.at.dist(at).total_cmp(&y.at.dist(at)))
+    }
+
+    /// WHERE CURVES `one` AND `other` CROSS, the crossing nearest `near` of those they have: through each other, or one
+    /// ending on the middle of the other. Curves that both end there make a corner, not a crossing.
+    pub fn crossing_of(&self, si: usize, [one, other]: [Id; 2], near: Point2) -> Option<LinesCrossing> {
+        let s = self.sketches.get(si)?;
+        let curve = |id: Id| s.entities.iter().find(|e| e.id == id).and_then(|e| Curve::of(s, e));
+        let (a, b) = (curve(one)?, curve(other)?);
+        let inside = |c: &Curve, t: f64| c.closed() || (t > 1e-9 && t < 1.0 - 1e-9);
+        a.meet(&b).into_iter().filter(|m| inside(&a, m.ta) || inside(&b, m.tb)).min_by(|x, y| x.at.dist(near).total_cmp(&y.at.dist(near))).map(|m| LinesCrossing { one, other, at: m.at })
+    }
+
+    /// THE TWO CURVES OF `crossing` CUT WHERE THEY CROSS, each that goes on past it: a line in two (`break_line`), any
+    /// other open curve into its two pieces there, a closed one at every place it meets the other curve - cut at the one
+    /// place alone it would be a single piece both of whose ends stand there. The halves share one point at the crossing:
+    /// the corners of a crossing are then corners of the drawing, rounded and cut as any are. Answers that point.
+    pub fn cut_at_crossing(&mut self, si: usize, crossing: LinesCrossing) -> Option<Id> {
+        let LinesCrossing { one, other, at } = crossing;
+        let s = self.sketches.get(si)?;
+        let curve = |id: Id| s.entities.iter().find(|e| e.id == id).and_then(|e| Curve::of(s, e));
+        let (a, b) = (curve(one)?, curve(other)?);
+        if !(self.cut_through(si, CutThrough { eid: one, me: &a, them: &b, at }) && self.cut_through(si, CutThrough { eid: other, me: &b, them: &a, at })) {
+            return None;
+        }
+        self.merge_close_points(si, 1e-9);
+        let s = self.sketches.get(si)?;
+        // the point the halves end at: a point of the origin may stand on the same place, and is not stitched to them
+        let half_end = |p: Id| s.entities.iter().any(|e| !e.construction && entity_ends(e).is_some_and(|ends| ends.contains(&p)));
+        s.points.iter().filter(|q| (q.x - at.x).hypot(q.y - at.y) < 1e-6).map(|q| q.id).find(|&p| half_end(p))
+    }
+
+    /// ONE CURVE OF A CROSSING CUT THERE, where it goes on past it: a line in two, any other open curve into its two
+    /// pieces, a closed one at every place it meets the other. Answers false where a closed curve meets the other at one
+    /// place alone.
+    fn cut_through(&mut self, si: usize, cut: CutThrough) -> bool {
+        let CutThrough { eid, me, them, at } = cut;
+        if !me.closed() && me.ends().iter().any(|p| p.dist(at) < 1e-9) {
+            return true;
+        }
+        if matches!(me, Curve::Line { .. }) {
+            self.break_line(si, eid, at.x, at.y);
+        } else if me.closed() {
+            let places: Vec<f64> = me.meet(them).iter().map(|m| m.ta).collect();
+            if places.len() < 2 {
+                return false;
+            }
+            self.cut_curve(si, eid, &places);
+        } else {
+            self.cut_curve(si, eid, &[me.nearest(at).t]);
+        }
+        true
     }
 
     /// WHETHER CURVE `eid` OF SKETCH `si` IS A STRAIGHT LINE.

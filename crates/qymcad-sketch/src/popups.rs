@@ -59,8 +59,10 @@ pub fn corner_input_popup(cc: &mut qymcad_ui_state::CornerCtx, ctx: &egui::Conte
             Err(e) => Some(qymcad_i18n::error_words::expr_error_text(&e)),
             Ok(v) if !v.is_finite() || v <= 1e-6 => Some(qymcad_i18n::tr("cmd-value-zero")),
             // A VALUE THE CORNERS CANNOT TAKE says so as it is typed: past the leg or the radius they hold, and
-            // nothing is drawn to promise what cannot be built.
-            Ok(v) if limit.is_some_and(|l| v >= l * (1.0 - 1e-9)) => Some(qymcad_i18n::tr("sk-fillet-too-big")),
+            // nothing is drawn to promise what cannot be built. A fillet takes the bound itself: two fillets of 10 on a
+            // side of 20 meet and the side goes, where they were refused as too big. A leg of a chamfer as long as its
+            // line is refused, as `chamfer_lines` refuses it.
+            Ok(v) if limit.is_some_and(|l| if chamfer { v >= l * (1.0 - 1e-9) } else { v > l * (1.0 + 1e-9) }) => Some(qymcad_i18n::tr("sk-fillet-too-big")),
             Ok(_) if standing.is_empty() => Some(qymcad_i18n::tr("sk-no-corner-here")),
             Ok(_) => None,
         }

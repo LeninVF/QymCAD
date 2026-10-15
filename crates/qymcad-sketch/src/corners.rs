@@ -142,7 +142,8 @@ pub(crate) fn corner_point_name(sk: &qymcad_ui_state::SketchCtx, si: usize, pid:
 pub(crate) fn corner_hover_under(cc: &qymcad_ui_state::CornerCtx, ctx: &egui::Context, rect: Rect, si: usize) -> Option<(Id, (Id, Id))> {
     let p = ctx.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p))?;
     let zone = qymcad_ui_state::corner_zone_px(cc.set);
-    let id = qymcad_pick::nearest_point_within(&cc.pick(), rect, p, si, zone)?;
+    let is_corner = |id: Id| cc.project.vertex_pairs(si, id).into_iter().any(|(a, b)| cc.project.corner_of_pair(si, a, b).is_some());
+    let id = qymcad_pick::nearest_point_within_where(&cc.pick(), rect, p, si, zone, is_corner)?;
     let w = qymcad_ui_state::to_world(cc.view, rect, p);
     let pair = cc.corner.set.read_at_point(cc.project, si, id, Some((w.x, w.y)))?;
     Some((id, pair))

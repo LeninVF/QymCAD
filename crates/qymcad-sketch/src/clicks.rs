@@ -664,7 +664,7 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                     let over = {
                         let zone = qymcad_ui_state::corner_zone_px(sk.set);
                         let is_corner = |id: Id| sk.project.vertex_pairs(si, id).into_iter().any(|(a, b)| sk.project.corner_of_pair(si, a, b).is_some());
-                        let point = qymcad_pick::nearest_point_within(&sk.pick(), rect, pos, si, zone).filter(|id| is_corner(*id)).map(|id| {
+                        let point = qymcad_pick::nearest_point_within_where(&sk.pick(), rect, pos, si, zone, is_corner).map(|id| {
                             let w = qymcad_ui_state::to_world(sk.view, rect, pos);
                             qymcad_ui_state::CornerOver::Point { id, at: (w.x, w.y) }
                         });
@@ -683,14 +683,17 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                             sk.corner.crossing = qymcad_ui_state::CrossingCut::Cut;
                             id.map(|id| qymcad_ui_state::CornerOver::Point { id, at: (w.x, w.y) })
                         });
-                        point.or_else(|| qymcad_pick::nearest_line_eid(&sk.pick(), rect, pos, si).map(qymcad_ui_state::CornerOver::Line)).unwrap_or(qymcad_ui_state::CornerOver::Nothing)
+                        // a line under the pointer first, as before; past it a curve of any kind - an arc, a spline, an ellipse
+                        let curve = qymcad_pick::nearest_line_eid(&sk.pick(), rect, pos, si).or_else(|| qymcad_pick::nearest_curve_eid(&sk.pick(), rect, pos, si));
+                        point.or_else(|| curve.map(qymcad_ui_state::CornerOver::Line)).unwrap_or(qymcad_ui_state::CornerOver::Nothing)
                     };
                     let mut act = qymcad_ui_state::corner_click(sk.project, si, sk.corner, sk.sel_sk, over, shift);
                     // TWO CHOSEN LINES THAT CROSS make their corners where they cross: the two are cut there - a step of
                     // undo the corner cut joins - and the corner is named at that point, on the side the pointer is.
                     // Reported behaviour: "it must work as well with two lines chosen with Shift".
                     let chosen: Vec<Id> = sk.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
-                    let crossing = chosen.iter().enumerate().find_map(|(i, &one)| chosen[i + 1..].iter().find_map(|&other| sk.project.crossing_of(si, one, other)));
+                    let w = qymcad_ui_state::to_world(sk.view, rect, pos);
+                    let crossing = chosen.iter().enumerate().find_map(|(i, &one)| chosen[i + 1..].iter().find_map(|&other| sk.project.crossing_of(si, [one, other], Point2::new(w.x, w.y))));
                     if let Some(crossing) = crossing {
                         qymcad_ui_state::begin_edit(&mut *sk.edits, &*sk.project, qymcad_i18n::tr(if chamfer { "tool-chamfer" } else { "tool-fillet" }));
                         let cut = sk.project.cut_at_crossing(si, crossing);

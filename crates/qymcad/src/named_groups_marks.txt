@@ -136,13 +136,13 @@ crates/qymcad-core/src/model/hash_ser.rs 0 0 1
 crates/qymcad-core/src/model/keys.rs 2 3 1
 crates/qymcad-core/src/model/params.rs 0 4 0
 crates/qymcad-core/src/model/projection.rs 1 7 0
-crates/qymcad-core/src/model/refs.rs 7 4 0
+crates/qymcad-core/src/model/refs.rs 7 5 0
 crates/qymcad-core/src/model/regen.rs 1 0 1
 crates/qymcad-core/src/model/regen/apply.rs 6 0 0
 crates/qymcad-core/src/model/regen/prep_bodies.rs 3 8 0
 crates/qymcad-core/src/model/regen/prep_ops.rs 11 5 4
 crates/qymcad-core/src/model/regen/prep_profiles.rs 1 1 0
-crates/qymcad-core/src/model/regen/refs.rs 2 4 1
+crates/qymcad-core/src/model/regen/refs.rs 2 5 1
 crates/qymcad-core/src/model/regen/run.rs 0 2 0
 crates/qymcad-core/src/model/round.rs 5 5 0
 crates/qymcad-core/src/model/sketch.rs 10 8 0
@@ -153,7 +153,7 @@ crates/qymcad-core/src/model/sketch/entities.rs 25 8 3
 crates/qymcad-core/src/model/sketch/offset.rs 0 3 0
 crates/qymcad-core/src/model/sketch/profiles.rs 9 5 0
 crates/qymcad-core/src/model/sketch/solve.rs 1 5 1
-crates/qymcad-core/src/model/sketch/trim.rs 13 6 0
+crates/qymcad-core/src/model/sketch/trim.rs 12 5 0
 crates/qymcad-core/src/model/sketch_ops.rs 7 4 0
 crates/qymcad-core/src/model/sketch_types.rs 0 2 0
 crates/qymcad-core/src/model/tess.rs 9 30 0

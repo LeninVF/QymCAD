@@ -87,6 +87,8 @@ pub(crate) fn fillet_modes(bc: &mut qymcad_ui_state::BarCtx, ui: &mut egui::Ui) 
     for by in [FilletBy::Radius, FilletBy::Chord, FilletBy::ArcLength] {
         if ui.selectable_label(bc.tool_prefs.fillet_by == by, qymcad_i18n::tr(qymcad_ui_state::fillet_label(by))).clicked() {
             bc.tool_prefs.fillet_by = by;
+            // the field of a corner already open takes the keys back: the click on the word took them
+            bc.corner.focus |= bc.corner.at.is_some();
         }
     }
     ui.separator();
@@ -98,6 +100,9 @@ pub(crate) fn chamfer_modes(bc: &mut qymcad_ui_state::BarCtx, ui: &mut egui::Ui)
     for (mode, word) in [(ChamferMode::Symmetric, "cmd-symmetric"), (ChamferMode::TwoDist, "cmd-two-distances"), (ChamferMode::DistAngle, "cmd-leg-angle")] {
         if ui.selectable_label(bc.tool_prefs.chamfer_mode == mode, qymcad_i18n::tr(word)).clicked() {
             qymcad_ui_state::set_chamfer_mode(bc.tool_prefs, mode);
+            // the field of a corner already open takes the keys back: the click on the word took them, and the values
+            // typed after choosing two distances on a chamfer of two lines chosen before the tool went nowhere
+            bc.corner.focus |= bc.corner.at.is_some();
         }
     }
     ui.separator();

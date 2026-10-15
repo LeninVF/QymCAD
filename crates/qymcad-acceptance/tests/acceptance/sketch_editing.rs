@@ -658,10 +658,11 @@ probe! {
 }
 
 probe! {
-    /// ANY LEFT CLICK WITHOUT SHIFT IS A SINGLE SELECTION, AND A MULTI-SELECTION IS MADE WITH SHIFT. Reported: after
-    /// two lines had been chosen with Shift, a click without Shift on a line of its own cut the whole set with it, and
-    /// there was no way to take one line out of a set without giving the set up altogether. So the plain click is the
-    /// single one, and the set is begun and left with Shift held.
+    /// A LEFT CLICK WITHOUT SHIFT ON A SET IS A SINGLE SELECTION, AND A MULTI-SELECTION IS MADE WITH SHIFT. Reported:
+    /// after two lines had been chosen with Shift, a click without Shift on a line of its own cut the whole set with it,
+    /// and there was no way to take one line out of a set without giving the set up altogether. So the plain click on a
+    /// set is the single one - but the second curve of a pair, meeting the one chosen alone, is taken without Shift: a
+    /// click on each of two curves names their corner.
     fn a_click_without_shift_chooses_one_line_and_leaves_the_set() {
         let mut s = empty_sketch();
         line(&mut s, (0.0, 0.0), (60.0, 0.0));
@@ -674,10 +675,10 @@ probe! {
         // A CLICK WITHOUT SHIFT ON A THIRD LINE: only that line is chosen from here, and the set is that line's corners.
         s.click_on_sketch(15.0, 25.0);
         assert!(!s.status().contains('1'), "a click without Shift kept the corners the set had: {:?}", s.status());
-        // THE TWO LINES OF ONE CORNER CHOSEN AGAIN, and the corner they make:
-        s.click_on_sketch(30.0, 0.0); // a click without Shift: this line alone
-        pick_shift(&mut s, 45.0, 25.0); // and with Shift the second joins it
-        assert!(s.status().contains('1'), "setup: the two lines chosen make their corner again: {:?}", s.status());
+        // THE SECOND LINE OF A PAIR IS TAKEN WITHOUT SHIFT: the left line stands chosen alone and makes no corner, and a
+        // click on the bottom line it meets makes the pair and their corner - a click on each curve names a corner
+        s.click_on_sketch(30.0, 0.0);
+        assert!(s.status().contains('1'), "a click without Shift on the line meeting the one chosen alone did not make their corner: {:?}", s.status());
         // AND A CLICK WITHOUT SHIFT ON EMPTY SPACE LEAVES THE LINES CHOSEN AND SPEAKS ABOUT THE MODE ALONE.
         let empty = s.on_sketch(200.0, -200.0);
         s.click(empty);

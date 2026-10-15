@@ -944,6 +944,13 @@ pub fn start_corner_tool(bc: &mut BarCtx, op: u8) {
     bc.corner.pos = None;
     let chosen: Vec<Id> = bc.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
     bc.corner.set.follow(&*bc.project, si, &chosen);
+    // A CHOICE THAT ALREADY MAKES A CORNER OPENS THE FIELD AT ONCE, beside that corner: the tool lands in hand with what
+    // was chosen and asks for its value. Kept shut, two lines chosen and the tool taken waited for a click on what was
+    // already chosen, and the value typed went nowhere.
+    if !bc.corner.set.standing().is_empty() {
+        bc.corner.at = Some((si, CORNER_SET, op == 5));
+        bc.corner.focus = true;
+    }
 }
 
 /// Turn a click-driven editing operation on or off (1 = trim, 2 = extend, 3 = break).

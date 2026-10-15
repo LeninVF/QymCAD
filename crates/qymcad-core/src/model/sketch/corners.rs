@@ -1,5 +1,6 @@
 //! THE CORNERS OF A SKETCH: rounded and chamfered, one by one or all at once.
 
+use super::blends::EdgeAt;
 use super::*;
 
 impl Project {
@@ -428,14 +429,10 @@ impl Project {
         self.solve_sketch_held(si);
         true
     }
-    /// Endpoints of an edge entity (a line or an arc), used to find the shared vertex when filleting.
+    /// The two ends of an open curve of any kind, used to find the shared vertex when filleting.
     pub(crate) fn edge_end_ids(&self, si: usize, eid: Id) -> Option<(Id, Id)> {
         let s = self.sketches.get(si)?;
-        s.entity(eid).and_then(|e| match e.kind {
-            EntityKind::Line { a, b } => Some((a, b)),
-            EntityKind::Arc { a, b, .. } => Some((a, b)),
-            _ => None,
-        })
+        s.entity(eid).and_then(entity_ends).map(|[a, b]| (a, b))
     }
     /// General fillet: an arc of radius `r` tangent to two adjacent edges (lines or arcs) sharing a vertex.
     ///
@@ -447,6 +444,9 @@ impl Project {
     pub fn fillet_curves(&mut self, si: usize, e1: Id, e2: Id, r: f64, nearx: f64, neary: f64) -> bool {
         if r <= 1e-9 {
             return false;
+        }
+        if !self.straight_or_round(si, [e1, e2]) {
+            return self.round_any(si, [e1, e2], r);
         }
         let Some((e1a, e1b)) = self.edge_end_ids(si, e1) else { return false };
         let Some((e2a, e2b)) = self.edge_end_ids(si, e2) else { return false };
@@ -563,12 +563,17 @@ impl Project {
             t2: (f64, f64),
         }
         // Choose the centre: tangency valid on both edges, and nearest to the click.
+        let curves = self.sketches.get(si).map(|s| [e1, e2].map(|id| s.entity(id).and_then(|e| crate::model::curve::Curve::of(s, e))));
+        let on_edge = |k: usize, p: (f64, f64)| curves.as_ref().and_then(|c| c[k].as_ref()).is_some_and(|c| c.nearest(Point2::new(p.0, p.1)).off < 1e-6);
         let mut best: Option<Candidate> = None;
         for (cx, cy) in centers {
             let (Some(t1), Some(t2)) = (tangent_pt(s1, cx, cy), tangent_pt(s2, cx, cy)) else { continue };
-            // Both tangency points have to lie on the vertex side, between `pc` and `o`; `tangent_pt` checks
-            // that for lines, while for an arc the radial projection is trusted. The score is the distance from
-            // the centre to the click.
+            // Both tangency points have to lie on the edges themselves: on the circle of an arc but off the arc, the
+            // fillet of two arcs touched the circle of one of them 0.69 mm past its end. The score is the distance
+            // from the centre to the click.
+            if !(on_edge(0, t1) && on_edge(1, t2)) {
+                continue;
+            }
             let score = (cx - nearx).powi(2) + (cy - neary).powi(2);
             if best.is_none_or(|b| score < b.score) {
                 best = Some(Candidate { score, center: (cx, cy), t1, t2 });
@@ -711,7 +716,7 @@ impl Project {
         let dist = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
         dist + m1 as f64 * r_of(c1) + m2 as f64 * r_of(c2)
     }
-    /// Edges (lines or arcs) for which point `pid` is an endpoint. Used by click-on-corner fillets and
+    /// Edges (open curves of any kind) for which point `pid` is an endpoint. Used by click-on-corner fillets and
     /// chamfers.
     pub fn vertex_edges(&self, si: usize, pid: Id) -> Vec<Id> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
@@ -719,7 +724,7 @@ impl Project {
             .iter()
             // construction lines are not edges of a corner: the diagonals of a rectangle end at its corners
             .filter(|e| !e.construction)
-            .filter(|e| matches!(e.kind, EntityKind::Line { a, b } if a == pid || b == pid) || matches!(e.kind, EntityKind::Arc { a, b, .. } if a == pid || b == pid))
+            .filter(|e| entity_ends(e).is_some_and(|[a, b]| a == pid || b == pid))
             .map(|e| e.id)
             .collect()
     }
@@ -761,32 +766,8 @@ impl Project {
     /// are one straight within 1e-6 of a turn - what a solve leaves at a tangency.
     pub fn corner_of_pair(&self, si: usize, e1: Id, e2: Id) -> Option<Id> {
         let pid = self.shared_vertex(si, e1, e2)?;
-        let (pcx, pcy) = self.point_xy(si, pid)?;
-        let dir = |me: &Self, eid: Id| -> Option<(f64, f64)> {
-            let kind = me.sketches.get(si)?.entities.iter().find(|e| e.id == eid)?.kind.clone();
-            let (dx, dy) = match kind {
-                EntityKind::Arc { center, a, ccw, .. } => {
-                    // the way along the arc out of the point: from its start the way it turns, from its end back
-                    let (cx, cy) = me.point_xy(si, center)?;
-                    let (rx, ry) = (pcx - cx, pcy - cy);
-                    let left = (a == pid) == ccw;
-                    if left {
-                        (-ry, rx)
-                    } else {
-                        (ry, -rx)
-                    }
-                }
-                _ => {
-                    let (a, b) = me.edge_end_ids(si, eid)?;
-                    let other = if a == pid { b } else { a };
-                    let (ox, oy) = me.point_xy(si, other)?;
-                    (ox - pcx, oy - pcy)
-                }
-            };
-            let l = (dx * dx + dy * dy).sqrt();
-            (l > 1e-9).then_some((dx / l, dy / l))
-        };
-        let (Some((x1, y1)), Some((x2, y2))) = (dir(self, e1), dir(self, e2)) else { return None };
+        let (Some(u), Some(v)) = (self.leaving(si, EdgeAt { edge: e1, corner: pid }), self.leaving(si, EdgeAt { edge: e2, corner: pid })) else { return None };
+        let (x1, y1, x2, y2) = (u.x, u.y, v.x, v.y);
         // parallel means one straight line: the angle between them is 180 degrees, and there is no corner in it
         ((x1 * y2 - y1 * x2).abs() > 1e-6).then_some(pid)
     }
@@ -855,6 +836,9 @@ impl Project {
         if self.corner_of_pair(si, e1, e2) != Some(pid) {
             return None;
         }
+        if !self.straight_or_round(si, [e1, e2]) {
+            return self.blend_any(si, [e1, e2], cut);
+        }
         let (pcx, pcy) = self.point_xy(si, pid)?;
         // the direction away from the corner along each edge, and how long that edge is
         let dir = |me: &Self, eid: Id| -> Option<(f64, f64, f64)> {
@@ -906,19 +890,8 @@ impl Project {
     /// wants a bound asks `corner_limit`, which takes the tightest of them all.
     pub fn vertex_pair(&self, si: usize, pid: Id, near: Option<(f64, f64)>) -> Option<(Id, Id)> {
         let (pcx, pcy) = self.point_xy(si, pid)?;
-        // each edge that meets at the vertex, with its direction AWAY from it
-        let dirs: Vec<(Id, f64, f64)> = self
-            .vertex_edges(si, pid)
-            .into_iter()
-            .filter_map(|eid| {
-                let (a, b) = self.edge_end_ids(si, eid)?;
-                let other = if a == pid { b } else { a };
-                let (ox, oy) = self.point_xy(si, other)?;
-                let (dx, dy) = (ox - pcx, oy - pcy);
-                let l = (dx * dx + dy * dy).sqrt();
-                (l > 1e-9).then_some((eid, dx / l, dy / l))
-            })
-            .collect();
+        // each edge that meets at the vertex, with its direction AWAY from it - the way it leaves the vertex
+        let dirs: Vec<(Id, f64, f64)> = self.vertex_edges(si, pid).into_iter().filter_map(|eid| self.leaving(si, EdgeAt { edge: eid, corner: pid }).map(|u| (eid, u.x, u.y))).collect();
         if dirs.len() < 2 {
             return None;
         }
@@ -951,19 +924,8 @@ impl Project {
     /// beginning as any; refusing outright would leave a field open with nothing behind it.
     pub fn vertex_pair_through(&self, si: usize, pid: Id, eid: Id, near: Option<(f64, f64)>) -> Option<(Id, Id)> {
         let (pcx, pcy) = self.point_xy(si, pid)?;
-        // every edge at the point with the angle of its direction away from it, in the turn of the circle
-        let mut v: Vec<(Id, f64)> = self
-            .vertex_edges(si, pid)
-            .into_iter()
-            .filter_map(|e| {
-                let (a, b) = self.edge_end_ids(si, e)?;
-                let other = if a == pid { b } else { a };
-                let (ox, oy) = self.point_xy(si, other)?;
-                let (dx, dy) = (ox - pcx, oy - pcy);
-                let l = (dx * dx + dy * dy).sqrt();
-                (l > 1e-9).then_some((e, dy.atan2(dx)))
-            })
-            .collect();
+        // every edge at the point with the angle of the way it leaves it, in the turn of the circle
+        let mut v: Vec<(Id, f64)> = self.vertex_edges(si, pid).into_iter().filter_map(|e| self.leaving(si, EdgeAt { edge: e, corner: pid }).map(|u| (e, u.y.atan2(u.x)))).collect();
         if v.len() < 2 {
             return None; // one edge at the point is not a corner of anything
         }
@@ -1028,28 +990,26 @@ impl Project {
         let Some(pair) = self.vertex_pair(si, pid, Some((x, y))) else { return false };
         self.chamfer_lines_of_pair(si, pair, legs, toward)
     }
-    /// The cut of `legs` off the corner the two named edges make, both of them straight: the chamfer of a sketch is a
-    /// straight cut, and an arc in the pair is refused rather than cut as if it were a line.
+    /// The cut of `legs` off the corner the two named edges make: two lines by `chamfer_lines`, a corner with a curve in
+    /// it cut along the curve by `chamfer_any` - its legs measured straight from the corner.
     pub fn chamfer_lines_of_pair(&mut self, si: usize, (e1, e2): (Id, Id), legs: ChamferLegs, toward: Option<Point2>) -> bool {
-        if self.corner_of_pair(si, e1, e2).is_none() {
+        let Some(shared) = self.corner_of_pair(si, e1, e2) else {
             return false; // two lines in one straight line: nothing is cut, and the cut would be along them
-        }
-        let both_lines = [e1, e2].iter().all(|&eid| matches!(self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).map(|e| &e.kind), Some(EntityKind::Line { .. })));
-        if !both_lines {
-            return false;
-        }
-        // the line whose direction from the corner leans nearer to the click is the first
+        };
+        // the side whose way from the corner leans nearer to the click is the first
         let lean = |me: &Self, eid: Id| -> f64 {
             let Some(toward) = toward else { return 0.0 };
-            let Some(shared) = me.corner_of_pair(si, e1, e2) else { return f64::MAX };
-            let (Some((a, b)), Some((px, py))) = (me.line_ends(si, eid), me.point_xy(si, shared)) else { return f64::MAX };
-            let far = if a == shared { b } else { a };
-            let Some((fx, fy)) = me.point_xy(si, far) else { return f64::MAX };
-            let (ux, uy, vx, vy) = (fx - px, fy - py, toward.x - px, toward.y - py);
-            -(ux * vx + uy * vy) / (ux.hypot(uy) * vx.hypot(vy)).max(1e-12)
+            let (Some(u), Some((px, py))) = (me.leaving(si, EdgeAt { edge: eid, corner: shared }), me.point_xy(si, shared)) else { return f64::MAX };
+            let (vx, vy) = (toward.x - px, toward.y - py);
+            -(u.x * vx + u.y * vy) / vx.hypot(vy).max(1e-12)
         };
         let (first, second) = if lean(self, e2) < lean(self, e1) { (e2, e1) } else { (e1, e2) };
-        self.chamfer_lines(si, first, second, legs)
+        let both_lines = [e1, e2].iter().all(|&eid| matches!(self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).map(|e| &e.kind), Some(EntityKind::Line { .. })));
+        if both_lines {
+            self.chamfer_lines(si, first, second, legs)
+        } else {
+            self.chamfer_any(si, [first, second], legs)
+        }
     }
     /// Connected shape: every entity reachable from `eid` through shared endpoints — a rectangle from one of
     /// its sides, a chain of lines and arcs. A circle or an ellipse stands alone. Used by "fillet all" followed

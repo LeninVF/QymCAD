@@ -125,6 +125,13 @@ pub fn nearest_vertex(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Optio
 /// the guides are never handed out, and the origin yields to the person's own point in the same place) belongs
 /// to the point, not to the tolerance, so it is read from `nearest_sketch_point` rather than written out again.
 pub fn nearest_point_within(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize, reach: f32) -> Option<Id> {
+    nearest_point_within_where(pick, rect, pos, si, reach, |_| true)
+}
+
+/// THE NEAREST POINT WITHIN `reach` THAT `keep` TAKES: the corner tools ask for the nearest corner, and a nearer point
+/// that is no corner - a node of a spline 2.2 mm off the click where the corner stood 2.3 mm off - is passed over
+/// rather than standing in its way.
+pub fn nearest_point_within_where(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize, reach: f32, keep: impl Fn(Id) -> bool) -> Option<Id> {
     let s = pick.project.sketches.get(si)?;
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
     let is = |sys: Id, id: Id| sys != 0 && sys == id;
@@ -135,7 +142,7 @@ pub fn nearest_point_within(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize, re
             continue; // the anchor and the guides are the frame, not the drawing
         }
         let d = sh.at(Point2::new(p.x, p.y)).distance(pos);
-        if d > reach {
+        if d > reach || !keep(p.id) {
             continue;
         }
         let slot = if is(s.origin, p.id) { &mut best_origin } else { &mut best };

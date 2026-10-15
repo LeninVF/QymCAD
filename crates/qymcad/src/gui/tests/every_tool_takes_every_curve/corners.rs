@@ -53,7 +53,41 @@ const OPEN: [&str; 4] = ["line", "arc", "open spline", "arc of an ellipse"];
 
 /// Whether a tool of the panel draws `kind` into a corner.
 fn drawable(kind: &str) -> bool {
-    matches!(kind, "line" | "arc" | "open spline")
+    matches!(kind, "line" | "arc" | "open spline" | "arc of an ellipse")
+}
+
+/// AN ARC OF AN ELLIPSE AS A PERSON DRAWS ONE, relative to the vertex: an ellipse by its centre, the end of its axis and
+/// its width; a line cutting it through the vertex; a click of the trim on the part to go; a click on the line and Delete.
+struct Cap {
+    centre: Point2,
+    axis: Point2,
+    width: Point2,
+    cut: [Point2; 2],
+    trim_at: Point2,
+    line_at: Point2,
+}
+
+fn draw_cap(h: &mut Hand, cap: &Cap) {
+    let at = |h: &mut Hand, p: Point2| {
+        h.click2d(V.x + p.x, V.y + p.y);
+    };
+    h.sk_tool(8);
+    for p in [cap.centre, cap.axis, cap.width] {
+        at(h, p);
+    }
+    h.key(egui::Key::Escape);
+    h.sk_tool(1);
+    for p in cap.cut {
+        at(h, p);
+    }
+    h.key(egui::Key::Escape).key(egui::Key::Escape);
+    assert!(h.press_hint(&crate::i18n::tr("tb-trim-hint")), "no trim button");
+    h.close_window();
+    at(h, cap.trim_at);
+    h.key(egui::Key::Escape);
+    h.sk_tool(0);
+    at(h, cap.line_at);
+    h.key(egui::Key::Delete);
 }
 
 /// A CURVE DRAWN BY HAND ARRIVING AT THE VERTEX from the left; a kind no tool draws is left out (`drawable`).
@@ -74,12 +108,29 @@ fn arrive(h: &mut Hand, kind: &str) {
             at(h, -6.0, -6.0);
             at(h, 0.0, 0.0);
         }
+        // arriving from above, at 80 deg to the line leaving: arriving from below it ran on nearly straight into it, a
+        // turn of 26 deg, and a fillet of 2 there was an arc of 0.6 mm standing within the reach of the curves it joins
         "open spline" => {
             h.sk_tool(9);
-            at(h, -12.0, -3.0);
-            at(h, -8.0, 1.0);
-            at(h, -4.0, -2.0);
+            at(h, -12.0, 3.0);
+            at(h, -8.0, -1.0);
+            at(h, -4.0, 2.0);
             h.double_click2d(V.x, V.y);
+        }
+        // the end of an ellipse 10 by 5 left of a line upright through the vertex, below and left of it: a line 6 from
+        // the centre across the long axis meets the ellipse 5 * sqrt(1 - 0.6^2) = 4 off it, and every click stands on
+        // the grid of 1 mm the clicks are drawn to
+        "arc of an ellipse" => {
+            let c = Point2::new(6.0, -4.0);
+            let cap = Cap {
+                centre: c,
+                axis: c + Point2::new(10.0, 0.0),
+                width: c + Point2::new(0.0, 5.0),
+                cut: [Point2::new(0.0, 6.0), Point2::new(0.0, -12.0)],
+                trim_at: c + Point2::new(10.0, 0.0),
+                line_at: Point2::new(0.0, 4.0),
+            };
+            draw_cap(h, &cap);
         }
         _ => return,
     }
@@ -111,6 +162,20 @@ fn leave(h: &mut Hand, kind: &str) {
             at(h, 3.0, 5.0);
             at(h, 7.0, 6.0);
             h.double_click2d(V.x + 10.0, V.y + 11.0);
+        }
+        // the lower end of an upright ellipse 10 by 5 above a line level with the vertex, leaving it down and right; the
+        // whole ellipse stands clear of every curve arriving from the left
+        "arc of an ellipse" => {
+            let c = Point2::new(4.0, 6.0);
+            let cap = Cap {
+                centre: c,
+                axis: c + Point2::new(0.0, 10.0),
+                width: c + Point2::new(5.0, 0.0),
+                cut: [Point2::new(14.0, 0.0), Point2::new(0.0, 0.0)],
+                trim_at: c + Point2::new(0.0, 10.0),
+                line_at: Point2::new(12.0, 0.0),
+            };
+            draw_cap(h, &cap);
         }
         _ => return,
     }
@@ -180,12 +245,16 @@ fn at_corner(d: &Drawing, corner: Point2) -> Vec<Curve> {
     d.curves.iter().filter(|c| !c.construction && [c.path[0], c.path[c.path.len() - 1]].iter().any(|e| e.dist(corner) < NEAR)).cloned().collect()
 }
 
-/// A place on the curve along it from the corner - a quarter of its length, 3 mm at most - where a click takes the curve
-/// and names this corner, the nearest of its ends.
-fn off_corner(c: &Curve, corner: Point2) -> Point2 {
+/// A place on the curve along it from the corner, from 1 mm to 3 mm or 0.45 of its length, where a click takes the curve
+/// and names this corner, the nearest of its ends: of those, the one farthest from every point of the sketch. At a fixed
+/// 3 mm the click stood 1.5 mm off a node of a spline, and at a quarter of the 6.2 mm of an arc 1.4 mm off the corner,
+/// and the point there was picked in place of the curve.
+fn off_corner(c: &Curve, corner: Point2, points: &[Dot]) -> Point2 {
     let path: Vec<Point2> = if c.path[0].dist(corner) < NEAR { c.path.clone() } else { c.path.iter().rev().copied().collect() };
     let length: f64 = path.windows(2).map(|w| w[0].dist(w[1])).sum();
-    share_along(&path, (3.0 / length).min(0.25))
+    let (lo, hi) = ((1.0 / length).min(0.2), (3.0 / length).min(0.45));
+    let clear = |p: &Point2| points.iter().map(|q| q.at.dist(*p)).fold(f64::MAX, f64::min);
+    (0..=20).map(|k| share_along(&path, lo + (hi - lo) * k as f64 / 20.0)).max_by(|a, b| clear(a).total_cmp(&clear(b))).unwrap_or(corner)
 }
 
 /// The direction of a path at the point of it nearest to `p`: the segment of the path that point lies on.
@@ -197,15 +266,28 @@ fn direction(path: &[Point2], p: Point2) -> Point2 {
 }
 
 /// THE DIRECTION OF A CURVE AT `p`: square to the radius on a round curve, whose laid out points stand a 96th of a turn
-/// apart and would tilt it by half of that, 1.9 deg; along the segment `p` lies on for any other.
+/// apart and would tilt it by half of that, 1.9 deg; along a line, the segment `p` lies on; on any other curve square to
+/// the radius of the circle through the three laid out points about `p` - the segment alone tilted the way an arc of an
+/// ellipse runs by 1.25 deg.
 fn tangent(c: &Curve, p: Point2) -> Point2 {
-    if matches!(c.kind, "arc" | "circle") {
-        let n = c.path.len();
-        let centre = centre_of([c.path[0], c.path[n / 3], c.path[2 * n / 3]]);
+    let square_to = |centre: Point2| {
         let (radial, r) = (p - centre, p.dist(centre));
-        return Point2::new(-radial.y / r, radial.x / r);
+        Point2::new(-radial.y / r, radial.x / r)
+    };
+    let n = c.path.len();
+    if matches!(c.kind, "arc" | "circle") {
+        return square_to(centre_of([c.path[0], c.path[n / 3], c.path[2 * n / 3]]));
     }
-    direction(&c.path, p)
+    if c.kind == "line" || n < 3 {
+        return direction(&c.path, p);
+    }
+    let k = (0..n).min_by(|a, b| c.path[*a].dist(p).total_cmp(&c.path[*b].dist(p))).unwrap_or(0).clamp(1, n - 2);
+    let [a, m, b] = [c.path[k - 1], c.path[k], c.path[k + 1]];
+    let bend = (m.x - a.x) * (b.y - a.y) - (m.y - a.y) * (b.x - a.x);
+    if bend.abs() < 1e-12 {
+        return direction(&c.path, p);
+    }
+    square_to(centre_of([a, m, b]))
 }
 
 /// The point of a path nearest to `p`.
@@ -272,11 +354,13 @@ fn made(tool: Tool, corner: &Corner, after: &Drawing) -> Result<(), String> {
     if on.len() != 2 || on[0] == on[1] {
         return Err(format!("the ends of the {kind} do not lie one on each curve: {ends:?}"));
     }
-    // the stretch of each side from the corner to the cut is gone; at a crossing the halves past it stay
+    // the stretch of each side from the corner to the cut is gone - no curve stands on the side half way along it; at a
+    // crossing the halves past it stay. Looked for a quarter of the stretch around, it found the half of the upright
+    // line in the next quarter of a crossing of a polygon, 30 deg off and 0.134 mm away
     let others: Vec<&Curve> = after.curves.iter().filter(|c| c.key != cut.key && !c.construction).collect();
     for (e, side) in ends.iter().zip(&on) {
         let half = onto(along([corner, *e], 0.5), &sides[*side].path);
-        if others.iter().any(|c| off_path(half, &c.path) < corner.dist(*e) / 4.0) {
+        if others.iter().any(|c| off_path(half, &c.path) < NEAR) {
             return Err(format!("the side between the corner and the cut is still there at ({:.2}, {:.2})", half.x, half.y));
         }
     }
@@ -321,7 +405,7 @@ fn at_vertex(pair: &Pair, name: Name, tool: Tool) -> Result<(), String> {
     let Drawn { mut app, corner: at } = drawn(pair)?;
     let before = drawing(&app);
     let sides = at_corner(&before, at);
-    let spots = [off_corner(&sides[0], at), off_corner(&sides[1], at)];
+    let spots = [off_corner(&sides[0], at, &before.points), off_corner(&sides[1], at, &before.points)];
     let corner = Corner { before, sides, at };
     let mut hand = Hand::new(&mut app);
     match name {
@@ -363,10 +447,25 @@ fn at_crossing(kind: &Kind, tool: Tool) -> Result<(), String> {
     // the crossing nearest to 3 mm above the place of the kind
     let at = crossings.iter().copied().min_by(|a, b| (a.y - V.y - 3.0).abs().total_cmp(&(b.y - V.y - 3.0).abs())).ok_or("the kind does not cross the upright line")?;
     let curve = own.iter().find(|c| off_path(at, &c.path) < NEAR).cloned().ok_or("no curve at the crossing")?;
-    // the curve is clicked where it stands farthest from the upright line, 2 mm clear of the points of the sketch
-    let clear = |p: &Point2| before.points.iter().all(|q| q.at.dist(*p) > 2.0);
-    let on_curve = curve.path.iter().copied().filter(clear).max_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs())).ok_or("no place to click the curve")?;
-    let on_line = Point2::new(x, if at.y > V.y { V.y + 13.0 } else { V.y - 13.0 });
+    // the curve is clicked where it stands farthest from what the zone of a corner catches - a point two curves end at,
+    // a crossing: 2 mm off a corner of a rectangle the click named that corner, and 4.6 mm off the crossing of an arc it
+    // cut the crossing before the line was chosen
+    let ends: Vec<Point2> = own.iter().chain([&upright]).flat_map(|c| [c.path[0], c.path[c.path.len() - 1]]).collect();
+    let corners: Vec<Point2> = ends.iter().copied().filter(|e| ends.iter().filter(|o| o.dist(*e) < NEAR).count() >= 2).collect();
+    let clear = |p: &Point2| corners.iter().chain(crossings.iter()).map(|q| q.dist(*p)).fold(f64::MAX, f64::min);
+    // within 8 mm of the crossing, in sight once the sheet is brought nearer
+    let on_curve = curve.path.iter().copied().filter(|p| p.dist(at) <= 8.0).max_by(|a, b| clear(a).total_cmp(&clear(b))).ok_or("no place to click the curve")?;
+    let on_line = Point2::new(x, if at.y > V.y { at.y + 6.0 } else { at.y - 6.0 });
+    // THE SHEET BROUGHT NEARER over the crossing, as a person does on a small figure, to four times the scale the matrix
+    // opens with: a side of the polygon is 7 mm, and at 6 px to the mm every place on it stood within the zone of a
+    // corner or of the crossing, 24 px
+    hand.look2d((at.x, at.y)).frame(Vec::new());
+    for _ in 0..40 {
+        if hand.app.viewing.view.scale >= 24.0 {
+            break;
+        }
+        hand.wheel2d((at.x, at.y), true);
+    }
     let corner = Corner { before, sides: vec![curve, upright], at };
     take(&mut hand, tool)?;
     hand.shift_click2d(on_curve.x, on_curve.y).shift_click2d(on_line.x, on_line.y);

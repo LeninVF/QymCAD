@@ -626,12 +626,23 @@ impl Project {
         if pts.len() < 2 || si >= self.sketches.len() {
             return None;
         }
-        let ids: Vec<Id> = pts.iter().map(|_| self.alloc_id()).collect();
+        // A NODE CLICKED ON A POINT STANDING THERE IS THAT POINT, as the end of a line is: a spline drawn on from the end
+        // of a line shares the point with it and makes a corner with it. Each node a point of its own, the end and the
+        // line were two points held together, and the corner tools found no corner there.
+        let mut ids: Vec<Id> = Vec::with_capacity(pts.len());
+        for p in &pts {
+            let id = self.sketch_point_at(si, p.x, p.y, 1e-6);
+            let id = if ids.contains(&id) {
+                let fresh = self.alloc_id();
+                self.sketches[si].points.push(SketchPoint { id: fresh, x: p.x, y: p.y });
+                fresh
+            } else {
+                id
+            };
+            ids.push(id);
+        }
         let eid = self.alloc_id();
         let s = self.sketches.get_mut(si)?;
-        for (id, p) in ids.iter().zip(&pts) {
-            s.points.push(SketchPoint { id: *id, x: p.x, y: p.y });
-        }
         let handles = vec![Handle::default(); ids.len()];
         s.entities.push(SketchEntity { id: eid, kind: EntityKind::Spline { nodes: ids, handles, ends }, construction: purpose == crate::feature::Purpose::Construction });
         self.regen_sketch(si);
