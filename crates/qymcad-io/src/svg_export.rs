@@ -34,6 +34,13 @@ pub fn export_svg(edges: &[ProfEdge], path: &str) -> Result<(), String> {
                 grow(center.x - r, center.y - r);
                 grow(center.x + r, center.y + r);
             }
+            ProfEdge::Oval { .. } | ProfEdge::Cubic { .. } => {
+                for k in 0..=48 {
+                    if let Some(p) = e.curve_at(k as f64 / 48.0) {
+                        grow(p.x, p.y);
+                    }
+                }
+            }
         }
     }
     let pad = ((xmax - xmin).max(ymax - ymin) * 0.05).max(1.0);
@@ -67,6 +74,15 @@ pub fn export_svg(edges: &[ProfEdge], path: &str) -> Result<(), String> {
                 // clockwise on screen and the sweep flag is 1
                 let sflag = if ccw { 1 } else { 0 };
                 s.push_str(&format!("    <path d=\"M {:.4} {:.4} A {:.4} {:.4} 0 {} {} {:.4} {:.4}\"/>\n", sx(a.x), sy(a.y), r, r, large, sflag, sx(b.x), sy(b.y)));
+            }
+            // a span of a spline is a cubic Bezier of SVG itself
+            ProfEdge::Cubic { a, c1, c2, b } => {
+                s.push_str(&format!("    <path d=\"M {:.4} {:.4} C {:.4} {:.4} {:.4} {:.4} {:.4} {:.4}\"/>\n", sx(a.x), sy(a.y), sx(c1.x), sy(c1.y), sx(c2.x), sy(c2.y), sx(b.x), sy(b.y)));
+            }
+            // an ellipse as the polyline of its points
+            ProfEdge::Oval { .. } => {
+                let pts: Vec<String> = (0..=96).filter_map(|k| e.curve_at(k as f64 / 96.0)).map(|p| format!("{:.4} {:.4}", sx(p.x), sy(p.y))).collect();
+                s.push_str(&format!("    <path d=\"M {}\"/>\n", pts.join(" L ")));
             }
         }
     }

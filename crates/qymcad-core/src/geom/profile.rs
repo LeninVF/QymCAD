@@ -161,13 +161,20 @@ pub fn circle_contour_from(cx: f64, cy: f64, radius: f64, max_sag: f64, src: cra
     c
 }
 
-/// How many numbers one edge occupies in the profile encoding.
-pub const EDGE_FIELDS: usize = 9;
+/// How many numbers one edge occupies in the profile encoding: its kind, nine numbers of its shape and its name.
+pub const EDGE_FIELDS: usize = 11;
 
 /// The single source of truth for the edge format of a kernel profile:
-/// `[kind, ax, ay, bx, by, cx, cy, ccw, name]`, where kind 0 is a segment, 1 an arc and 2 a circle.
+/// `[kind, nine numbers of its shape, name]`:
 ///
-/// The ninth number is the name descriptor of the face this edge will produce (0 means no name, and the kernel
+/// * 0, a segment: `ax, ay, bx, by`;
+/// * 1, an arc: `ax, ay, bx, by, cx, cy, ccw`;
+/// * 2, a circle: `r` first, its centre at the places of an arc's, `cx, cy`;
+/// * 3, an ellipse or an arc of one: `cx, cy, major x, major y, minor x, minor y, from, sweep` - the semi-axes as
+///   vectors, the eccentric angles in radians;
+/// * 4, a cubic span of a spline: its Bezier points `a, c1, c2, b`.
+///
+/// The numbers an edge does not use are 0. The last number is the name descriptor of the face this edge will produce (0 means no name, and the kernel
 /// falls back to a positional index). The name is derived from the recipe as "the wall of feature F from sketch
 /// entity E", so inserting an edge in the middle of a contour does not shift the names of its neighbours.
 ///
@@ -177,9 +184,11 @@ pub const EDGE_FIELDS: usize = 9;
 pub fn encode_edge(e: ProfEdge, name: u32) -> [f64; EDGE_FIELDS] {
     let s = name as f64;
     match e {
-        ProfEdge::Line { a, b } => [0.0, a.x, a.y, b.x, b.y, 0.0, 0.0, 0.0, s],
-        ProfEdge::Arc { a, b, center, ccw } => [1.0, a.x, a.y, b.x, b.y, center.x, center.y, if ccw { 1.0 } else { 0.0 }, s],
-        ProfEdge::Circle { center, r } => [2.0, r, 0.0, 0.0, 0.0, center.x, center.y, 0.0, s],
+        ProfEdge::Line { a, b } => [0.0, a.x, a.y, b.x, b.y, 0.0, 0.0, 0.0, 0.0, 0.0, s],
+        ProfEdge::Arc { a, b, center, ccw } => [1.0, a.x, a.y, b.x, b.y, center.x, center.y, if ccw { 1.0 } else { 0.0 }, 0.0, 0.0, s],
+        ProfEdge::Circle { center, r } => [2.0, r, 0.0, 0.0, 0.0, center.x, center.y, 0.0, 0.0, 0.0, s],
+        ProfEdge::Oval { centre, major, minor, from, sweep } => [3.0, centre.x, centre.y, major.x, major.y, minor.x, minor.y, from, sweep, 0.0, s],
+        ProfEdge::Cubic { a, c1, c2, b } => [4.0, a.x, a.y, c1.x, c1.y, c2.x, c2.y, b.x, b.y, 0.0, s],
     }
 }
 
@@ -238,6 +247,15 @@ pub fn piece_of(e: &ProfEdge) -> ([i64; 2], f64) {
             (key(center.x + r * mid.cos(), center.y + r * mid.sin()), mid.rem_euclid(tau))
         }
         ProfEdge::Circle { center, r } => (key(center.x + r, center.y), 0.0),
+        // an ellipse by the eccentric angle of its middle, a span of a spline by its middle along X, then Y
+        ProfEdge::Oval { from, sweep, .. } => {
+            let m = e.curve_at(0.5).unwrap_or(Point2::new(0.0, 0.0));
+            (key(m.x, m.y), (from + sweep * 0.5).rem_euclid(std::f64::consts::TAU))
+        }
+        ProfEdge::Cubic { .. } => {
+            let m = e.curve_at(0.5).unwrap_or(Point2::new(0.0, 0.0));
+            (key(m.x, m.y), m.x + m.y * 1e-6)
+        }
     }
 }
 

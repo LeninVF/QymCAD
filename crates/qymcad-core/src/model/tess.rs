@@ -5,6 +5,8 @@
 //! contours, decomposition of intersecting curves into regions, and Hermite tessellation of splines.
 
 use super::*;
+use crate::geom::ProfEdge;
+use crate::model::curve::Curve;
 
 /// The profile of a rectangle centred at the origin, for a box primitive; flat in XY.
 pub(super) fn rect_profile(dx: f64, dy: f64) -> Vec<f64> {
@@ -303,10 +305,10 @@ pub(super) fn tessellate_sketch_multi(points: &[SketchPoint], entities: &[Sketch
         // open chain of its own
         if let EntityKind::Ellipse { c, ma, mi, span } = e.kind {
             match (pt(c), pt(ma), pt(mi), span) {
-                (Some(pc), Some(pma), Some(pmi), None) => out.push(ellipse_contour(pc, pma, pmi)),
+                (Some(pc), Some(pma), Some(pmi), None) => out.push(with_exact_edges(ellipse_contour(pc, pma, pmi), &pt, e)),
                 (Some(pc), Some(pma), Some(pmi), Some(s)) => {
                     if let (Some(from), Some(to)) = (pt(s.from), pt(s.to)) {
-                        out.push(Contour::open(ellipse_arc_points([pc, pma, pmi], [from, to], s.winding)));
+                        out.push(with_exact_edges(Contour::open(ellipse_arc_points([pc, pma, pmi], [from, to], s.winding)), &pt, e));
                     }
                 }
                 _ => {}
@@ -613,6 +615,99 @@ pub(super) fn meeting_boxes(boxes: &[[f64; 4]]) -> Vec<BoxPair> {
     pairs
 }
 
+/// THE CONTOUR OF ONE CURVE WITH ITS EXACT EDGES, from entity `e` with its points where `at` puts them: an ellipse one
+/// edge, an arc of one one edge, the kernel building the ellipse it is rather than the segments of its points.
+fn with_exact_edges(mut c: Contour, at: &dyn Fn(Id) -> Option<Point2>, e: &SketchEntity) -> Contour {
+    if let Some(curve) = Curve::of_placed(at, e) {
+        c.edges = curve.to_edges();
+        c.edge_src = vec![e.id; c.edges.len()];
+    }
+    c
+}
+
+/// THE PIECES OF A SPLINE OR AN ARC OF AN ELLIPSE IN A LOOP AS THE CURVE THEY ARE. The arrangement cuts such a curve as
+/// the segments of its points, and the kernel built a face of a body for every segment; a run of them along one curve
+/// now goes as the piece of that curve between the ends of the run - an arc of an ellipse one edge, a spline a cubic a
+/// span. A piece starts and ends where the run does, on the edges beside it: a crossing with a line lies on a segment of
+/// the points, up to 0.005 mm off the curve. An ellipse keeps its ends, held by its centre and axes, and the edges beside
+/// it are brought to them.
+fn exact_runs(c: &mut Contour, exact: &std::collections::HashMap<Id, Curve>) {
+    let n = c.edges.len();
+    if n == 0 || c.edge_src.len() != n || !c.edge_src.iter().any(|id| exact.contains_key(id)) {
+        return;
+    }
+    // WHETHER EDGE k GOES ON FROM THE EDGE BEFORE IT along one curve: of the same curve, and at the same place of it - the
+    // point they share found from the middle of each. Where a curve crosses itself the two stand on two branches of it,
+    // and a lobe of a figure of eight, all of one spline, is a run from the crossing round to it.
+    let joined = |k: usize| -> bool {
+        let p = (k + n - 1) % n;
+        if c.edge_src[p] != c.edge_src[k] {
+            return false;
+        }
+        let (Some(curve), Some([pa, pb]), Some([qa, qb])) = (exact.get(&c.edge_src[k]), c.edges[p].ends(), c.edges[k].ends()) else { return true };
+        let middle = |a: Point2, b: Point2| curve.nearest(Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)).t;
+        let gap = (curve.polish(pb, middle(pa, pb)) - curve.polish(qa, middle(qa, qb))).abs();
+        gap < 1e-6 || (curve.closed() && (gap - 1.0).abs() < 1e-6)
+    };
+    // the loop read from the start of a run, or from its first edge when it is one curve all round
+    let first = (0..n).find(|&k| !joined(k)).unwrap_or(0);
+    let at = |k: usize| (first + k) % n;
+    let mut edges: Vec<ProfEdge> = Vec::with_capacity(n);
+    let mut src: Vec<Id> = Vec::with_capacity(n);
+    let mut k = 0;
+    while k < n {
+        let id = c.edge_src[at(k)];
+        let len = 1 + (k + 1..n).take_while(|&j| joined(at(j))).count();
+        let run: Vec<ProfEdge> = (k..k + len).map(|j| c.edges[at(j)]).collect();
+        let piece = exact.get(&id).and_then(|curve| run_as_curve(curve, &run));
+        let laid = piece.unwrap_or(run);
+        src.extend(std::iter::repeat_n(id, laid.len()));
+        edges.extend(laid);
+        k += len;
+    }
+    // the edges beside an ellipse brought to its ends
+    let m = edges.len();
+    for k in 0..m {
+        if let (ProfEdge::Oval { .. }, Some([s, e])) = (edges[k], edges[k].ends()) {
+            let (before, after) = ((k + m - 1) % m, (k + 1) % m);
+            edges[before] = edges[before].with_end(s);
+            edges[after] = edges[after].with_start(e);
+        }
+    }
+    c.edges = edges;
+    c.edge_src = src;
+}
+
+/// THE RUN OF SEGMENTS ALONG `curve` AS THE PIECE OF IT between the ends of the run, in the way the run goes. `None`
+/// when the run holds an edge that is no segment.
+///
+/// The place of each end is found from the place of the point next to it in the run: where a curve crosses itself, its
+/// two ends stand at one point on two branches of it - a lobe of a figure of eight was taken for the whole curve, and its
+/// area came out 0.008 mm^2 against the other lobe's 0.
+fn run_as_curve(curve: &Curve, run: &[ProfEdge]) -> Option<Vec<ProfEdge>> {
+    let [start, second] = run.first()?.ends()?;
+    let [last_but_one, end] = run.last()?.ends()?;
+    if !run.iter().all(|e| matches!(e, ProfEdge::Line { .. })) {
+        return None;
+    }
+    let (t0, t1) = (curve.polish(start, curve.nearest(second).t), curve.polish(end, curve.nearest(last_but_one).t));
+    // the way the run goes along the curve, told by its first segment; a closed curve run round from where it started is
+    // the whole of it
+    let v = curve.velocity(t0);
+    let forward = (second.x - start.x) * v.x + (second.y - start.y) * v.y >= 0.0;
+    let whole = curve.closed() && start.dist(end) < 1e-9 && ((t1 - t0).rem_euclid(1.0) < 1e-6 || (t0 - t1).rem_euclid(1.0) < 1e-6);
+    let span = |from: f64, to: f64| if curve.closed() { from + if whole { 1.0 } else { (to - from).rem_euclid(1.0) } } else { to };
+    let mut edges = if forward { curve.piece([t0, span(t0, t1)]).to_edges() } else { curve.piece([t1, span(t1, t0)]).to_edges() };
+    if !forward {
+        edges.reverse();
+        edges = edges.into_iter().map(ProfEdge::reversed).collect();
+    }
+    let last = edges.len().checked_sub(1)?;
+    edges[0] = edges[0].with_start(start);
+    edges[last] = edges[last].with_end(end);
+    Some(edges)
+}
+
 /// The planar arrangement of a sketch: every entity — lines, arcs, circles and splines — is intersected with every
 /// other, the curves are cut at the intersection points, and the minimal faces, that is the closed regions, are
 /// assembled. This is what turns the strip between two circles, cut by a line, into a selectable closed region.
@@ -693,6 +788,12 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
     let mut curves: Vec<ArrCurve> = Vec::new();
     let mut curve_eid: Vec<Id> = Vec::new(); // provenance of a curve, its entity id, parallel to `curves`
     let mut out_ellipse: Vec<(Contour, Vec<Id>)> = Vec::new(); // ellipses are regions of their own, outside the arrangement graph
+                                                               // the curves that enter the arrangement as the segments of their points, as the curves they are, to give the kernel
+    let exact: std::collections::HashMap<Id, Curve> = entities
+        .iter()
+        .filter(|e| !e.construction && matches!(e.kind, EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. }))
+        .filter_map(|e| Curve::of_placed(&|id: Id| pt(id).map(|(x, y)| Point2::new(x, y)), e).map(|c| (e.id, c)))
+        .collect();
     for e in entities {
         if e.construction {
             continue;
@@ -756,7 +857,9 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
             EntityKind::Ellipse { c, ma, mi, span: None } => {
                 // an ellipse is a closed region of its own; its intersections are not part of the arrangement yet
                 if let (Some(pc), Some(pma), Some(pmi)) = (pt(c), pt(ma), pt(mi)) {
-                    out_ellipse.push((ellipse_contour(crate::geom::Point2::new(pc.0, pc.1), crate::geom::Point2::new(pma.0, pma.1), crate::geom::Point2::new(pmi.0, pmi.1)), vec![e.id]));
+                    let placed = |id: Id| pt(id).map(|(x, y)| Point2::new(x, y));
+                    let contour = ellipse_contour(crate::geom::Point2::new(pc.0, pc.1), crate::geom::Point2::new(pma.0, pma.1), crate::geom::Point2::new(pmi.0, pmi.1));
+                    out_ellipse.push((with_exact_edges(contour, &placed, e), vec![e.id]));
                 }
             }
         }
@@ -1062,6 +1165,7 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
         let mut cont = Contour::closed(cpts);
         cont.edges = cedges;
         cont.edge_src = csrc;
+        exact_runs(&mut cont, &exact);
         if cont.signed_area() > 1e-3 {
             // provenance of a face: the set of entities whose pieces form its boundary, sorted and without
             // repeats

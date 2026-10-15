@@ -12,6 +12,7 @@
 use super::*;
 
 mod blend;
+mod edges;
 mod meet;
 mod shift;
 mod stretch;
@@ -53,7 +54,11 @@ const TURN: f64 = std::f64::consts::TAU;
 impl Curve {
     /// THE CURVE OF ENTITY `e` of sketch `s`, where its points stand; `None` when a point of it is missing.
     pub fn of(s: &Sketch, e: &SketchEntity) -> Option<Curve> {
-        let at = |id: Id| s.point(id).map(|p| Point2::new(p.x, p.y));
+        Curve::of_placed(&|id: Id| s.point(id).map(|p| Point2::new(p.x, p.y)), e)
+    }
+
+    /// THE CURVE OF ENTITY `e` with its points where `at` puts them; `None` when a point of it is missing.
+    pub fn of_placed(at: &dyn Fn(Id) -> Option<Point2>, e: &SketchEntity) -> Option<Curve> {
         let angle = |c: Point2, p: Point2| (p.y - c.y).atan2(p.x - c.x);
         Some(match &e.kind {
             EntityKind::Line { a, b } => Curve::Line { a: at(*a)?, b: at(*b)? },
@@ -336,7 +341,7 @@ impl Curve {
     /// The place `t` near `start` where the curve is nearest to `p`, by Newton's steps on the derivative of the squared
     /// distance, held within the curve - on a closed curve going on round past its start: a point 0.001 of the way
     /// before the start of a closed spline, held at 0 by the end of the curve, was answered 0.025 mm off it.
-    fn polish(&self, p: Point2, start: f64) -> f64 {
+    pub(crate) fn polish(&self, p: Point2, start: f64) -> f64 {
         let closed = self.closed();
         let hold = |t: f64| if closed { t.rem_euclid(1.0) } else { t.clamp(0.0, 1.0) };
         let mut t = start;

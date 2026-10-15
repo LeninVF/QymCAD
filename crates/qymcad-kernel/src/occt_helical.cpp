@@ -68,7 +68,7 @@ extern "C" QymShape* qym_shape_helical_profile(const QymShape* base, const doubl
             if (nedges < 2) return why("helix/profile", "the profile loop has fewer than two edges"), nullptr;
             for (size_t i = 0; i < nedges; ++i) {
                 double kind = pp[0], ax = pp[1], ay = pp[2], bx = pp[3], by = pp[4], cx = pp[5], cy = pp[6], ccw = pp[7];
-                pp += 9;
+                pp += QYM_EDGE_FIELDS;
                 if (kind == 1.0) {                                  // AN ARC becomes a polyline by sagitta
                     double r = std::hypot(ax - cx, ay - cy);
                     double t0 = atan2(ay - cy, ax - cx), t1 = atan2(by - cy, bx - cx);

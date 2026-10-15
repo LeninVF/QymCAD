@@ -1243,6 +1243,10 @@ impl Project {
                     let id = self.alloc_id();
                     self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Circle { center: ci, r }, construction: false });
                 }
+                // an ellipse and a span of a spline are laid as the curves they are
+                ProfEdge::Oval { .. } | ProfEdge::Cubic { .. } => {
+                    self.lay_curve(si, &crate::model::curve::Curve::of_edge(e), crate::model::LayAs::default());
+                }
             }
         }
         let (sid, nm) = (self.sketches[si].id, self.sketches[si].name.clone());

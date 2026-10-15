@@ -358,6 +358,13 @@ fn placed_polyline(verts: &[(Point2, f64)], closed: bool, place: &Place, curves:
             }
             (ProfEdge::Circle { center, r }, Some((k, _))) => curves.push(ProfEdge::Circle { center: place.at(center.x, center.y), r: r * k }),
             (ProfEdge::Circle { center, r }, None) => run(|t| place.at(center.x + r * t.cos(), center.y + r * t.sin()), 0.0, std::f64::consts::TAU, curves),
+            // a place is an affine map, which takes an ellipse to an ellipse and a cubic to a cubic: by their points
+            (ProfEdge::Oval { centre, major, minor, from, sweep }, _) => {
+                let c = place.at(centre.x, centre.y);
+                let axis = |v: Point2| place.at(centre.x + v.x, centre.y + v.y) - c;
+                curves.push(ProfEdge::Oval { centre: c, major: axis(major), minor: axis(minor), from, sweep });
+            }
+            (ProfEdge::Cubic { a, c1, c2, b }, _) => curves.push(ProfEdge::Cubic { a: place.at(a.x, a.y), c1: place.at(c1.x, c1.y), c2: place.at(c2.x, c2.y), b: place.at(b.x, b.y) }),
         }
     }
 }

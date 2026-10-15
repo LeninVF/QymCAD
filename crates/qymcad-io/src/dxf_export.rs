@@ -53,6 +53,20 @@ pub fn export_dxf(edges: &[ProfEdge], path: &str) -> Result<(), String> {
                 ln(50, &format!("{:.6}", start), &mut s);
                 ln(51, &format!("{:.6}", end), &mut s);
             }
+            // R12 has no ELLIPSE and no SPLINE: an ellipse and a span of a spline go as the LINEs of their points
+            ProfEdge::Oval { .. } | ProfEdge::Cubic { .. } => {
+                let pts: Vec<_> = (0..=48).filter_map(|k| e.curve_at(k as f64 / 48.0)).collect();
+                for w in pts.windows(2) {
+                    ln(0, "LINE", &mut s);
+                    ln(8, "0", &mut s);
+                    ln(10, &format!("{:.6}", w[0].x), &mut s);
+                    ln(20, &format!("{:.6}", w[0].y), &mut s);
+                    ln(30, "0.0", &mut s);
+                    ln(11, &format!("{:.6}", w[1].x), &mut s);
+                    ln(21, &format!("{:.6}", w[1].y), &mut s);
+                    ln(31, "0.0", &mut s);
+                }
+            }
         }
     }
     s.push_str("0\nENDSEC\n0\nEOF\n");

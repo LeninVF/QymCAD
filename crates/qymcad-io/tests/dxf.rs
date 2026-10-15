@@ -171,14 +171,16 @@ fn real_drawings_are_measured() {
         match import_dxf(&f.to_string_lossy()) {
             Ok(s) => {
                 let (mut lines, mut arcs, mut circles) = (0, 0, 0);
+                let mut curves = 0;
                 for c in &s.curves {
                     match c {
                         qymcad_core::geom::ProfEdge::Line { .. } => lines += 1,
                         qymcad_core::geom::ProfEdge::Arc { .. } => arcs += 1,
                         qymcad_core::geom::ProfEdge::Circle { .. } => circles += 1,
+                        qymcad_core::geom::ProfEdge::Oval { .. } | qymcad_core::geom::ProfEdge::Cubic { .. } => curves += 1,
                     }
                 }
-                println!("DRAWING {}: lines {lines}, arcs {arcs}, circles {circles}; not read {:?}", f.display(), s.skipped);
+                println!("DRAWING {}: lines {lines}, arcs {arcs}, circles {circles}, ellipses and spans of splines {curves}; not read {:?}", f.display(), s.skipped);
             }
             Err(e) => println!("DRAWING {}: refused - {e}", f.display()),
         }

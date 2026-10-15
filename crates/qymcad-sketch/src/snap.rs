@@ -83,10 +83,8 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
                     if c.edge_src.get(k) == c.edge_src.get((k + 1) % n) {
                         continue;
                     }
-                    let p = match c.edges[k] {
-                        qymcad_core::geom::ProfEdge::Line { b, .. } | qymcad_core::geom::ProfEdge::Arc { b, .. } => b,
-                        qymcad_core::geom::ProfEdge::Circle { .. } => continue,
-                    };
+                    // the end of the edge; a circle and a whole ellipse have none
+                    let Some([_, p]) = c.edges[k].ends() else { continue };
                     let d = sd(p, &*sk.view);
                     if best.is_none_or(|(bd, _, _)| d < bd) {
                         best = Some((d, p, 5));

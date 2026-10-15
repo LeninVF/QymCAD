@@ -90,6 +90,10 @@
 #include <ShapeFix_ShapeTolerance.hxx>
 #include <ShapeFix_FixSmallFace.hxx>
 #include <Geom_Circle.hxx>
+#include <Geom_Ellipse.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <TColgp_Array1OfPnt.hxx>
+#include <gp_Elips.hxx>
 #include <BRepLib.hxx>
 #include <ShapeFix_Edge.hxx>
 #include <Geom_Curve.hxx>
@@ -354,6 +358,10 @@ struct QymShapeList {
 
 /// The bit that marks a STRUCTURAL name (one derived from the recipe) apart from a positional one.
 static const int QYM_NAMED = 0x40000000;
+/// HOW MANY NUMBERS ONE EDGE OF A PROFILE TAKES: its kind, nine numbers of its shape and its name. The Rust side holds
+/// the same number (`EDGE_FIELDS`, `geom/profile.rs`) and says what each number of each kind is.
+static const size_t QYM_EDGE_FIELDS = 11;
+
 /// A ROLE AWAITING ITS NAME: the number the bridge hands a face an operation makes, until the table of the document
 /// names it when the result lands (`names::ROLE` on the Rust side).
 static const int QYM_ROLE = 0x10000000;

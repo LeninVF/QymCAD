@@ -11,6 +11,74 @@ pub enum ProfEdge {
     Arc { a: Point2, b: Point2, center: Point2, ccw: bool },
     /// A full circle (centre and radius), which is a closed contour in its own right.
     Circle { center: Point2, r: f64 },
+    /// An ellipse or an arc of one: its semi-axes as vectors from the centre, from the eccentric angle `from` through
+    /// the signed `sweep` - a whole turn for an ellipse, which is a closed contour in its own right.
+    Oval { centre: Point2, major: Point2, minor: Point2, from: f64, sweep: f64 },
+    /// A cubic span of a spline by its Bezier points: from `a`, drawn towards `c1` and `c2`, into `b`.
+    Cubic { a: Point2, c1: Point2, c2: Point2, b: Point2 },
+}
+
+impl ProfEdge {
+    /// THE EDGE RUN THE OTHER WAY, from its end to its start. A circle and a whole ellipse have no ends and stay.
+    pub fn reversed(self) -> ProfEdge {
+        match self {
+            ProfEdge::Line { a, b } => ProfEdge::Line { a: b, b: a },
+            ProfEdge::Arc { a, b, center, ccw } => ProfEdge::Arc { a: b, b: a, center, ccw: !ccw },
+            ProfEdge::Oval { centre, major, minor, from, sweep } if !self.whole() => ProfEdge::Oval { centre, major, minor, from: from + sweep, sweep: -sweep },
+            ProfEdge::Cubic { a, c1, c2, b } => ProfEdge::Cubic { a: b, c1: c2, c2: c1, b: a },
+            whole => whole,
+        }
+    }
+
+    /// Whether the edge is a closed loop of its own: a circle or a whole ellipse.
+    pub fn whole(&self) -> bool {
+        match *self {
+            ProfEdge::Circle { .. } => true,
+            ProfEdge::Oval { sweep, .. } => sweep.abs() >= std::f64::consts::TAU - 1e-9,
+            _ => false,
+        }
+    }
+
+    /// THE TWO ENDS OF THE EDGE, its start first; `None` for a circle or a whole ellipse, which have none.
+    pub fn ends(&self) -> Option<[Point2; 2]> {
+        match *self {
+            ProfEdge::Line { a, b } | ProfEdge::Arc { a, b, .. } | ProfEdge::Cubic { a, b, .. } => Some([a, b]),
+            ProfEdge::Oval { .. } if !self.whole() => Some([self.curve_at(0.0)?, self.curve_at(1.0)?]),
+            _ => None,
+        }
+    }
+
+    /// THE EDGE STARTING AT `p` instead: a segment, an arc and a cubic move their start there, a circle and an ellipse -
+    /// held by their centre and axes - stay as they are.
+    pub fn with_start(self, p: Point2) -> ProfEdge {
+        match self {
+            ProfEdge::Line { b, .. } => ProfEdge::Line { a: p, b },
+            ProfEdge::Arc { b, center, ccw, .. } => ProfEdge::Arc { a: p, b, center, ccw },
+            ProfEdge::Cubic { c1, c2, b, .. } => ProfEdge::Cubic { a: p, c1, c2, b },
+            held => held,
+        }
+    }
+
+    /// THE EDGE ENDING AT `p` instead, as `with_start` moves its start.
+    pub fn with_end(self, p: Point2) -> ProfEdge {
+        self.reversed().with_start(p).reversed()
+    }
+
+    /// THE POINT AT SHARE `t` OF AN ELLIPSE OR A CUBIC EDGE, 0 at its start and 1 at its end; `None` for another kind.
+    pub fn curve_at(&self, t: f64) -> Option<Point2> {
+        match *self {
+            ProfEdge::Oval { centre, major, minor, from, sweep } => {
+                let (s, c) = (from + sweep * t).sin_cos();
+                Some(Point2::new(centre.x + major.x * c + minor.x * s, centre.y + major.y * c + minor.y * s))
+            }
+            ProfEdge::Cubic { a, c1, c2, b } => {
+                let u = 1.0 - t;
+                let [w0, w1, w2, w3] = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+                Some(Point2::new(w0 * a.x + w1 * c1.x + w2 * c2.x + w3 * b.x, w0 * a.y + w1 * c1.y + w2 * c2.y + w3 * b.y))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// A closed or open polyline contour in a plane (XY at the `z` of the operation).
@@ -108,11 +176,7 @@ impl Contour {
                 self.edges.reverse();
                 self.edge_src.reverse(); // Provenance travels with the edges, otherwise face names shift.
                 for e in self.edges.iter_mut() {
-                    *e = match *e {
-                        ProfEdge::Line { a, b } => ProfEdge::Line { a: b, b: a },
-                        ProfEdge::Arc { a, b, center, ccw } => ProfEdge::Arc { a: b, b: a, center, ccw: !ccw },
-                        c @ ProfEdge::Circle { .. } => c,
-                    };
+                    *e = e.reversed();
                 }
             }
             // 2) The polyline is derived from the edges rather than being an independent description.
@@ -147,6 +211,12 @@ impl Contour {
                 }
                 ProfEdge::Circle { center, r } => {
                     pts.extend(circle_contour(center.x, center.y, r, (r * 0.0016).clamp(0.003, 0.05)).points);
+                }
+                // an ellipse by 96 points a turn, a cubic by 24: within 0.005 mm of an ellipse 40 by 20 and of a span 20 long
+                ProfEdge::Oval { .. } | ProfEdge::Cubic { .. } => {
+                    let n = if let ProfEdge::Oval { sweep, .. } = *e { ((sweep.abs() / std::f64::consts::TAU) * 96.0).ceil().max(8.0) as usize } else { 24 };
+                    let along = (0..=n).filter_map(|k| e.curve_at(k as f64 / n as f64));
+                    pts.extend(along.skip(usize::from(!pts.is_empty())));
                 }
             }
         }

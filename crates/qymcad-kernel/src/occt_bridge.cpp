@@ -2281,17 +2281,18 @@ static TopoDS_Shape extrude_shape(const double* xy, size_t n, double h) {
 }
 
 // --- EXACT profiles (a B-rep built from real curves) ------------------------------------------
-// The encoding of the flat array of doubles: [L, then for each contour: nedges, then 8 numbers per edge:
-//   kind, ax, ay, bx, by, cx, cy, ccw]. kind 0 is a segment (a to b), 1 an arc (a to b about c, ccw), 2 a
-//   full circle (centre c, radius = ax — a contour of one "edge"). The first contour is the outer one, the
-//   rest are holes.
+// The encoding of the flat array of doubles: [L, then for each contour: nedges, then QYM_EDGE_FIELDS numbers per
+//   edge: kind, nine numbers of its shape, its name]. kind 0 is a segment (a to b), 1 an arc (a to b about c, ccw),
+//   2 a full circle (centre c, radius first - a contour of one "edge"), 3 an ellipse or an arc of one (centre, the
+//   semi-axes as vectors, the first eccentric angle and the signed sweep), 4 a cubic span of a spline by its four
+//   Bezier points. The first contour is the outer one, the rest are holes.
 // It gives EXACT faces (a cylinder is 3 faces, not a faceted prism) and real edge and face topology.
 // The origins of one contour's edges (the 9th number of each edge), without moving the pointer.
 static std::vector<int> wire_src(const double* p) {
     size_t nedges = (size_t)(p[0]);
     std::vector<int> out;
     out.reserve(nedges);
-    for (size_t i = 0; i < nedges; ++i) out.push_back((int)p[1 + i * 9 + 8]);
+    for (size_t i = 0; i < nedges; ++i) out.push_back((int)p[1 + i * QYM_EDGE_FIELDS + QYM_EDGE_FIELDS - 1]);
     return out;
 }
 
@@ -2301,34 +2302,91 @@ static std::vector<int> wire_src(const double* p) {
 // for a gap of 1e-4).
 static const double QYM_PROFILE_WELD = 1e-3;
 
-// ONE EDGE OF AN ENCODED PROFILE, as read: what it is, its ends, its centre, its way round, and its origin.
+// ONE EDGE OF AN ENCODED PROFILE, as read: what it is, the nine numbers of its shape, and its origin.
 struct QymProfileEdge {
-    double kind, ax, ay, bx, by, cx, cy, ccw;
+    double kind;
+    double d[9];
     int src;
+    // a circle and a whole ellipse are loops of their own, with no ends
+    bool whole() const { return kind == 2.0 || (kind == 3.0 && std::abs(d[7]) >= 2.0 * M_PI - 1e-9); }
+    // the point of an ellipse at its eccentric angle w
+    gp_Pnt2d oval_at(double w) const { return gp_Pnt2d(d[0] + d[2] * cos(w) + d[4] * sin(w), d[1] + d[3] * cos(w) + d[5] * sin(w)); }
+    gp_Pnt2d start() const { return kind == 3.0 ? oval_at(d[6]) : gp_Pnt2d(d[0], d[1]); }
+    gp_Pnt2d end() const {
+        if (kind == 3.0) return oval_at(d[6] + d[7]);
+        if (kind == 4.0) return gp_Pnt2d(d[6], d[7]);
+        return gp_Pnt2d(d[2], d[3]);
+    }
+    // an ellipse is held by its centre and axes, and its ends are not moved; a segment, an arc and a cubic are
+    bool set_end(const gp_Pnt2d& q) {
+        if (kind == 3.0) return false;
+        double* at = kind == 4.0 ? d + 6 : d + 2;
+        at[0] = q.X();
+        at[1] = q.Y();
+        return true;
+    }
+    bool set_start(const gp_Pnt2d& q) {
+        if (kind == 3.0) return false;
+        d[0] = q.X();
+        d[1] = q.Y();
+        return true;
+    }
 };
+
+// THE EDGE OF AN ELLIPSE OR AN ARC OF ONE: OCCT wants its major radius first, so axes the other way round are taken as
+// (N, -M) from the angle less a quarter turn - the same points - and the plane is turned over where the minor axis lies
+// clockwise of the major, so the eccentric angle runs the way the sketch runs it.
+static TopoDS_Edge qym_oval_edge(const QymProfileEdge& g) {
+    double mx = g.d[2], my = g.d[3], nx = g.d[4], ny = g.d[5], from = g.d[6], sweep = g.d[7];
+    if (std::hypot(nx, ny) > std::hypot(mx, my)) {
+        const double ox = mx, oy = my;
+        mx = nx;
+        my = ny;
+        nx = -ox;
+        ny = -oy;
+        from -= M_PI / 2.0;
+    }
+    const double a = std::hypot(mx, my), b = std::hypot(nx, ny);
+    if (b < 1e-12) return TopoDS_Edge();
+    const double up = (mx * ny - my * nx) >= 0.0 ? 1.0 : -1.0;
+    gp_Elips el(gp_Ax2(gp_Pnt(g.d[0], g.d[1], 0.0), gp_Dir(0.0, 0.0, up), gp_Dir(mx / a, my / a, 0.0)), a, b);
+    Handle(Geom_Ellipse) curve = new Geom_Ellipse(el);
+    if (g.whole()) return BRepBuilderAPI_MakeEdge(curve).Edge();
+    if (sweep > 0.0) return BRepBuilderAPI_MakeEdge(curve, from, from + sweep).Edge();
+    TopoDS_Edge e = BRepBuilderAPI_MakeEdge(curve, from + sweep, from).Edge();
+    e.Reverse();
+    return e;
+}
+
+// THE EDGE OF A CUBIC SPAN OF A SPLINE, by its four Bezier points.
+static TopoDS_Edge qym_cubic_edge(const QymProfileEdge& g) {
+    TColgp_Array1OfPnt poles(1, 4);
+    for (int k = 0; k < 4; ++k) poles.SetValue(k + 1, gp_Pnt(g.d[2 * k], g.d[2 * k + 1], 0.0));
+    Handle(Geom_BezierCurve) curve = new Geom_BezierCurve(poles);
+    return BRepBuilderAPI_MakeEdge(curve).Edge();
+}
 
 static TopoDS_Wire build_exact_wire_src(const double*& p, TopTools_DataMapOfShapeInteger* esrc) {
     size_t nedges = (size_t)(*p++);
     std::vector<QymProfileEdge> read;
     read.reserve(nedges);
     for (size_t i = 0; i < nedges; ++i) {
-        QymProfileEdge g{p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], (int)p[8]};
-        p += 9;
+        QymProfileEdge g{p[0], {p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9]}, (int)p[QYM_EDGE_FIELDS - 1]};
+        p += QYM_EDGE_FIELDS;
         // A SEGMENT OF NO LENGTH IS NO EDGE: a glyph of a TTF closes by returning to its first point, and OCCT throws
         // building an edge between two equal points - the whole profile was refused
-        if (g.kind == 0.0 && std::hypot(g.bx - g.ax, g.by - g.ay) < 1e-9) continue;
+        if (g.kind == 0.0 && std::hypot(g.d[2] - g.d[0], g.d[3] - g.d[1]) < 1e-9) continue;
         read.push_back(g);
     }
     // the ends of neighbouring edges welded, the last to the first included: each edge ends where the next one starts,
     // so the loop closes on the point it began at. A circle is a loop of its own and has no ends.
+    // An ellipse keeps its ends where its centre and axes put them: the edge beside it is welded to it instead.
     for (size_t i = 0; i < read.size(); ++i) {
-        const QymProfileEdge next = read[(i + 1) % read.size()];
+        QymProfileEdge& next = read[(i + 1) % read.size()];
         QymProfileEdge& cur = read[i];
-        if (next.kind == 2.0 || cur.kind == 2.0) continue;
-        if (std::hypot(next.ax - cur.bx, next.ay - cur.by) < QYM_PROFILE_WELD) {
-            cur.bx = next.ax;
-            cur.by = next.ay;
-        }
+        if (next.whole() || cur.whole()) continue;
+        const gp_Pnt2d e = cur.end(), s = next.start();
+        if (e.Distance(s) < QYM_PROFILE_WELD && !cur.set_end(s)) next.set_start(e);
     }
     BRepBuilderAPI_MakeWire mkw;
     std::vector<int> srcs; // the origins, in the order the edges are added
@@ -2336,15 +2394,19 @@ static TopoDS_Wire build_exact_wire_src(const double*& p, TopTools_DataMapOfShap
     for (const QymProfileEdge& g : read) {
         TopoDS_Edge e;
         if (g.kind == 2.0) { // a full circle
-            gp_Circ circ(gp_Ax2(gp_Pnt(g.cx, g.cy, 0.0), gp_Dir(0.0, 0.0, 1.0)), g.ax);
+            gp_Circ circ(gp_Ax2(gp_Pnt(g.d[4], g.d[5], 0.0), gp_Dir(0.0, 0.0, 1.0)), g.d[0]);
             e = BRepBuilderAPI_MakeEdge(circ).Edge();
         } else if (g.kind == 1.0) { // an arc from a to b about the centre c
-            double r = std::hypot(g.ax - g.cx, g.ay - g.cy);
-            gp_Dir n(0.0, 0.0, g.ccw > 0.5 ? 1.0 : -1.0);
-            gp_Circ circ(gp_Ax2(gp_Pnt(g.cx, g.cy, 0.0), n), r);
-            e = BRepBuilderAPI_MakeEdge(circ, gp_Pnt(g.ax, g.ay, 0.0), gp_Pnt(g.bx, g.by, 0.0)).Edge();
+            double r = std::hypot(g.d[0] - g.d[4], g.d[1] - g.d[5]);
+            gp_Dir n(0.0, 0.0, g.d[6] > 0.5 ? 1.0 : -1.0);
+            gp_Circ circ(gp_Ax2(gp_Pnt(g.d[4], g.d[5], 0.0), n), r);
+            e = BRepBuilderAPI_MakeEdge(circ, gp_Pnt(g.d[0], g.d[1], 0.0), gp_Pnt(g.d[2], g.d[3], 0.0)).Edge();
+        } else if (g.kind == 3.0) { // an ellipse or an arc of one
+            e = qym_oval_edge(g);
+        } else if (g.kind == 4.0) { // a cubic span of a spline
+            e = qym_cubic_edge(g);
         } else { // a segment
-            e = BRepBuilderAPI_MakeEdge(gp_Pnt(g.ax, g.ay, 0.0), gp_Pnt(g.bx, g.by, 0.0)).Edge();
+            e = BRepBuilderAPI_MakeEdge(gp_Pnt(g.d[0], g.d[1], 0.0), gp_Pnt(g.d[2], g.d[3], 0.0)).Edge();
         }
         if (!e.IsNull()) {
             mkw.Add(e);

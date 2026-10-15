@@ -179,14 +179,11 @@ pub(super) fn chains_round(ch: &Change, from: &[usize]) -> Chains {
 /// of 200 by 200 took the whole grid, 0.25 s a frame.
 fn borders_a_moved_curve(c: &Contour, moved: &HashSet<Id>, free_end: &dyn Fn(Id, Point2) -> bool) -> bool {
     let key = |p: Point2| ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64);
-    let ends = |e: &ProfEdge| match *e {
-        ProfEdge::Line { a, b } | ProfEdge::Arc { a, b, .. } => Some((a, b)),
-        ProfEdge::Circle { .. } => None,
-    };
-    let walked: HashSet<((i64, i64), (i64, i64))> = c.edges.iter().filter_map(ends).map(|(a, b)| (key(a), key(b))).collect();
+    let ends = |e: &ProfEdge| e.ends();
+    let walked: HashSet<((i64, i64), (i64, i64))> = c.edges.iter().filter_map(ends).map(|[a, b]| (key(a), key(b))).collect();
     c.edges.iter().zip(&c.edge_src).filter(|(_, id)| moved.contains(id)).any(|(e, &id)| match ends(e) {
         None => true,
-        Some((a, b)) => !walked.contains(&(key(b), key(a))) || !(free_end(id, a) || free_end(id, b)),
+        Some([a, b]) => !walked.contains(&(key(b), key(a))) || !(free_end(id, a) || free_end(id, b)),
     })
 }
 

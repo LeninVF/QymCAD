@@ -541,6 +541,11 @@ impl ThreadSpec {
                         ccw: !ccw, // mirroring reverses the traversal direction of an arc
                     },
                     ProfEdge::Circle { center, r } => ProfEdge::Circle { center: Point2::new(center.x, -center.y), r },
+                    // the semi-axes mirrored with the centre: the eccentric angles stay
+                    ProfEdge::Oval { centre, major, minor, from, sweep } => {
+                        ProfEdge::Oval { centre: Point2::new(centre.x, -centre.y), major: Point2::new(major.x, -major.y), minor: Point2::new(minor.x, -minor.y), from, sweep }
+                    }
+                    ProfEdge::Cubic { a, c1, c2, b } => ProfEdge::Cubic { a: Point2::new(a.x, -a.y), c1: Point2::new(c1.x, -c1.y), c2: Point2::new(c2.x, -c2.y), b: Point2::new(b.x, -b.y) },
                 };
             }
         }
