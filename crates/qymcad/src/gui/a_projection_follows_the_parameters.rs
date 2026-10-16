@@ -147,8 +147,8 @@ mod tests {
         let mut hand = Hand::new(&mut app);
         hand.sk_tool(1).click2d(-30.0, -30.0).click2d(-10.0, -20.0).key(egui::Key::Escape).key(egui::Key::Escape);
         let s = &hand.app.project.sketches[si2];
-        let start = s.entities.iter().find_map(|e| match e.kind {
-            qymcad_core::model::EntityKind::Line { a, .. } if !e.construction => Some(a),
+        let start = s.entities.iter().find_map(|e| match e.kind.as_line() {
+            Some(qymcad_core::model::LineParts { a, .. }) if !e.construction => Some(a),
             _ => None,
         });
         let start = start.expect("the line drawn");

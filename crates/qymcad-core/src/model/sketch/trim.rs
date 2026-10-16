@@ -52,7 +52,7 @@ impl Project {
             let p0 = if t0 <= 1e-9 { a } else { self.sketch_point_at(si, pax + (pbx - pax) * t0, pay + (pby - pay) * t0, 1e-9) };
             let p1 = if t1 >= 1.0 - 1e-9 { b } else { self.sketch_point_at(si, pax + (pbx - pax) * t1, pay + (pby - pay) * t1, 1e-9) };
             let id = self.alloc_id();
-            self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Line { a: p0, b: p1 }, construction: false });
+            self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::LineParts { a: p0, b: p1 }.into(), construction: false });
             seg_pts.push((p0, p1));
         }
         // The pieces of one line stay on one straight line: the interior cut points are held by `PointOnLine`
@@ -95,40 +95,9 @@ impl Project {
             return None;
         }
         let mut cand: Vec<ExtendStop> = Vec::new();
-        for e in self.sketches.get(si)?.entities.iter().filter(|e| e.id != eid) {
-            let mut ts: Vec<f64> = Vec::new();
-            match e.kind {
-                // a spline takes no part in these crossings
-                EntityKind::Spline { .. } => {}
-                EntityKind::Line { a: c, b: d } => {
-                    if let (Some((cx, cy)), Some((dx, dy))) = (self.point_xy(si, c), self.point_xy(si, d)) {
-                        ts.extend(line_seg_t([pax, pay], [pbx, pby], [cx, cy], [dx, dy]));
-                    }
-                }
-                EntityKind::Circle { center, r } => {
-                    if let Some((cx, cy)) = self.point_xy(si, center) {
-                        ts.extend(line_circle_t(pax, pay, pbx, pby, cx, cy, r));
-                    }
-                }
-                EntityKind::Ellipse { c, ma, mi, .. } => {
-                    if let (Some((ex, ey)), Some((mx, my)), Some((nx, ny))) = (self.point_xy(si, c), self.point_xy(si, ma), self.point_xy(si, mi)) {
-                        let (ux, uy, major, minor) = ellipse_axes(ex, ey, mx, my, nx, ny);
-                        ts.extend(line_ellipse_roots([pax, pay], [pbx, pby], [ex, ey], [ux, uy], major, minor));
-                    }
-                }
-                EntityKind::Arc { center, a: aa, b: bb, ccw } => {
-                    if let (Some((cx, cy)), Some((sx, sy)), Some((ex, ey))) = (self.point_xy(si, center), self.point_xy(si, aa), self.point_xy(si, bb)) {
-                        let r = ((sx - cx).powi(2) + (sy - cy).powi(2)).sqrt();
-                        let (a0, a1) = ((sy - cy).atan2(sx - cx), (ey - cy).atan2(ex - cx));
-                        for t in line_circle_t(pax, pay, pbx, pby, cx, cy, r) {
-                            let (ix, iy) = (pax + (pbx - pax) * t, pay + (pby - pay) * t);
-                            if angle_in_arc((iy - cy).atan2(ix - cx), a0, a1, ccw) {
-                                ts.push(t);
-                            }
-                        }
-                    }
-                }
-            }
+        let s = self.sketches.get(si)?;
+        for e in s.entities.iter().filter(|e| e.id != eid) {
+            let ts = crate::model::curve::Curve::of(s, e).map(|c| c.meets_line([Point2::new(pax, pay), Point2::new(pbx, pby)])).unwrap_or_default();
             cand.extend(ts.into_iter().map(|t| ExtendStop { t, by: e.id }));
         }
         let mut stops = ExtendStops { before_a: cand.iter().copied().filter(|s| s.t < -1e-6).collect(), past_b: cand.into_iter().filter(|s| s.t > 1.0 + 1e-6).collect() };
@@ -173,16 +142,18 @@ impl Project {
             Some(Stretch { from: t(p).min(t(q)), to: t(p).max(t(q)) })
         };
         let round = |e: &super::SketchEntity| -> Option<OnCircle> {
-            match e.kind {
-                EntityKind::Circle { center, r } => Some(OnCircle { centre: at(center)?, r, span: None }),
-                EntityKind::Arc { center, a, b, ccw } => {
-                    let (c, pa, pb) = (at(center)?, at(a)?, at(b)?);
-                    let ang = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
-                    let (from, to) = if ccw { (ang(pa), ang(pb)) } else { (ang(pb), ang(pa)) };
-                    Some(OnCircle { centre: c, r: (pa.0 - c.0).hypot(pa.1 - c.1), span: Some(Stretch { from, to }) })
+            let circle = e.kind.circle_by(&|id| at(id).map(|(x, y)| Point2::new(x, y)))?;
+            let c = at(circle.center)?;
+            let ang = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
+            let span = match e.kind.as_arc() {
+                Some(arc) => {
+                    let (pa, pb) = (at(arc.a)?, at(arc.b)?);
+                    let (from, to) = if arc.ccw { (ang(pa), ang(pb)) } else { (ang(pb), ang(pa)) };
+                    Some(Stretch { from, to })
                 }
-                _ => None,
-            }
+                None => None,
+            };
+            Some(OnCircle { centre: c, r: circle.r, span })
         };
         // whether an angle stands on a counter-clockwise stretch of a circle (none: the whole of it)
         let inside = |span: Option<Stretch>, t: f64| match span {
@@ -194,9 +165,9 @@ impl Project {
             (0..64).map(|k| f64::from(k) / 64.0 * std::f64::consts::TAU).any(|t| inside(x, t) && inside(y, t) && inside(x, t + 0.01) && inside(y, t + 0.01))
         };
         let over = |e: &super::SketchEntity| -> bool {
-            match (&me.kind, &e.kind) {
-                (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) => {
-                    let (Some(a), Some(b), Some(c), Some(d)) = (at(*a), at(*b), at(*c), at(*d)) else { return false };
+            match (me.kind.as_line(), e.kind.as_line()) {
+                (Some(mine), Some(other)) => {
+                    let (Some(a), Some(b), Some(c), Some(d)) = (at(mine.a), at(mine.b), at(other.a), at(other.b)) else { return false };
                     let Some(mine) = line_span(a, b, a, b) else { return false };
                     line_span(a, b, c, d).is_some_and(|other| other.to.min(mine.to) - other.from.max(mine.from) > TOL)
                 }
@@ -302,7 +273,7 @@ impl Project {
     pub fn extend_curve(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
         use std::f64::consts::TAU;
         // a curve of another kind is stretched along its own way (`extend_piece`)
-        if !self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).is_some_and(|e| matches!(e.kind, EntityKind::Arc { .. })) {
+        if !self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).is_some_and(|e| e.kind.as_arc().is_some()) {
             return self.extend_piece(si, eid, Point2::new(clickx, clicky));
         }
         // Arc geometry; the coordinates are copied to release the borrow before calling
@@ -311,7 +282,7 @@ impl Project {
             let Some(s) = self.sketches.get(si) else { return false };
             let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return false };
             let p = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-            let EntityKind::Arc { center, a, b, ccw } = e.kind else { return false };
+            let Some(crate::model::ArcParts { center, a, b, ccw }) = e.kind.as_arc() else { return false };
             let (Some((cx, cy)), Some((ax, ay)), Some((bx, by))) = (p(center), p(a), p(b)) else { return false };
             (center, a, b, ccw, cx, cy, ax, ay, bx, by)
         };
@@ -361,10 +332,10 @@ impl Project {
         // of a half: measured on the case of the examples, breaking the first line of each of its 32 sketches renamed
         // 59 faces that did not move.
         if let Some(line) = self.sketches[si].entities.iter_mut().find(|e| e.id == eid) {
-            line.kind = EntityKind::Line { a, b: mid };
+            line.kind = crate::model::LineParts { a, b: mid }.into();
         }
         let id = self.alloc_id();
-        self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Line { a: mid, b }, construction: con });
+        self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::LineParts { a: mid, b }.into(), construction: con });
         // THE HALVES KEEP WHAT THE LINE WAS HELD BY: a horizontal or a vertical of its ends becomes one of each half. Left
         // as it stood, it held the far ends only, and the break point was free to leave the line - two constraints and
         // seven freedoms where there are three and six.
@@ -389,8 +360,8 @@ impl Project {
     }
     pub(crate) fn line_ends(&self, si: usize, eid: Id) -> Option<(Id, Id)> {
         let s = self.sketches.get(si)?;
-        s.entity(eid).and_then(|e| match e.kind {
-            EntityKind::Line { a, b } => Some((a, b)),
+        s.entity(eid).and_then(|e| match e.kind.as_line() {
+            Some(crate::model::LineParts { a, b }) => Some((a, b)),
             _ => None,
         })
     }
@@ -506,7 +477,7 @@ impl Project {
             let pa = self.sketch_point_at(si, cx + r * g0.cos(), cy + r * g0.sin(), 1e-6);
             let pb = self.sketch_point_at(si, cx + r * g1.cos(), cy + r * g1.sin(), 1e-6);
             let id = self.alloc_id();
-            self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Arc { center: center_id, a: pa, b: pb, ccw: accw }, construction: con });
+            self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::ArcParts { center: center_id, a: pa, b: pb, ccw: accw }.into(), construction: con });
             // The arc endpoints are anchored to the crossing entities, so a cut point does not drift along the
             // angle on the next solve.
             self.anchor_cut_point(si, pa);
@@ -539,7 +510,7 @@ impl Project {
             let pa = me.sketch_point_at(si, cx + r * g0.cos(), cy + r * g0.sin(), 1e-6);
             let pb = me.sketch_point_at(si, cx + r * g1.cos(), cy + r * g1.sin(), 1e-6);
             let id = first.take().unwrap_or_else(|| me.alloc_id());
-            me.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Arc { center: center_id, a: pa, b: pb, ccw }, construction: con });
+            me.sketches[si].entities.push(SketchEntity { id, kind: crate::model::ArcParts { center: center_id, a: pa, b: pb, ccw }.into(), construction: con });
         };
         self.sketches[si].entities.retain(|x| x.id != eid);
         match span {

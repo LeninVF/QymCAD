@@ -72,7 +72,7 @@ fn with_whole_figures(project: &Project, si: usize, picked: &[Id]) -> Vec<Id> {
 pub fn splines_with_handles(project: &Project, sel_sk: &SketchSelection, si: usize) -> Vec<Id> {
     let Some(s) = project.sketches.get(si) else { return Vec::new() };
     let picked = |e: &qymcad_core::model::SketchEntity, nodes: &[Id]| sel_sk.items.iter().any(|&(k, id)| (k == 1 && id == e.id) || (k == 0 && nodes.contains(&id)));
-    s.entities.iter().filter(|e| matches!(&e.kind, qymcad_core::model::EntityKind::Spline { nodes, .. } if picked(e, nodes))).map(|e| e.id).collect()
+    s.entities.iter().filter(|e| e.kind.as_spline().is_some_and(|sp| picked(e, sp.nodes))).map(|e| e.id).collect()
 }
 
 /// The indices of the texts selected in sketch `si`, in the order they were picked.
@@ -306,48 +306,25 @@ pub fn selected_centroid(project: &Project, sel: &Sel) -> Option<Point2> {
 }
 
 pub fn sel_line_pts(project: &Project, sel_sk: &SketchSelection, si: usize) -> Vec<(Id, Id)> {
-    use qymcad_core::model::EntityKind;
     let Some(s) = project.sketches.get(si) else { return Vec::new() };
-    sel_sk
-        .items
-        .iter()
-        .filter(|(k, _)| *k == 1)
-        .filter_map(|(_, eid)| {
-            s.entities.iter().find(|e| e.id == *eid).and_then(|e| match e.kind {
-                EntityKind::Line { a, b } => Some((a, b)),
-                _ => None,
-            })
-        })
-        .collect()
+    sel_sk.items.iter().filter(|(k, _)| *k == 1).filter_map(|(_, eid)| s.entity(*eid)?.kind.as_line().map(|l| (l.a, l.b))).collect()
 }
 
 /// The (centre, radius) of the first selected circle entity — for a tangency.
 pub fn sel_circle_cr(project: &Project, sel_sk: &SketchSelection, si: usize) -> Option<(Id, f64)> {
-    use qymcad_core::model::EntityKind;
     let s = project.sketches.get(si)?;
-    let pos = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-    sel_sk.items.iter().filter(|(k, _)| *k == 1).find_map(|(_, eid)| {
-        s.entities.iter().find(|e| e.id == *eid).and_then(|e| match e.kind {
-            EntityKind::Circle { center, r } => Some((center, r)),
-            // an arc: the radius is the distance from the centre to an end (the tangency uses the arc's LIVE radius variable)
-            EntityKind::Arc { center, a, .. } => match (pos(center), pos(a)) {
-                (Some((cx, cy)), Some((ax, ay))) => Some((center, ((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt())),
-                _ => None,
-            },
-            _ => None,
-        })
-    })
+    // an arc: the radius is the distance from the centre to an end (the tangency uses the arc's LIVE radius variable)
+    sel_sk.items.iter().filter(|(k, _)| *k == 1).find_map(|(_, eid)| s.entity(*eid).and_then(|e| qymcad_core::model::circle_of(s, e)).map(|c| (c.center, c.r)))
 }
 
 /// The ends of an existing LINE on which the point `p` lies (somewhere along it, not at an end) — for
 /// the automatic point-on-edge. Excludes the line (ea, eb) and any line where `p` is an end.
 pub fn line_under_point(project: &Project, view: &View2d, si: usize, p: Point2, ea: Id, eb: Id) -> Option<(Id, Id)> {
-    use qymcad_core::model::EntityKind;
     let s = project.sketches.get(si)?;
     let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
     let pt = |id: Id| points_by_id.get(&id).copied().map(|q| Point2::new(q.x, q.y));
     for e in &s.entities {
-        if let EntityKind::Line { a, b } = e.kind {
+        if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
             if (a == ea && b == eb) || (a == eb && b == ea) {
                 continue; // our own line
             }

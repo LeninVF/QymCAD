@@ -648,16 +648,9 @@ impl<'a> Hand<'a> {
                     .entities
                     .iter()
                     .find(|e| e.id == *id)
-                    .map(|e| match e.kind {
-                        qymcad_core::model::EntityKind::Line { a, b } => {
-                            at(a).zip(at(b)).map(|(u, v)| [0.5, 0.37, 0.63, 0.25, 0.75, 0.15, 0.85].iter().map(|t| (u.0 + (v.0 - u.0) * t, u.1 + (v.1 - u.1) * t)).collect()).unwrap_or_default()
-                        }
-                        // a circle along its rim, from the top round
-                        qymcad_core::model::EntityKind::Circle { center, r } => at(center)
-                            .map(|c| [90.0f64, 45.0, 135.0, 0.0, 180.0, 225.0, 315.0, 270.0].iter().map(|deg| (c.0 + r * deg.to_radians().cos(), c.1 + r * deg.to_radians().sin())).collect())
-                            .unwrap_or_default(),
-                        _ => Vec::new(),
-                    })
+                    // a curve of any kind tried from its middle outwards
+                    .and_then(|e| qymcad_core::model::curve::Curve::of(sk, e))
+                    .map(|c| [0.5, 0.37, 0.63, 0.25, 0.75, 0.15, 0.85, 0.05, 0.95].iter().map(|t| c.at(*t)).map(|p| (p.x, p.y)).collect())
                     .unwrap_or_default(),
             })
             .collect()

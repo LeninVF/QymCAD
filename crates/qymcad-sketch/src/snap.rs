@@ -17,15 +17,7 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
     // the centres of the circles and arcs of the active sketch, so a centre can be told from a plain vertex
     let centers: std::collections::HashSet<u64> = qymcad_ui_state::edit_si(&*sk.project, &*sk.sketch_ses)
         .and_then(|si| sk.project.sketches.get(si))
-        .map(|s| {
-            s.entities
-                .iter()
-                .filter_map(|e| match e.kind {
-                    qymcad_core::model::EntityKind::Circle { center, .. } | qymcad_core::model::EntityKind::Arc { center, .. } => Some(center),
-                    _ => None,
-                })
-                .collect()
-        })
+        .map(|s| s.entities.iter().filter_map(|e| e.kind.round_centre()).collect())
         .unwrap_or_default();
     // THE VERTICES of existing geometry snap ALWAYS - that is topology. Type 4 marks the centres.
     // THE ACTIVE SKETCH ONLY: every sketch and every contour of the project used to be walked, so the
@@ -114,7 +106,7 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
     let start = (sk.armed.draw_kind() == 1).then(|| sk.tool.pts.last().copied()).flatten();
     if let (Some(from), Some(si)) = (start, qymcad_ui_state::edit_si(&*sk.project, &*sk.sketch_ses)) {
         let reach = f64::from(qymcad_ui_state::grab::grab(sk.set, Grab::Snap)) / f64::from(sk.view.scale);
-        let touch = curve_snaps(&sk.project.sketches[si], CurveSnapAsk { at: Point2::new(w.x, w.y), start: Some(from), reach, dragged: None })
+        let touch = curve_snaps(&sk.project.sketches[si], CurveSnapAsk { at: Point2::new(w.x, w.y), start: Some(from), reach, moving: &[] })
             .into_iter()
             .filter(|f| f.rank == 2)
             .map(|snap| Offered { off: sd(snap.at, &*sk.view), snap })
@@ -264,8 +256,7 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
         // 2c) THE CURVES OF ANY KIND near the pointer (`curve_snaps`), the nearest of the best rank; weighed against the
         // rest once they are all found, by its rank and not by what it says
         let start = (sk.armed.draw_kind() == 1).then(|| sk.tool.pts.last().copied()).flatten();
-        let dragged = sk.drag.pt().and_then(|(dsi, pi)| sk.project.sketches.get(dsi)?.points.get(pi).map(|q| q.id));
-        for found in curve_snaps(&sk.project.sketches[si], CurveSnapAsk { at: w, start, reach: f64::from(reach) / f64::from(sk.view.scale), dragged }) {
+        for found in curve_snaps(&sk.project.sketches[si], CurveSnapAsk { at: w, start, reach: f64::from(reach) / f64::from(sk.view.scale), moving: &moving }) {
             let d = sd(found.at, &*sk.view);
             if d <= qymcad_ui_state::grab::grab(sk.set, Grab::Snap) && curve_cand.as_ref().is_none_or(|b| found.rank.cmp(&b.snap.rank).then(d.total_cmp(&b.off)).is_lt()) {
                 curve_cand = Some(Offered { off: d, snap: found });
@@ -337,13 +328,13 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
 
 /// WHAT THE SNAPS OF CURVES ARE ASKED: where the pointer is, where a line being drawn starts, and how far around the
 /// pointer to look, in millimetres.
-struct CurveSnapAsk {
+struct CurveSnapAsk<'a> {
     at: Point2,
     start: Option<Point2>,
     reach: f64,
-    /// a point being dragged: the curves standing on it go with it, and offer nothing - the middle of a lone spline
-    /// caught the node it was dragged by
-    dragged: Option<Id>,
+    /// the places of what a drag moves: the curves standing on them go with it, and offer nothing - the middle of a
+    /// lone spline caught the node it was dragged by, and a side of a rectangle led by its centre the centre
+    moving: &'a [Point2],
 }
 
 /// A PLACE A CURVE OFFERS to snap to: what the snap says of it (`kind`, as every snap does - 5 a crossing, 6 a point on a
@@ -368,28 +359,18 @@ struct Offered {
 /// drawn from `start` touches each; where any two of them meet.
 fn curve_snaps(s: &qymcad_core::model::Sketch, ask: CurveSnapAsk) -> Vec<CurveSnap> {
     use qymcad_core::model::curve::Curve;
-    let moves = |e: &qymcad_core::model::SketchEntity| ask.dragged.is_some_and(|p| qymcad_core::model::entity_points(e).contains(&p));
+    let goes = |id: &Id| s.point(*id).is_some_and(|q| ask.moving.iter().any(|m| (m.x - q.x).abs() < 1e-9 && (m.y - q.y).abs() < 1e-9));
+    let moves = |e: &qymcad_core::model::SketchEntity| qymcad_core::model::entity_points(e).iter().any(goes);
     let near: Vec<Curve> = s.entities.iter().filter(|e| !moves(e)).filter_map(|e| Curve::of(s, e)).filter(|c| c.nearest(ask.at).off <= ask.reach).collect();
     let mut out = Vec::new();
     for c in &near {
-        let on = |q: Point2| c.nearest(q).off < 1e-9;
-        match c {
-            Curve::Line { .. } => {}
-            Curve::Round { centre, r, .. } => {
-                out.extend([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]].map(|[x, y]| Point2::new(centre.x + r * x, centre.y + r * y)).into_iter().filter(|q| on(*q)).map(|at| CurveSnap {
-                    at,
-                    kind: 6,
-                    rank: 5,
-                }));
-            }
-            Curve::Oval { centre, major, minor, .. } => {
-                out.extend([*major, *minor].into_iter().flat_map(|v| [*centre + v, *centre - v]).filter(|q| on(*q)).map(|at| CurveSnap { at, kind: 6, rank: 5 }));
-            }
-            Curve::Spline { .. } => {}
+        out.extend(c.quadrants().into_iter().map(|at| CurveSnap { at, kind: 6, rank: 5 }));
+        if !c.closed() && !c.straight() {
+            out.push(CurveSnap { at: c.half_way(), kind: 6, rank: 5 });
         }
-        if !c.closed() && !matches!(c, Curve::Line { .. }) {
-            out.push(CurveSnap { at: half_way(c), kind: 6, rank: 5 });
-        }
+        // the point of the curve nearest the pointer: a point put there stands on the curve and is held on it - an
+        // ellipse and a spline offered none, and the grid took the click off them
+        out.push(CurveSnap { at: c.nearest(ask.at).point, kind: 6, rank: 6 });
         if let Some(from) = ask.start {
             out.extend(touch_from(c, [from, ask.at]).map(|at| CurveSnap { at, kind: 6, rank: 2 }));
         }
@@ -400,26 +381,6 @@ fn curve_snaps(s: &qymcad_core::model::Sketch, ask: CurveSnapAsk) -> Vec<CurveSn
         }
     }
     out
-}
-
-/// The point half way along a curve by its length: on an arc the middle of its sweep, on any other the place its laid
-/// out points put half way, taken onto the curve.
-fn half_way(c: &qymcad_core::model::curve::Curve) -> Point2 {
-    if let qymcad_core::model::curve::Curve::Round { .. } = c {
-        return c.at(0.5);
-    }
-    let line = c.polyline();
-    let total: f64 = line.windows(2).map(|w| w[0].dist(w[1])).sum();
-    let mut left = total / 2.0;
-    for w in line.windows(2) {
-        let l = w[0].dist(w[1]);
-        if l >= left && l > 0.0 {
-            let k = left / l;
-            return c.nearest(Point2::new(w[0].x + (w[1].x - w[0].x) * k, w[0].y + (w[1].y - w[0].y) * k)).point;
-        }
-        left -= l;
-    }
-    c.at(0.5)
 }
 
 /// WHERE A LINE FROM `from` TOUCHES CURVE `c` near `near`: the place where the way from `from` runs along the curve, by

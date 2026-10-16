@@ -73,7 +73,7 @@ impl Project {
         let ma = self.sketch_point_at(si, cx + rx * ux, cy + rx * uy, 1e-6); // Endpoint of the major axis.
         let mi = self.sketch_point_at(si, cx - ry * uy, cy + ry * ux, 1e-6); // Endpoint of the minor axis, perpendicular to it.
         let id = self.alloc_id();
-        self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Ellipse { c, ma, mi, span: None }, construction });
+        self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::EllipseParts { c, ma, mi, span: None }.into(), construction });
         self.regen_sketch(si);
         c
     }
@@ -94,15 +94,15 @@ impl Project {
         self.sketches[si].points.push(SketchPoint { id: to, x: p1.x, y: p1.y });
         let id = self.alloc_id();
         let span = Some(EllipseSpan { from, to, winding: arc.winding });
-        self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Ellipse { c, ma, mi, span }, construction: purpose == crate::feature::Purpose::Construction });
+        self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::EllipseParts { c, ma, mi, span }.into(), construction: purpose == crate::feature::Purpose::Construction });
         self.regen_sketch(si);
         id
     }
     /// The major and minor semi-axes of an ellipse entity, by the id of its centre.
     pub fn ellipse_axes(&self, si: usize, center: Id) -> Option<(f64, f64)> {
         let s = self.sketches.get(si)?;
-        let (ma, mi) = s.entities.iter().find_map(|e| match e.kind {
-            EntityKind::Ellipse { c, ma, mi, .. } if c == center => Some((ma, mi)),
+        let (ma, mi) = s.entities.iter().find_map(|e| match e.kind.as_ellipse() {
+            Some(crate::model::EllipseParts { c, ma, mi, .. }) if c == center => Some((ma, mi)),
             _ => None,
         })?;
         let p = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
@@ -115,8 +115,8 @@ impl Project {
     pub fn set_ellipse_axes(&mut self, si: usize, center: Id, rx: f64, ry: f64) -> bool {
         let (rx, ry) = (rx.max(0.01), ry.max(0.01));
         let Some(s) = self.sketches.get(si) else { return false };
-        let Some((ma, mi)) = s.entities.iter().find_map(|e| match e.kind {
-            EntityKind::Ellipse { c, ma, mi, .. } if c == center => Some((ma, mi)),
+        let Some((ma, mi)) = s.entities.iter().find_map(|e| match e.kind.as_ellipse() {
+            Some(crate::model::EllipseParts { c, ma, mi, .. }) if c == center => Some((ma, mi)),
             _ => None,
         }) else {
             return false;
@@ -171,11 +171,9 @@ impl Project {
             // Without a dimension, the circle radius is edited directly and the solver keeps the vertices on
             // it.
             for e in s.entities.iter_mut() {
-                if let EntityKind::Circle { center: cc, r: er } = &mut e.kind {
-                    if *cc == center {
-                        *er = r;
-                        found = true;
-                    }
+                if e.kind.as_circle().is_some_and(|c| c.center == center) {
+                    e.kind.set_radius(r);
+                    found = true;
                 }
             }
         }
@@ -188,8 +186,8 @@ impl Project {
     pub fn polygon_circle(&self, si: usize, center: Id) -> Option<(f64, f64, f64)> {
         let s = self.sketches.get(si)?;
         let (cx, cy) = s.points.iter().find(|q| q.id == center).map(|q| (q.x, q.y))?;
-        let r = s.entities.iter().find_map(|e| match e.kind {
-            EntityKind::Circle { center: cc, r } if cc == center => Some(r),
+        let r = s.entities.iter().find_map(|e| match e.kind.as_circle() {
+            Some(crate::model::CircleParts { center: cc, r }) if cc == center => Some(r),
             _ => None,
         })?;
         Some((cx, cy, r))
@@ -237,7 +235,7 @@ impl Project {
             let a = points[k].id;
             let b = points[(k + 1) % n].id;
             let id = self.alloc_id();
-            entities.push(SketchEntity { id, kind: EntityKind::Line { a, b }, construction: false });
+            entities.push(SketchEntity { id, kind: crate::model::LineParts { a, b }.into(), construction: false });
         }
         let sid = self.alloc_id();
         let si = self.sketches.len();
@@ -318,7 +316,7 @@ impl Project {
         let last = if closed { n } else { n - 1 };
         for k in 0..last {
             let id = self.alloc_id();
-            entities.push(SketchEntity { id, kind: EntityKind::Line { a: points[k].id, b: points[(k + 1) % n].id }, construction: false });
+            entities.push(SketchEntity { id, kind: crate::model::LineParts { a: points[k].id, b: points[(k + 1) % n].id }.into(), construction: false });
         }
         let s = &mut self.sketches[si];
         s.points.extend(points);
@@ -647,7 +645,7 @@ impl Project {
         let eid = self.alloc_id();
         let s = self.sketches.get_mut(si)?;
         let handles = vec![Handle::default(); ids.len()];
-        s.entities.push(SketchEntity { id: eid, kind: EntityKind::Spline { nodes: ids, handles, ends }, construction: purpose == crate::feature::Purpose::Construction });
+        s.entities.push(SketchEntity { id: eid, kind: EntityKind::spline(ids, handles, ends), construction: purpose == crate::feature::Purpose::Construction });
         self.regen_sketch(si);
         Some(eid)
     }
@@ -655,9 +653,9 @@ impl Project {
     /// sketch or has lost a node.
     fn spline_of(&self, si: usize, eid: Id) -> Option<SplineNow> {
         let s = self.sketches.get(si)?;
-        let EntityKind::Spline { nodes, handles, ends } = &s.entity(eid)?.kind else { return None };
-        let at: Vec<Point2> = nodes.iter().map(|id| s.point(*id).map(|p| crate::geom::Point2::new(p.x, p.y))).collect::<Option<_>>()?;
-        Some(SplineNow { at, handles: handles.clone(), ends: *ends })
+        let sp = s.entity(eid)?.kind.as_spline()?;
+        let at: Vec<Point2> = sp.nodes.iter().map(|id| s.point(*id).map(|p| crate::geom::Point2::new(p.x, p.y))).collect::<Option<_>>()?;
+        Some(SplineNow { at, handles: sp.handles.to_vec(), ends: sp.ends })
     }
     /// Polyline of spline `eid` (a cubic Hermite tessellation) in world coordinates, for drawing - including the dashed
     /// rendering of a construction spline, which never reaches the contours.
@@ -703,9 +701,9 @@ impl Project {
     /// The handles of spline `eid` given to `change`, one per node however many were kept. Answers whether it is a spline.
     fn with_handles(&mut self, si: usize, eid: Id, change: impl FnOnce(&mut Vec<Handle>)) -> bool {
         let Some(e) = self.sketches.get_mut(si).and_then(|s| s.entities.iter_mut().find(|e| e.id == eid)) else { return false };
-        let EntityKind::Spline { nodes, handles, .. } = &mut e.kind else { return false };
-        handles.resize(nodes.len(), Handle::default());
-        change(handles);
+        let Some(sp) = e.kind.as_spline_mut() else { return false };
+        sp.handles.resize(sp.nodes.len(), Handle::default());
+        change(sp.handles);
         true
     }
     /// Add a construction polyline (a projection of part geometry into a sketch). Every segment is construction
@@ -723,7 +721,7 @@ impl Project {
                 s.points.push(SketchPoint { id: *id, x: p.x, y: p.y });
             }
             for (k, eid) in eids.into_iter().enumerate() {
-                s.entities.push(SketchEntity { id: eid, kind: EntityKind::Line { a: pids[k], b: pids[(k + 1) % n] }, construction: true });
+                s.entities.push(SketchEntity { id: eid, kind: crate::model::LineParts { a: pids[k], b: pids[(k + 1) % n] }.into(), construction: true });
             }
         }
     }
@@ -823,8 +821,8 @@ impl Project {
                 .entities
                 .iter()
                 .filter(|e| eids.contains(&e.id))
-                .filter_map(|e| match e.kind {
-                    EntityKind::Line { a, b } => Some((a, b)),
+                .filter_map(|e| match e.kind.as_line() {
+                    Some(crate::model::LineParts { a, b }) => Some((a, b)),
                     _ => None,
                 })
                 .collect();
@@ -945,7 +943,7 @@ impl Project {
         let a = self.sketch_point_at(si, ax, ay, 1e-6);
         let b = self.sketch_point_at(si, bx, by, 1e-6);
         let id = self.alloc_id();
-        self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Line { a, b }, construction });
+        self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::LineParts { a, b }.into(), construction });
         self.regen_sketch(si);
         id
     }
@@ -955,7 +953,7 @@ impl Project {
     /// A radius variable is keyed by centre id (see `solver::RadiusVar`), so two curves cannot share one centre
     /// node without their radii collapsing. Concentricity is a constraint, not a shared node.
     pub(crate) fn is_radius_center(&self, si: usize, pid: Id) -> bool {
-        self.sketches.get(si).is_some_and(|s| s.entities.iter().any(|e| matches!(e.kind, EntityKind::Circle { center, .. } | EntityKind::Arc { center, .. } if center == pid)))
+        self.sketches.get(si).is_some_and(|s| s.entities.iter().any(|e| e.kind.round_centre() == Some(pid)))
     }
     /// Centre node of a radius curve (circle, arc, polygon, slot) at (x, y).
     ///
@@ -977,7 +975,7 @@ impl Project {
         let construction = purpose == crate::feature::Purpose::Construction;
         let c = self.radius_center_at(si, cx, cy);
         let id = self.alloc_id();
-        self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Circle { center: c, r: r.max(0.01) }, construction });
+        self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::CircleParts { center: c, r: r.max(0.01) }.into(), construction });
         self.regen_sketch(si);
         id
     }
@@ -1013,7 +1011,7 @@ impl Project {
         let mut sides = [0; 4];
         for (k, side) in sides.iter_mut().enumerate() {
             *side = self.alloc_id();
-            self.sketches[si].entities.push(SketchEntity { id: *side, kind: EntityKind::Line { a: pids[k], b: pids[(k + 1) % 4] }, construction });
+            self.sketches[si].entities.push(SketchEntity { id: *side, kind: crate::model::LineParts { a: pids[k], b: pids[(k + 1) % 4] }.into(), construction });
         }
         // A RECTANGLE DRAWN AS CONSTRUCTION IS A RECTANGLE all the same - its own constraints and its record - so its size
         // is typed and it is dragged by its corners whole. Reported behaviour: "a construction rectangle is just four
@@ -1025,7 +1023,7 @@ impl Project {
             let mut d = [0; 2];
             for (id, (a, b)) in d.iter_mut().zip([(c0, c2), (c1, c3)]) {
                 *id = self.alloc_id();
-                self.sketches[si].entities.push(SketchEntity { id: *id, kind: EntityKind::Line { a, b }, construction: true });
+                self.sketches[si].entities.push(SketchEntity { id: *id, kind: crate::model::LineParts { a, b }.into(), construction: true });
             }
             d
         });
@@ -1060,11 +1058,11 @@ impl Project {
             .collect();
         // The construction circumscribed circle is the parametric rim of the polygon.
         let circ = self.alloc_id();
-        self.sketches[si].entities.push(SketchEntity { id: circ, kind: EntityKind::Circle { center, r }, construction: true });
+        self.sketches[si].entities.push(SketchEntity { id: circ, kind: crate::model::CircleParts { center, r }.into(), construction: true });
         let mut eids = Vec::with_capacity(n);
         for k in 0..n {
             let id = self.alloc_id();
-            self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Line { a: pids[k], b: pids[(k + 1) % n] }, construction });
+            self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::LineParts { a: pids[k], b: pids[(k + 1) % n] }.into(), construction });
             eids.push(id);
         }
         // Parametric shape: the vertices sit on the circumscribed circle and every side is equal, which makes
@@ -1116,10 +1114,10 @@ impl Project {
             self.sketches[si].entities.push(SketchEntity { id, kind, construction });
             curves.push(id);
         };
-        add(EntityKind::Line { a: i1, b: i2 });
-        add(EntityKind::Arc { center: c2, a: i3, b: i2, ccw: true });
-        add(EntityKind::Line { a: i3, b: i4 });
-        add(EntityKind::Arc { center: c1, a: i1, b: i4, ccw: true });
+        add(LineParts { a: i1, b: i2 }.into());
+        add(ArcParts { center: c2, a: i3, b: i2, ccw: true }.into());
+        add(LineParts { a: i3, b: i4 }.into());
+        add(ArcParts { center: c1, a: i1, b: i4, ccw: true }.into());
         // A parametric slot, or dragging and dimension edits spread its corners and arcs apart. The arc
         // endpoints already sit on the radius circles of their centres (the arc intrinsics). Added on top:
         // equal end radii plus tangency of both side lines to both ends (i1 to i4 are the tangency points).
@@ -1166,7 +1164,7 @@ impl Project {
         let a = self.sketch_point_at(si, ax, ay, 1e-6);
         let b = self.sketch_point_at(si, bx, by, 1e-6);
         let id = self.alloc_id();
-        self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Arc { center, a, b, ccw }, construction });
+        self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::ArcParts { center, a, b, ccw }.into(), construction });
         self.regen_sketch(si);
     }
     /// Create a sketch from a set of contours (a DXF or SVG import) and return its id.
@@ -1225,7 +1223,7 @@ impl Project {
                     let (ai, bi) = (self.import_intern_pt(si, &mut cache, a.x, a.y), self.import_intern_pt(si, &mut cache, b.x, b.y));
                     if ai != bi {
                         let id = self.alloc_id();
-                        self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Line { a: ai, b: bi }, construction: false });
+                        self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::LineParts { a: ai, b: bi }.into(), construction: false });
                     }
                 }
                 ProfEdge::Arc { a, b, center, ccw } => {
@@ -1235,13 +1233,13 @@ impl Project {
                     let ci = self.alloc_id();
                     self.sketches[si].points.push(SketchPoint { id: ci, x: center.x, y: center.y });
                     let id = self.alloc_id();
-                    self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Arc { center: ci, a: ai, b: bi, ccw }, construction: false });
+                    self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::ArcParts { center: ci, a: ai, b: bi, ccw }.into(), construction: false });
                 }
                 ProfEdge::Circle { center, r } => {
                     let ci = self.alloc_id();
                     self.sketches[si].points.push(SketchPoint { id: ci, x: center.x, y: center.y });
                     let id = self.alloc_id();
-                    self.sketches[si].entities.push(SketchEntity { id, kind: EntityKind::Circle { center: ci, r }, construction: false });
+                    self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::CircleParts { center: ci, r }.into(), construction: false });
                 }
                 // an ellipse and a span of a spline are laid as the curves they are
                 ProfEdge::Oval { .. } | ProfEdge::Cubic { .. } => {

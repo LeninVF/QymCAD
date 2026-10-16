@@ -10,7 +10,7 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
 
     /// A chain of lines drawn by the line tool through `clicks`, and the select tool taken.
     fn drawn(clicks: &[(f64, f64)]) -> (App, usize) {
@@ -35,7 +35,11 @@ mod tests {
         let at = |id: u64, p: (f64, f64)| s.points.iter().any(|q| q.id == id && (q.x - p.0).hypot(q.y - p.1) < 1e-6);
         ends.iter()
             .map(|[p, q]| {
-                let e = s.entities.iter().find(|e| matches!(e.kind, EntityKind::Line { a, b } if (at(a, *p) && at(b, *q)) || (at(a, *q) && at(b, *p)))).expect("a line between the two places");
+                let e = s
+                    .entities
+                    .iter()
+                    .find(|e| e.kind.as_line().is_some_and(|qymcad_core::model::LineParts { a, b }| (at(a, *p) && at(b, *q)) || (at(a, *q) && at(b, *p))))
+                    .expect("a line between the two places");
                 (1u8, e.id)
             })
             .collect()
@@ -47,8 +51,8 @@ mod tests {
         let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("a point");
         s.entities
             .iter()
-            .filter_map(|e| match e.kind {
-                EntityKind::Arc { center, a, .. } => {
+            .filter_map(|e| match e.kind.as_arc() {
+                Some(qymcad_core::model::ArcParts { center, a, .. }) => {
                     let (c, p) = (at(center), at(a));
                     Some((p.0 - c.0).hypot(p.1 - c.1))
                 }

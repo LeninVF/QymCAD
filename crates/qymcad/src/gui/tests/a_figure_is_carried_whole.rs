@@ -6,7 +6,6 @@
 use crate::gui::hand::Hand;
 use crate::gui::App;
 use qymcad_core::feature::SketchPlane;
-use qymcad_core::model::EntityKind;
 
 #[test]
 fn one_side_of_a_polygon_copied_copies_the_polygon() {
@@ -20,7 +19,7 @@ fn one_side_of_a_polygon_copied_copies_the_polygon() {
     hand.sk_tool(0).click2d(11.9, 3.64);
     hand.sk_move_tool(2).click2d(40.0, -30.0).click2d(70.0, -30.0);
     let s = &hand.app.project.sketches[si];
-    let circles = s.entities.iter().filter(|e| matches!(e.kind, EntityKind::Circle { .. })).count();
+    let circles = s.entities.iter().filter(|e| e.kind.as_circle().is_some()).count();
     let status = hand.app.status.clone();
     assert_eq!(s.entities.len(), 14, "the sketch holds {} curves, not two hexagons with their circles; the status line says {status:?}", s.entities.len());
     assert_eq!(circles, 2, "{circles} circles, not one for each hexagon");

@@ -5,7 +5,7 @@
 //! Reported behaviour: "a sketch fillet or chamfer cannot be put where two lines cross".
 use qymcad_core::feature::Purpose;
 use qymcad_core::geom::Point2;
-use qymcad_core::model::{EntityKind, Project};
+use qymcad_core::model::Project;
 
 /// TWO LINES DRAWN APART: their ends.
 struct Two {
@@ -26,7 +26,7 @@ fn cut(two: Two, near: (f64, f64)) -> Option<usize> {
     let at = p.cut_at_crossing(si, crossing)?;
     let s = &p.sketches[si];
     assert!(!s.system_ids().contains(&at), "the cut answered a point of the frame, which is no corner of the drawing");
-    Some(s.entities.iter().filter(|e| matches!(e.kind, EntityKind::Line { a, b } if a == at || b == at)).count())
+    Some(s.entities.iter().filter(|e| e.kind.as_line().is_some_and(|qymcad_core::model::LineParts { a, b }| a == at || b == at)).count())
 }
 
 #[test]

@@ -5,7 +5,7 @@
 //! Reported (issue #36): the sketch fillet took a radius only; a rounding given by its chord or its arc length had its
 //! radius worked out by hand.
 use qymcad_core::feature::Purpose;
-use qymcad_core::model::{Constraint, EntityKind, FilletBy, FilletSize, Project};
+use qymcad_core::model::{Constraint, FilletBy, FilletSize, Project};
 
 /// The square corner (30, 0) -> (0, 0) -> (0, 30), held as a drawing holds it - the one line horizontal, the other
 /// upright, the far ends pinned; (project, sketch, the corner point).
@@ -15,8 +15,8 @@ fn corner() -> (Project, usize, u64) {
     let si = p.new_sketch("S");
     let l1 = p.add_line_entity(si, 30.0, 0.0, 0.0, 0.0, Purpose::Real);
     let l2 = p.add_line_entity(si, 0.0, 0.0, 0.0, 30.0, Purpose::Real);
-    let ends = |p: &Project, id| match p.sketches[si].entities.iter().find(|e| e.id == id).map(|e| e.kind.clone()) {
-        Some(EntityKind::Line { a, b }) => (a, b),
+    let ends = |p: &Project, id| match p.sketches[si].entities.iter().find(|e| e.id == id).and_then(|e| e.kind.as_line()) {
+        Some(qymcad_core::model::LineParts { a, b }) => (a, b),
         _ => panic!("a line"),
     };
     let ((a1, b1), (a2, b2)) = (ends(&p, l1), ends(&p, l2));
@@ -35,8 +35,8 @@ struct Measured {
 fn measure(p: &Project, si: usize) -> Option<Measured> {
     let s = &p.sketches[si];
     let at = |id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-    let (c, a, b) = s.entities.iter().find_map(|e| match e.kind {
-        EntityKind::Arc { center, a, b, .. } => Some((at(center)?, at(a)?, at(b)?)),
+    let (c, a, b) = s.entities.iter().find_map(|e| match e.kind.as_arc() {
+        Some(qymcad_core::model::ArcParts { center, a, b, .. }) => Some((at(center)?, at(a)?, at(b)?)),
         _ => None,
     })?;
     let radius = (a.0 - c.0).hypot(a.1 - c.1);
@@ -115,8 +115,8 @@ fn a_fillet_by_its_radius_its_chord_or_its_arc_length() {
     let chords: Vec<f64> = s
         .entities
         .iter()
-        .filter_map(|e| match e.kind {
-            EntityKind::Arc { a, b, .. } => Some((at(a)?, at(b)?)),
+        .filter_map(|e| match e.kind.as_arc() {
+            Some(qymcad_core::model::ArcParts { a, b, .. }) => Some((at(a)?, at(b)?)),
             _ => None,
         })
         .map(|(a, b)| (b.0 - a.0).hypot(b.1 - a.1))

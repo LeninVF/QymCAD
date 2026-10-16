@@ -655,32 +655,7 @@ fn remap_point_id(s: &mut Sketch, from: Id, to: Id) {
         }
     };
     for e in &mut s.entities {
-        match &mut e.kind {
-            EntityKind::Line { a, b } => {
-                r(a);
-                r(b);
-            }
-            EntityKind::Arc { center, a, b, .. } => {
-                r(center);
-                r(a);
-                r(b);
-            }
-            EntityKind::Circle { center, .. } => r(center),
-            EntityKind::Ellipse { c, ma, mi, span } => {
-                r(c);
-                r(ma);
-                r(mi);
-                if let Some(s) = span {
-                    r(&mut s.from);
-                    r(&mut s.to);
-                }
-            }
-            EntityKind::Spline { nodes, .. } => {
-                for n in nodes {
-                    r(n);
-                }
-            }
-        }
+        e.kind.each_point_mut(r);
     }
     for c in &mut s.constraints {
         match c {
@@ -1413,6 +1388,8 @@ pub use sketch_types::*;
 mod curves;
 pub mod curve;
 pub use tess::NodeTangents;
+pub use curve::kinds::*;
+pub use curve::refs::*;
 pub use curves::*;
 mod sketch_ops;
 mod params;

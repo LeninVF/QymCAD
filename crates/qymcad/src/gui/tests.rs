@@ -89,4 +89,7 @@ mod a_trim_preview_shows_any_curve;
 mod a_curve_under_the_pointer_is_the_one_cut;
 
 #[cfg(test)]
+mod a_point_drawn_on_a_curve_is_held_on_it;
+
+#[cfg(test)]
 mod a_picked_curve_of_any_kind_is_lit;

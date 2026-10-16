@@ -9,7 +9,7 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
 
     /// The drag every point of the shape is to follow.
     const BY: (f64, f64) = (12.0, 6.0);
@@ -55,15 +55,7 @@ mod tests {
 
     /// The centre of the first arc of the sketch, or of its ellipse.
     fn centre_of(app: &App, si: usize) -> u64 {
-        app.project.sketches[si]
-            .entities
-            .iter()
-            .find_map(|e| match e.kind {
-                EntityKind::Arc { center, .. } => Some(center),
-                EntityKind::Ellipse { c, .. } => Some(c),
-                _ => None,
-            })
-            .expect("a shape with a centre")
+        app.project.sketches[si].entities.iter().find_map(|e| e.kind.as_arc().map(|a| a.center).or_else(|| e.kind.as_ellipse().map(|el| el.c))).expect("a shape with a centre")
     }
 
     #[test]
@@ -90,7 +82,7 @@ mod tests {
     fn the_centre_of_a_fillet_is_not_taken() {
         let (mut app, si) = drawn(1, None, &[(0.0, 30.0), (0.0, 0.0), (40.0, 0.0)]);
         let s = &app.project.sketches[si];
-        let lines: Vec<(u8, u64)> = s.entities.iter().filter(|e| matches!(e.kind, EntityKind::Line { .. })).map(|e| (1u8, e.id)).collect();
+        let lines: Vec<(u8, u64)> = s.entities.iter().filter(|e| e.kind.as_line().is_some()).map(|e| (1u8, e.id)).collect();
         assert!(Hand::new(&mut app).sk_corner_set("tb-fillet-sketch-hint", &lines, 5.0), "the corner rounded");
         let s = &app.project.sketches[si];
         assert!(s.constraints.iter().any(|c| matches!(c, Constraint::Tangent { .. })), "setup: the fillet touches its lines");

@@ -12,7 +12,7 @@ mod tests {
     use super::super::hand::Hand;
     use crate::gui::import_door::tests::running;
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
 
     /// HOW THE FIELD OF A SHAPE JUST DRAWN IS CLOSED.
     #[derive(Clone, Copy, Debug)]
@@ -197,8 +197,8 @@ mod tests {
             if got != vec![(false, want)] {
                 failures.push(format!("a double click on {by} and {value} typed: sizes {got:?}"));
             }
-            let radius = hand.app.project.sketches[0].entities.iter().find_map(|e| match e.kind {
-                EntityKind::Arc { center, a, .. } => {
+            let radius = hand.app.project.sketches[0].entities.iter().find_map(|e| match e.kind.as_arc() {
+                Some(qymcad_core::model::ArcParts { center, a, .. }) => {
                     let sk = &hand.app.project.sketches[0];
                     let at = |id| sk.points.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
                     at(center).zip(at(a)).map(|(c, p)| (p.0 - c.0).hypot(p.1 - c.1))
@@ -218,8 +218,8 @@ mod tests {
         let at = |id| sk.points.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
         sk.entities
             .iter()
-            .filter_map(|e| match e.kind {
-                EntityKind::Arc { center, a, .. } => at(center).zip(at(a)),
+            .filter_map(|e| match e.kind.as_arc() {
+                Some(qymcad_core::model::ArcParts { center, a, .. }) => at(center).zip(at(a)),
                 _ => None,
             })
             .min_by(|x, y| (x.0 .0 - centre_at.0).hypot(x.0 .1 - centre_at.1).total_cmp(&(y.0 .0 - centre_at.0).hypot(y.0 .1 - centre_at.1)))
@@ -316,7 +316,7 @@ mod tests {
         }
         hand.sk_select();
         assert!(sizes(&hand).is_empty(), "GUARD: no size laid on circles drawn without typing: {:?}", sizes(&hand));
-        let circles: Vec<u64> = hand.app.project.sketches[0].entities.iter().filter(|e| matches!(e.kind, EntityKind::Circle { .. })).map(|e| e.id).collect();
+        let circles: Vec<u64> = hand.app.project.sketches[0].entities.iter().filter(|e| e.kind.as_circle().is_some()).map(|e| e.id).collect();
         // the first and the second equal, the second and the third equal: tied as a person ties them, by hand
         for pair in circles.windows(2) {
             let picked: Vec<(u8, u64)> = pair.iter().map(|&c| (1, c)).collect();

@@ -230,10 +230,8 @@ impl Project {
         // circles.
         let solved: std::collections::HashMap<Id, f64> = radii.iter().map(|rv| (rv.center, rv.value)).collect();
         for e in s.entities.iter_mut() {
-            if let EntityKind::Circle { center, r } = &mut e.kind {
-                if let Some(&v) = solved.get(center) {
-                    *r = v;
-                }
+            if let Some(&v) = e.kind.as_circle().and_then(|c| solved.get(&c.center)) {
+                e.kind.set_radius(v);
             }
         }
         // what the solve moved: the points and the centres of the circles whose radius changed
@@ -260,9 +258,9 @@ impl Project {
         let pos: std::collections::HashMap<Id, (f64, f64)> = s.points.iter().map(|p| (p.id, (p.x, p.y))).collect();
         let mut out = Vec::new();
         for e in &s.entities {
-            match e.kind {
-                EntityKind::Circle { center, r } => out.push(crate::solver::RadiusVar { center, value: r }),
-                EntityKind::Arc { center, a, .. } => {
+            match e.kind.radius_source() {
+                Some(RadiusSource::Held(c)) => out.push(crate::solver::RadiusVar { center: c.center, value: c.r }),
+                Some(RadiusSource::ToEnd { center, end: a }) => {
                     if let (Some(&(cx, cy)), Some(&(ax, ay))) = (pos.get(&center), pos.get(&a)) {
                         // `hypot`, as the drag session reads it (`drag_session`): the root of the squares rounds the last
                         // bit apart from it, and a frame kept by the drag and the frame solved alone came out different
@@ -270,7 +268,7 @@ impl Project {
                         out.push(crate::solver::RadiusVar { center, value: rr });
                     }
                 }
-                _ => {}
+                None => {}
             }
         }
         out
@@ -299,26 +297,10 @@ impl Project {
             Some((a, b)) => Constraint::Perpendicular { a: centre, b: end, c: a, d: b },
             None => Constraint::PointOnCircle { p: end, c: centre },
         };
+        // an arc of a projection has its centre and both ends pinned by the body: one end on the circle sets the radius,
+        // the other would say it again - a fillet of the body projected showed one redundant
         for e in &s.entities {
-            match e.kind {
-                // an arc of a projection has its centre and both ends pinned by the body: one end on the circle sets the
-                // radius, the other would say it again - a fillet of the body projected showed one redundant
-                EntityKind::Arc { center, a, .. } if projected.contains(&e.id) => {
-                    out.push(Constraint::PointOnCircle { p: a, c: center });
-                }
-                EntityKind::Arc { center, a, b, .. } => {
-                    out.push(on_the_arc(center, a));
-                    out.push(on_the_arc(center, b));
-                }
-                EntityKind::Ellipse { c, ma, mi, span } => {
-                    out.push(Constraint::Perpendicular { a: c, b: ma, c, d: mi });
-                    // the ends of an arc of an ellipse stay on the ellipse
-                    for p in span.into_iter().flat_map(|s| [s.from, s.to]) {
-                        out.push(Constraint::PointOnEllipse { p, c, ma, mi });
-                    }
-                }
-                _ => {}
-            }
+            out.extend(e.kind.intrinsics(&on_the_arc, if projected.contains(&e.id) { HeldBy::Body } else { HeldBy::Sketch }));
         }
         // Projected geometry is driven by the body: its points and circle radii are given, not unknowns.
         // Without this a projected edge counted 4 degrees of freedom and a box face outline 8, and a solve
@@ -329,7 +311,7 @@ impl Project {
         for pr in &s.projections {
             out.extend(pr.points.iter().filter(|&&p| pinned.insert(p)).map(|&p| Constraint::Fixed { p }));
             for e in s.entities.iter().filter(|e| pr.entities.contains(&e.id)) {
-                if let EntityKind::Circle { center, r } = e.kind {
+                if let Some(crate::model::CircleParts { center, r }) = e.kind.as_circle() {
                     out.push(Constraint::Diameter { c: center, d: r, off: 0.0, expr: String::new(), driven: false, diam: false, at: None });
                 }
             }
@@ -344,8 +326,8 @@ impl Project {
             return Some(i);
         }
         // The initial value is the current radius of the circle.
-        let r = s.entities.iter().find_map(|e| match e.kind {
-            EntityKind::Circle { center, r } if center == c => Some(r),
+        let r = s.entities.iter().find_map(|e| match e.kind.as_circle() {
+            Some(crate::model::CircleParts { center, r }) if center == c => Some(r),
             _ => None,
         })?;
         let d = if diam { 2.0 * r } else { r };
@@ -356,8 +338,8 @@ impl Project {
     /// Find or create a driving arc-length dimension for arc entity `arc_eid`. Returns its index.
     pub fn ensure_arc_length(&mut self, si: usize, arc_eid: Id) -> Option<usize> {
         let s = self.sketches.get(si)?;
-        let (c, a, b, ccw) = s.entities.iter().find(|e| e.id == arc_eid).and_then(|e| match e.kind {
-            EntityKind::Arc { center, a, b, ccw } => Some((center, a, b, ccw)),
+        let (c, a, b, ccw) = s.entities.iter().find(|e| e.id == arc_eid).and_then(|e| match e.kind.as_arc() {
+            Some(crate::model::ArcParts { center, a, b, ccw }) => Some((center, a, b, ccw)),
             _ => None,
         })?;
         if let Some(i) = s.constraints.iter().position(|x| matches!(x, Constraint::ArcLength { c: cc, a: ca, b: cb, .. } if *cc == c && *ca == a && *cb == b)) {
@@ -390,18 +372,7 @@ impl Project {
         let pos: std::collections::HashMap<Id, (f64, f64)> = s.points.iter().map(|p| (p.id, (p.x, p.y))).collect();
         // The radii of the circles and the arcs by centre, for reference diameter and radius dimensions: an arc's from its
         // first end. Of circles alone, a reference radius of an arc kept the value it was laid with.
-        let crad: std::collections::HashMap<Id, f64> = s
-            .entities
-            .iter()
-            .filter_map(|e| match e.kind {
-                EntityKind::Circle { center, r } => Some((center, r)),
-                EntityKind::Arc { center, a, .. } => {
-                    let ((cx, cy), (ax, ay)) = (pos.get(&center)?, pos.get(&a)?);
-                    Some((center, (ax - cx).hypot(ay - cy)))
-                }
-                _ => None,
-            })
-            .collect();
+        let crad: std::collections::HashMap<Id, f64> = s.entities.iter().filter_map(|e| e.kind.circle_by(&|id| pos.get(&id).map(|&(x, y)| Point2::new(x, y))).map(|c| (c.center, c.r))).collect();
         for c in &mut s.constraints {
             measure_driven(c, &pos, &crad);
         }
@@ -444,7 +415,7 @@ impl Project {
         let Some(s) = self.sketches.get(si) else { return };
         // only the loops round what changed since they were made (`round::Laid`), where few curves changed; splines and
         // text are made whole
-        let plain = !s.entities.iter().any(|e| matches!(e.kind, EntityKind::Spline { .. })) && s.texts.is_empty();
+        let plain = !s.entities.iter().any(|e| e.kind.as_spline().is_some()) && s.texts.is_empty();
         if let Some(changed) = self.changed_since_laid(si).filter(|_| plain) {
             let drawn = s.entities.iter().filter(|e| !e.construction).count();
             if changed.drawn.is_empty() && changed.gone.is_empty() {
@@ -470,7 +441,7 @@ impl Project {
         // An open spline is an open chain too (cubic Hermite with tangent handles, automatic Catmull-Rom by default): a
         // path for a sweep or a loft. A construction spline never reaches a profile; it is drawn dashed.
         for e in &ents {
-            let EntityKind::Spline { nodes, handles, ends: crate::feature::Ends::Open } = &e.kind else { continue };
+            let Some(SplineParts { nodes, handles, ends: crate::feature::Ends::Open }) = e.kind.as_spline() else { continue };
             let cps: Vec<Point2> = nodes.iter().filter_map(|id| pts.iter().find(|p| p.id == *id).map(|p| crate::geom::Point2::new(p.x, p.y))).collect();
             if cps.len() >= 2 {
                 pairs.push((tessellate_spline_hermite(&cps, handles, crate::feature::Ends::Open), Vec::new()));
@@ -544,7 +515,7 @@ impl Project {
         s.drag_session = None; // its loops are made anew: what a drag kept of them goes
         let s = &self.sketches[si];
         // a frame of reference to be made first (`ensure_frame` in `regen_sketch`), splines, text: rebuilt whole
-        if s.entities.iter().any(|e| matches!(e.kind, EntityKind::Spline { .. })) || !s.texts.is_empty() || (s.origin != 0 || s.axis_pts.iter().any(|g| *g != 0)) && s.frame == 0 {
+        if s.entities.iter().any(|e| e.kind.as_spline().is_some()) || !s.texts.is_empty() || (s.origin != 0 || s.axis_pts.iter().any(|g| *g != 0)) && s.frame == 0 {
             return self.regen_sketch(si);
         }
         if self.detach_geometry_from_origin(si) || self.sketches[si].pin_frame() {
@@ -630,14 +601,14 @@ impl Project {
 /// THE SPLINES A CONSTRAINT HOLDS TO, AS THEY ARE NOW: a constraint keeps the handles and the ends of a spline it was laid
 /// with, and a handle dragged since would leave it holding the curve as it was. The spline is found by its nodes.
 fn splines_held_follow(s: &mut Sketch) {
-    let shapes: Vec<EntityKind> = s.entities.iter().filter(|e| matches!(e.kind, EntityKind::Spline { .. })).map(|e| e.kind.clone()).collect();
+    let shapes: Vec<EntityKind> = s.entities.iter().filter(|e| e.kind.as_spline().is_some()).map(|e| e.kind.clone()).collect();
     if shapes.is_empty() {
         return;
     }
     let follow = |on: &mut CurveRef| {
         if let CurveRef::Spline { nodes, handles, ends } = on {
-            if let Some(EntityKind::Spline { handles: now, ends: e, .. }) = shapes.iter().find(|k| matches!(k, EntityKind::Spline { nodes: n, .. } if n == nodes)) {
-                (*handles, *ends) = (now.clone(), *e);
+            if let Some(now) = shapes.iter().filter_map(|k| k.as_spline()).find(|sp| sp.nodes == nodes.as_slice()) {
+                (*handles, *ends) = (now.handles.to_vec(), now.ends);
             }
         }
     };

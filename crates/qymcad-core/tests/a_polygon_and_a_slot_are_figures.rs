@@ -4,7 +4,7 @@
 //! constraints gone with it.
 use qymcad_core::feature::Purpose;
 use qymcad_core::geom::Point2;
-use qymcad_core::model::{Constraint, EntityKind, FigureShape, Project};
+use qymcad_core::model::{Constraint, FigureShape, Project};
 
 /// Where the point of `id` stands in sketch `si`.
 fn at(p: &Project, si: usize, id: u64) -> Point2 {
@@ -16,8 +16,8 @@ fn lines(p: &Project, si: usize) -> Vec<[Point2; 2]> {
     p.sketches[si]
         .entities
         .iter()
-        .filter_map(|e| match e.kind {
-            EntityKind::Line { a, b } if !e.construction => Some([at(p, si, a), at(p, si, b)]),
+        .filter_map(|e| match e.kind.as_line() {
+            Some(qymcad_core::model::LineParts { a, b }) if !e.construction => Some([at(p, si, a), at(p, si, b)]),
             _ => None,
         })
         .collect()
@@ -66,8 +66,8 @@ fn a_slot_is_a_figure_that_keeps_its_sides_touching_and_breaks_when_a_side_goes(
     let centres: Vec<u64> = s
         .entities
         .iter()
-        .filter_map(|e| match e.kind {
-            EntityKind::Arc { center, .. } => Some(center),
+        .filter_map(|e| match e.kind.as_arc() {
+            Some(qymcad_core::model::ArcParts { center, .. }) => Some(center),
             _ => None,
         })
         .collect();
@@ -80,8 +80,8 @@ fn a_slot_is_a_figure_that_keeps_its_sides_touching_and_breaks_when_a_side_goes(
     let r = p.sketches[si]
         .entities
         .iter()
-        .find_map(|e| match e.kind {
-            EntityKind::Arc { center, a, .. } if center == centres[0] => Some(at(&p, si, a).dist(c1)),
+        .find_map(|e| match e.kind.as_arc() {
+            Some(qymcad_core::model::ArcParts { center, a, .. }) if center == centres[0] => Some(at(&p, si, a).dist(c1)),
             _ => None,
         })
         .expect("the end arc");
@@ -91,7 +91,7 @@ fn a_slot_is_a_figure_that_keeps_its_sides_touching_and_breaks_when_a_side_goes(
         assert!((off(a) - r).abs() < 1e-6 && (off(b) - r).abs() < 1e-6, "a side from {a:?} to {b:?} does not run {r:.4} off the centres {c1:?} {c2:?}");
     }
     // a side deleted: the record and its own constraints go
-    let side = p.sketches[si].entities.iter().find(|e| matches!(e.kind, EntityKind::Line { .. })).map(|e| e.id).expect("a side");
+    let side = p.sketches[si].entities.iter().find(|e| e.kind.as_line().is_some()).map(|e| e.id).expect("a side");
     p.delete_entities(si, &[side]);
     let s = &p.sketches[si];
     assert!(s.figures.is_empty(), "a slot with a side deleted is still a figure");

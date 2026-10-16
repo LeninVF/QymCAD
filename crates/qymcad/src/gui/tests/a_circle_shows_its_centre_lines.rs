@@ -6,7 +6,6 @@
 use crate::gui::hand::Hand;
 use crate::gui::App;
 use qymcad_core::feature::SketchPlane;
-use qymcad_core::model::EntityKind;
 
 /// A sketch open for editing.
 fn a_sketch() -> App {
@@ -20,7 +19,7 @@ fn a_sketch() -> App {
 fn line_starts(app: &App) -> Vec<[f64; 2]> {
     let s = &app.project.sketches[0];
     let at = |id: u64| s.points.iter().find(|p| p.id == id).map(|p| [p.x, p.y]);
-    s.entities.iter().filter_map(|e| if let EntityKind::Line { a, .. } = e.kind { at(a) } else { None }).collect()
+    s.entities.iter().filter_map(|e| if let Some(qymcad_core::model::LineParts { a, .. }) = e.kind.as_line() { at(a) } else { None }).collect()
 }
 
 /// A LINE STARTED NEAR THE VERTICAL CENTRE LINE STARTS ON IT: a circle around (50.5, 30.5), off the nodes of the grid,

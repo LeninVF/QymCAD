@@ -524,12 +524,12 @@ mod tests {
         }
         {
             let s = &app.project.sketches[si2];
-            let centre = s.entities.iter().find_map(|e| match e.kind {
-                qymcad_core::model::EntityKind::Circle { center, .. } => Some(center),
+            let centre = s.entities.iter().find_map(|e| match e.kind.as_circle() {
+                Some(qymcad_core::model::CircleParts { center, .. }) => Some(center),
                 _ => None,
             });
-            let up = s.entities.iter().rev().find_map(|e| match e.kind {
-                qymcad_core::model::EntityKind::Line { a, .. } if e.construction => Some(a),
+            let up = s.entities.iter().rev().find_map(|e| match e.kind.as_line() {
+                Some(qymcad_core::model::LineParts { a, .. }) if e.construction => Some(a),
                 _ => None,
             });
             let on_centre = up
@@ -626,8 +626,8 @@ mod tests {
                 Some(si) => {
                     let s = &app.project.sketches[si];
                     let now = s.points.iter().find(|q| q.id == corner).map(|q| (q.x, q.y));
-                    let start = s.entities.iter().find_map(|e| match e.kind {
-                        qymcad_core::model::EntityKind::Line { a, .. } if !s.projected_entities().contains(&e.id) => s.points.iter().find(|q| q.id == a).map(|q| (q.x, q.y)),
+                    let start = s.entities.iter().find_map(|e| match e.kind.as_line() {
+                        Some(qymcad_core::model::LineParts { a, .. }) if !s.projected_entities().contains(&e.id) => s.points.iter().find(|q| q.id == a).map(|q| (q.x, q.y)),
                         _ => None,
                     });
                     let moved = now.is_some_and(|n| (n.0 - at.0).hypot(n.1 - at.1) > 5.0);
@@ -713,8 +713,8 @@ mod tests {
             let s = app.project.sketch_index(sid).map(|si| &app.project.sketches[si]);
             let now = s.and_then(|s| s.points.iter().find(|q| q.id == corner).map(|q| (q.x, q.y)));
             let start = s.and_then(|s| {
-                s.entities.iter().find_map(|e| match e.kind {
-                    qymcad_core::model::EntityKind::Line { a, .. } if !s.projected_entities().contains(&e.id) => s.points.iter().find(|q| q.id == a).map(|q| (q.x, q.y)),
+                s.entities.iter().find_map(|e| match e.kind.as_line() {
+                    Some(qymcad_core::model::LineParts { a, .. }) if !s.projected_entities().contains(&e.id) => s.points.iter().find(|q| q.id == a).map(|q| (q.x, q.y)),
                     _ => None,
                 })
             });
@@ -1303,15 +1303,7 @@ mod tests {
                 // the radius that holds the polygon
                 let sizes = |a: &App| {
                     let sk = &a.project.sketches[si];
-                    let shapes: Vec<u64> = sk
-                        .entities
-                        .iter()
-                        .filter(|e| !e.construction)
-                        .filter_map(|e| match e.kind {
-                            qymcad_core::model::EntityKind::Circle { center, .. } | qymcad_core::model::EntityKind::Arc { center, .. } => Some(center),
-                            _ => None,
-                        })
-                        .collect();
+                    let shapes: Vec<u64> = sk.entities.iter().filter(|e| !e.construction).filter_map(|e| e.kind.round_centre()).collect();
                     sk.constraints
                         .iter()
                         .filter_map(|c| match c {
@@ -1369,7 +1361,7 @@ mod tests {
                 // put on: "horizontal" and then "vertical" on the same two lines fold them to nothing, and a line of
                 // no length cannot be clicked.
                 hand.sk_select();
-                let lines: Vec<(u8, u64)> = hand.app.project.sketches[si].entities.iter().filter(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. })).map(|e| (1u8, e.id)).collect();
+                let lines: Vec<(u8, u64)> = hand.app.project.sketches[si].entities.iter().filter(|e| e.kind.as_line().is_some()).map(|e| (1u8, e.id)).collect();
                 let pair = lines.windows(2).map(|w| w.to_vec()).find(|w| hand.select2d(w)).unwrap_or_default();
                 if pair.is_empty() {
                     problems.push(format!("sketch: before the \"{name}\" constraint no pair of lines could be clicked"));
@@ -1388,7 +1380,7 @@ mod tests {
             {
                 let mut hand = Hand::new(&mut app);
                 hand.sk_select();
-                let lines: Vec<(u8, u64)> = hand.app.project.sketches[si].entities.iter().filter(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. })).map(|e| (1u8, e.id)).collect();
+                let lines: Vec<(u8, u64)> = hand.app.project.sketches[si].entities.iter().filter(|e| e.kind.as_line().is_some()).map(|e| (1u8, e.id)).collect();
                 if lines.windows(2).any(|w| hand.select2d(w)) {
                     hand.sk_tool(3).click2d(150.0, 150.0).click2d(160.0, 150.0).key(egui::Key::Escape);
                     if !hand.app.tools.sel_sk.items.is_empty() {
@@ -1422,10 +1414,7 @@ mod tests {
                     // and a click on one of those would answer it and not the line.
                     let before = |a: &App| {
                         let sk = &a.project.sketches[si];
-                        (
-                            sk.entities.iter().filter(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. })).count(),
-                            sk.entities.iter().filter(|e| matches!(e.kind, qymcad_core::model::EntityKind::Arc { .. })).count(),
-                        )
+                        (sk.entities.iter().filter(|e| e.kind.as_line().is_some()).count(), sk.entities.iter().filter(|e| e.kind.as_arc().is_some()).count())
                     };
                     // A CONTOUR OF THE HAND'S OWN, drawn a long way from everything else on the sheet, because the
                     // lines of the drawing above stand under the glyphs of the constraints put on them, and a click
@@ -1443,7 +1432,7 @@ mod tests {
                     // THE THREE LEGS JUST DRAWN, which are the last three lines of the sketch. Their ends move a
                     // little under the solver, so they are taken by their place in the drawing rather than by their
                     // coordinates - and the drawing above is left where it was.
-                    let lines: Vec<u64> = app.project.sketches[si].entities.iter().rev().filter(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. })).take(3).map(|e| e.id).collect();
+                    let lines: Vec<u64> = app.project.sketches[si].entities.iter().rev().filter(|e| e.kind.as_line().is_some()).take(3).map(|e| e.id).collect();
                     let (lines0, arcs0) = before(&app);
                     let named: Vec<(u8, u64)> = lines.iter().map(|&id| (1u8, id)).collect();
                     app.status.words.clear(); // so that what is said afterwards is said about THIS action
@@ -1518,7 +1507,7 @@ mod tests {
                 // a line has a node of the trims above sitting on it, and a line with constraints on it is covered
                 // by their glyphs - a click on either picks that and not the line.
                 let on_a_line = |a: &mut App| -> Option<(u64, (f64, f64))> {
-                    let lines: Vec<u64> = a.project.sketches[si].entities.iter().rev().filter(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. })).map(|e| e.id).collect();
+                    let lines: Vec<u64> = a.project.sketches[si].entities.iter().rev().filter(|e| e.kind.as_line().is_some()).map(|e| e.id).collect();
                     let mut hand = Hand::new(a);
                     hand.sk_tool(0);
                     lines.into_iter().find_map(|eid| hand.spot2d((1, eid)).map(|p| (eid, p)))
@@ -1527,8 +1516,8 @@ mod tests {
                 let ends_of = |a: &App, eid: u64| -> Option<((f64, f64), (f64, f64))> {
                     let sk = &a.project.sketches[si];
                     let at = |id: u64| sk.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-                    sk.entities.iter().find(|e| e.id == eid).and_then(|e| match e.kind {
-                        qymcad_core::model::EntityKind::Line { a: pa, b: pb } => Some((at(pa)?, at(pb)?)),
+                    sk.entities.iter().find(|e| e.id == eid).and_then(|e| match e.kind.as_line() {
+                        Some(qymcad_core::model::LineParts { a: pa, b: pb }) => Some((at(pa)?, at(pb)?)),
                         _ => None,
                     })
                 };
@@ -1648,8 +1637,8 @@ mod tests {
                     hand.click2d(160.0, -40.0).type_text("5").key(egui::Key::Enter);
                     let sk = &app.project.sketches[si];
                     let at = |id: u64| sk.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-                    let chord_5 = sk.entities.iter().any(|e| match e.kind {
-                        qymcad_core::model::EntityKind::Arc { center, a, b, .. } => {
+                    let chord_5 = sk.entities.iter().any(|e| match e.kind.as_arc() {
+                        Some(qymcad_core::model::ArcParts { center, a, b, .. }) => {
                             let (Some(c), Some(a), Some(b)) = (at(center), at(a), at(b)) else { return false };
                             (c.0 - 160.0).hypot(c.1 + 40.0) < 10.0 && ((b.0 - a.0).hypot(b.1 - a.1) - 5.0).abs() < 1e-5
                         }
@@ -1676,16 +1665,16 @@ mod tests {
                     hand.click2d(280.6, -24.4).click2d(281.0, -24.0).type_text("4").key(egui::Key::Enter);
                     let sk = &app.project.sketches[si];
                     let at = |id: u64| sk.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-                    let rounded = sk.entities.iter().any(|e| match e.kind {
-                        qymcad_core::model::EntityKind::Arc { center, .. } => at(center).is_some_and(|c| (c.0 - 284.0).hypot(c.1 + 21.0) < 1e-5),
+                    let rounded = sk.entities.iter().any(|e| match e.kind.as_arc() {
+                        Some(qymcad_core::model::ArcParts { center, .. }) => at(center).is_some_and(|c| (c.0 - 284.0).hypot(c.1 + 21.0) < 1e-5),
                         _ => false,
                     });
                     if !pressed || !rounded {
                         let centres: Vec<(f64, f64)> = sk
                             .entities
                             .iter()
-                            .filter_map(|e| match e.kind {
-                                qymcad_core::model::EntityKind::Arc { center, .. } => at(center).filter(|c| c.0 > 250.0),
+                            .filter_map(|e| match e.kind.as_arc() {
+                                Some(qymcad_core::model::ArcParts { center, .. }) => at(center).filter(|c| c.0 > 250.0),
                                 _ => None,
                             })
                             .collect();
@@ -1729,12 +1718,12 @@ mod tests {
                     hand.click2d(435.0, -41.25).shift_click2d(410.0, -20.0).constraint(9);
                     let sk = &app.project.sketches[si];
                     let at = |id: u64| sk.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-                    let centre = sk.entities.iter().rev().find_map(|e| match e.kind {
-                        qymcad_core::model::EntityKind::Circle { center, .. } => at(center),
+                    let centre = sk.entities.iter().rev().find_map(|e| match e.kind.as_circle() {
+                        Some(qymcad_core::model::CircleParts { center, .. }) => at(center),
                         _ => None,
                     });
-                    let ends = sk.entities.iter().rev().find_map(|e| match e.kind {
-                        qymcad_core::model::EntityKind::Line { a, b } => at(a).zip(at(b)),
+                    let ends = sk.entities.iter().rev().find_map(|e| match e.kind.as_line() {
+                        Some(qymcad_core::model::LineParts { a, b }) => at(a).zip(at(b)),
                         _ => None,
                     });
                     let touches = centre.zip(ends).is_some_and(|(c, (a, b))| {
@@ -1781,8 +1770,8 @@ mod tests {
                     hand.key(egui::Key::Escape).sk_tool(3).look2d((520.0, -40.0)).click2d(510.0, -40.0).click2d(514.0, -40.0).key(egui::Key::Escape);
                     hand.sk_tool(0);
                     let sk = &app.project.sketches[si];
-                    let centre = sk.entities.iter().rev().find_map(|e| match e.kind {
-                        qymcad_core::model::EntityKind::Circle { center, .. } => Some(center),
+                    let centre = sk.entities.iter().rev().find_map(|e| match e.kind.as_circle() {
+                        Some(qymcad_core::model::CircleParts { center, .. }) => Some(center),
                         _ => None,
                     });
                     let held = centre.is_some_and(|c| sk.constraints.iter().any(|k| matches!(k, qymcad_core::model::Constraint::PointOnLine { p, .. } if *p == c)));
@@ -1829,7 +1818,7 @@ mod tests {
                     let at = |id: u64| sk.points.iter().find(|q| q.id == id).map(|q| q.x);
                     // the middle is laid by Vertical, held to the line clicked
                     let line = match picked.as_slice() {
-                        [(1, eid)] => sk.entities.iter().find(|e| e.id == *eid).and_then(|e| if let qymcad_core::model::EntityKind::Line { a, b } = e.kind { Some((a, b)) } else { None }),
+                        [(1, eid)] => sk.entities.iter().find(|e| e.id == *eid).and_then(|e| if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() { Some((a, b)) } else { None }),
                         _ => None,
                     };
                     let mid = line.and_then(|(a, b)| {
@@ -1975,8 +1964,8 @@ mod tests {
                 let arcs: Vec<u64> = sk
                     .entities
                     .iter()
-                    .flat_map(|e| match e.kind {
-                        qymcad_core::model::EntityKind::Arc { center, a, b, .. } => vec![center, a, b],
+                    .flat_map(|e| match e.kind.as_arc() {
+                        Some(qymcad_core::model::ArcParts { center, a, b, .. }) => vec![center, a, b],
                         _ => Vec::new(),
                     })
                     .collect();

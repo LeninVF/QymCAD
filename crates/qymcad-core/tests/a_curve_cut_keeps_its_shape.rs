@@ -15,13 +15,13 @@ fn p2(at: [f64; 2]) -> Point2 {
 
 /// The kind of an entity in words.
 fn kind(k: &EntityKind) -> &'static str {
-    match k {
-        EntityKind::Line { .. } => "line",
-        EntityKind::Arc { .. } => "arc",
-        EntityKind::Circle { .. } => "circle",
-        EntityKind::Ellipse { span: None, .. } => "ellipse",
-        EntityKind::Ellipse { .. } => "arc of an ellipse",
-        EntityKind::Spline { .. } => "spline",
+    match (k.name_key(), k.as_ellipse().map(|e| e.span.is_some())) {
+        (_, Some(false)) => "ellipse",
+        (_, Some(true)) => "arc of an ellipse",
+        ("ent-line", _) => "line",
+        ("ent-arc", _) => "arc",
+        ("ent-circle", _) => "circle",
+        _ => "spline",
     }
 }
 

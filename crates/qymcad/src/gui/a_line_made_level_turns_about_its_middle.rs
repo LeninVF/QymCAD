@@ -10,7 +10,6 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::EntityKind;
 
     #[test]
     fn a_steep_line_given_horizontal_lies_level_with_its_length() {
@@ -22,7 +21,7 @@ mod tests {
         Hand::new(&mut app).sk_tool(1).click2d(10.0, 0.0).click2d(10.0 + dx, dy).key(egui::Key::Escape);
         let ends = |app: &App| {
             let s = &app.project.sketches[si];
-            let (a, b) = s.entities.iter().find_map(|e| if let EntityKind::Line { a, b } = e.kind { Some((a, b)) } else { None }).expect("the line");
+            let (a, b) = s.entities.iter().find_map(|e| if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() { Some((a, b)) } else { None }).expect("the line");
             let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("an end");
             (at(a), at(b))
         };
@@ -53,7 +52,7 @@ mod tests {
         Hand::new(&mut app).sk_tool(0).click2d(10.0, 15.0);
         Hand::new(&mut app).constraint(1);
         let s = &app.project.sketches[si];
-        let (a, b) = s.entities.iter().find_map(|e| if let EntityKind::Line { a, b } = e.kind { Some((a, b)) } else { None }).expect("the line");
+        let (a, b) = s.entities.iter().find_map(|e| if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() { Some((a, b)) } else { None }).expect("the line");
         let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("an end");
         let (pa, pb) = (at(a), at(b));
         let len = (pb.0 - pa.0).hypot(pb.1 - pa.1);

@@ -9,7 +9,6 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::EntityKind;
 
     /// How far each arc of the sketch turns, in degrees, with its radius.
     fn arcs(app: &App, si: usize) -> Vec<(f64, f64)> {
@@ -17,8 +16,8 @@ mod tests {
         let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("a point of the arc");
         s.entities
             .iter()
-            .filter_map(|e| match e.kind {
-                EntityKind::Arc { center, a, b, ccw } => {
+            .filter_map(|e| match e.kind.as_arc() {
+                Some(qymcad_core::model::ArcParts { center, a, b, ccw }) => {
                     let (c, pa, pb) = (at(center), at(a), at(b));
                     let (a0, a1) = ((pa.1 - c.1).atan2(pa.0 - c.0), (pb.1 - c.1).atan2(pb.0 - c.0));
                     let sweep = if ccw { (a1 - a0).rem_euclid(std::f64::consts::TAU) } else { (a0 - a1).rem_euclid(std::f64::consts::TAU) };
@@ -49,8 +48,8 @@ mod tests {
         let mut sins = Vec::new();
         let s = &app.project.sketches[si];
         let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-        let turn = s.entities.iter().find(|e| e.id == side).and_then(|e| match e.kind {
-            EntityKind::Line { a, b } => {
+        let turn = s.entities.iter().find(|e| e.id == side).and_then(|e| match e.kind.as_line() {
+            Some(qymcad_core::model::LineParts { a, b }) => {
                 let (pa, pb) = (at(a)?, at(b)?);
                 Some((pb.1 - pa.1).atan2(pb.0 - pa.0).to_degrees())
             }

@@ -9,8 +9,8 @@ impl Project {
     /// circle is - one constraint more and one freedom less. Reported behaviour: the radius tool wrote 15 into the arc
     /// and left no dimension, the arc free to be dragged to any radius.
     pub fn put_arc_radius_dim(&mut self, si: usize, eid: Id, rr: f64) {
-        let Some((center, a, b, ccw)) = self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).and_then(|e| match e.kind {
-            EntityKind::Arc { center, a, b, ccw } => Some((center, a, b, ccw)),
+        let Some((center, a, b, ccw)) = self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).and_then(|e| match e.kind.as_arc() {
+            Some(crate::model::ArcParts { center, a, b, ccw }) => Some((center, a, b, ccw)),
             _ => None,
         }) else {
             return;
@@ -29,8 +29,8 @@ impl Project {
         let (center, a, b) = {
             let Some(s) = self.sketches.get(si) else { return };
             let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return };
-            match e.kind {
-                EntityKind::Arc { center, a, b, .. } => (center, a, b),
+            match e.kind.as_arc() {
+                Some(crate::model::ArcParts { center, a, b, .. }) => (center, a, b),
                 _ => return,
             }
         };
@@ -54,7 +54,7 @@ impl Project {
             if e.id == exclude {
                 return None;
             }
-            if let EntityKind::Line { a, b } = e.kind {
+            if let Some(crate::model::LineParts { a, b }) = e.kind.as_line() {
                 if a == pid {
                     return Some(b);
                 }
@@ -68,10 +68,7 @@ impl Project {
     /// Index of the radius dimension of an arc (a `Diameter` constraint in radius mode on the arc centre).
     pub fn fillet_radius_constraint(&self, si: usize, arc_eid: Id) -> Option<usize> {
         let s = self.sketches.get(si)?;
-        let center = match s.entities.iter().find(|e| e.id == arc_eid)?.kind {
-            EntityKind::Arc { center, .. } => center,
-            _ => return None,
-        };
+        let center = s.entity(arc_eid)?.kind.as_arc()?.center;
         s.constraints.iter().position(|c| matches!(*c, Constraint::Diameter { c: cc, .. } if cc == center))
     }
     /// Change the radius of a fillet through its dimension, letting the solver move the geometry while keeping
@@ -94,8 +91,8 @@ impl Project {
         let (center, t1, t2) = {
             let Some(s) = self.sketches.get(si) else { return false };
             let Some(e) = s.entities.iter().find(|e| e.id == arc_eid) else { return false };
-            match e.kind {
-                EntityKind::Arc { center, a, b, .. } => (center, a, b),
+            match e.kind.as_arc() {
+                Some(crate::model::ArcParts { center, a, b, .. }) => (center, a, b),
                 _ => return false,
             }
         };
@@ -138,8 +135,8 @@ impl Project {
             }
         }
         if let Some(e) = self.sketches[si].entities.iter_mut().find(|e| e.id == arc_eid) {
-            if let EntityKind::Arc { ccw: c, .. } = &mut e.kind {
-                *c = ccw;
+            if e.kind.as_arc().is_some_and(|arc| arc.ccw != ccw) {
+                e.kind.reverse_arc();
             }
         }
         // Keep the radius dimension in step with the geometry, when the fillet has a parametric one.
@@ -240,12 +237,12 @@ impl Project {
         if let Some(s) = self.sketches.get_mut(si) {
             for e in s.entities.iter_mut() {
                 if e.id == e1 {
-                    e.kind = EntityKind::Line { a: o1, b: t1 };
+                    e.kind = crate::model::LineParts { a: o1, b: t1 }.into();
                 } else if e.id == e2 {
-                    e.kind = EntityKind::Line { a: o2, b: t2 };
+                    e.kind = crate::model::LineParts { a: o2, b: t2 }.into();
                 }
             }
-            s.entities.push(SketchEntity { id: arc, kind: EntityKind::Arc { center: cen, a: t1, b: t2, ccw }, construction: false });
+            s.entities.push(SketchEntity { id: arc, kind: crate::model::ArcParts { center: cen, a: t1, b: t2, ccw }.into(), construction: false });
             // A parametric fillet: the arc is held by tangency to both lines plus a radius dimension (a
             // `Diameter` constraint in radius mode on the arc centre — one R dimension, with no extra linear
             // witness line).
@@ -383,12 +380,12 @@ impl Project {
         if let Some(s) = self.sketches.get_mut(si) {
             for e in s.entities.iter_mut() {
                 if e.id == e1 {
-                    e.kind = EntityKind::Line { a: o1, b: t1 };
+                    e.kind = crate::model::LineParts { a: o1, b: t1 }.into();
                 } else if e.id == e2 {
-                    e.kind = EntityKind::Line { a: o2, b: t2 };
+                    e.kind = crate::model::LineParts { a: o2, b: t2 }.into();
                 }
             }
-            s.entities.push(SketchEntity { id: seg, kind: EntityKind::Line { a: t1, b: t2 }, construction: false });
+            s.entities.push(SketchEntity { id: seg, kind: crate::model::LineParts { a: t1, b: t2 }.into(), construction: false });
             // THE CHAMFER KEEPS ITS SIZE AS DIMENSIONS, so it can be changed afterwards and the cut follows. A symmetric
             // one is sized by the cut itself, between its two ends, and held symmetric by its legs kept equal; two legs,
             // or a leg and the angle from the first line, are measured from the sharp corner. Whatever stands on the
@@ -471,22 +468,19 @@ impl Project {
         }
         let support = |me: &Self, eid: Id, other: Id| -> Option<Sup> {
             let kind = me.sketches.get(si)?.entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone())?;
-            match kind {
-                EntityKind::Line { .. } => {
-                    let (ox, oy) = me.point_xy(si, other)?;
-                    let (dx, dy) = (ox - pcx, oy - pcy);
-                    let len = (dx * dx + dy * dy).sqrt();
-                    if len < 1e-9 {
-                        return None;
-                    }
-                    Some(Sup::Line { px: pcx, py: pcy, ux: dx / len, uy: dy / len, len })
+            if kind.as_line().is_some() {
+                let (ox, oy) = me.point_xy(si, other)?;
+                let (dx, dy) = (ox - pcx, oy - pcy);
+                let len = (dx * dx + dy * dy).sqrt();
+                if len < 1e-9 {
+                    return None;
                 }
-                EntityKind::Arc { center, .. } => {
-                    let (cx, cy) = me.point_xy(si, center)?;
-                    let rad = ((pcx - cx).powi(2) + (pcy - cy).powi(2)).sqrt();
-                    Some(Sup::Circle { cx, cy, rad, center })
-                }
-                _ => None,
+                Some(Sup::Line { px: pcx, py: pcy, ux: dx / len, uy: dy / len, len })
+            } else {
+                let center = kind.as_arc()?.center;
+                let (cx, cy) = me.point_xy(si, center)?;
+                let rad = ((pcx - cx).powi(2) + (pcy - cy).powi(2)).sqrt();
+                Some(Sup::Circle { cx, cy, rad, center })
             }
         };
         let (Some(s1), Some(s2)) = (support(self, e1, o1), support(self, e2, o2)) else { return false };
@@ -593,23 +587,7 @@ impl Project {
         // Trim the edges: replace the endpoint at the vertex with the tangency point.
         let replace_end = |me: &mut Self, eid: Id, newp: Id| {
             if let Some(e) = me.sketches.get_mut(si).and_then(|s| s.entities.iter_mut().find(|e| e.id == eid)) {
-                match &mut e.kind {
-                    EntityKind::Line { a, b } => {
-                        if *a == pc {
-                            *a = newp;
-                        } else if *b == pc {
-                            *b = newp;
-                        }
-                    }
-                    EntityKind::Arc { a, b, .. } => {
-                        if *a == pc {
-                            *a = newp;
-                        } else if *b == pc {
-                            *b = newp;
-                        }
-                    }
-                    _ => {}
-                }
+                e.kind.move_end(crate::model::Repoint { from: pc, to: newp });
             }
         };
         replace_end(self, e1, t1);
@@ -644,7 +622,7 @@ impl Project {
         // The fillet arc, plus parametric tangency constraints and a radius dimension.
         let (s1c, s2c) = (s1, s2);
         if let Some(s) = self.sketches.get_mut(si) {
-            s.entities.push(SketchEntity { id: arc, kind: EntityKind::Arc { center: cen, a: t1, b: t2, ccw }, construction: false });
+            s.entities.push(SketchEntity { id: arc, kind: crate::model::ArcParts { center: cen, a: t1, b: t2, ccw }.into(), construction: false });
             // External or internal tangency between circles, chosen by which the actual centre distance is
             // nearer to.
             let ext = |cx: f64, cy: f64, rad: f64| {
@@ -699,19 +677,7 @@ impl Project {
     pub fn measure_edge_distance(&self, si: usize, c1: Id, m1: i8, c2: Id, m2: i8) -> f64 {
         let Some(s) = self.sketches.get(si) else { return 0.0 };
         let p = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-        let r_of = |cid: Id| -> f64 {
-            s.entities
-                .iter()
-                .find_map(|e| match e.kind {
-                    EntityKind::Circle { center, r } if center == cid => Some(r),
-                    EntityKind::Arc { center, a, .. } if center == cid => match (p(center), p(a)) {
-                        (Some((cx, cy)), Some((ax, ay))) => Some(((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt()),
-                        _ => None,
-                    },
-                    _ => None,
-                })
-                .unwrap_or(0.0)
-        };
+        let r_of = |cid: Id| -> f64 { s.entities.iter().find_map(|e| e.kind.circle_by(&|id| p(id).map(|(x, y)| Point2::new(x, y))).filter(|c| c.center == cid).map(|c| c.r)).unwrap_or(0.0) };
         let (Some((x1, y1)), Some((x2, y2))) = (p(c1), p(c2)) else { return 0.0 };
         let dist = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
         dist + m1 as f64 * r_of(c1) + m2 as f64 * r_of(c2)
@@ -1004,7 +970,7 @@ impl Project {
             -(u.x * vx + u.y * vy) / vx.hypot(vy).max(1e-12)
         };
         let (first, second) = if lean(self, e2) < lean(self, e1) { (e2, e1) } else { (e1, e2) };
-        let both_lines = [e1, e2].iter().all(|&eid| matches!(self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).map(|e| &e.kind), Some(EntityKind::Line { .. })));
+        let both_lines = [e1, e2].iter().all(|&eid| self.sketches.get(si).and_then(|s| s.entity(eid)).is_some_and(|e| e.kind.as_line().is_some()));
         if both_lines {
             self.chamfer_lines(si, first, second, legs)
         } else {
@@ -1017,13 +983,7 @@ impl Project {
     pub fn connected_entities(&self, si: usize, eid: Id) -> std::collections::HashSet<Id> {
         let mut out: std::collections::HashSet<Id> = std::collections::HashSet::new();
         let Some(s) = self.sketches.get(si) else { return out };
-        let ends = |e: &SketchEntity| -> Vec<Id> {
-            match e.kind {
-                EntityKind::Line { a, b } => vec![a, b],
-                EntityKind::Arc { a, b, .. } => vec![a, b],
-                _ => Vec::new(),
-            }
-        };
+        let ends = |e: &SketchEntity| -> Vec<Id> { e.kind.straight_or_round_ends().map(|ends| ends.to_vec()).unwrap_or_default() };
         let mut queue = vec![eid];
         while let Some(cur) = queue.pop() {
             if !out.insert(cur) {
@@ -1057,12 +1017,7 @@ impl Project {
                 if e.construction || only.is_some_and(|f| !f.contains(&e.id)) {
                     continue;
                 }
-                let ends = match e.kind {
-                    EntityKind::Line { a, b } => Some((a, b)),
-                    EntityKind::Arc { a, b, .. } => Some((a, b)),
-                    _ => None,
-                };
-                if let Some((a, b)) = ends {
+                if let Some([a, b]) = e.kind.straight_or_round_ends() {
                     *count.entry(a).or_default() += 1;
                     *count.entry(b).or_default() += 1;
                 }

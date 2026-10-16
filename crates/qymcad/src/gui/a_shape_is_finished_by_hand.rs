@@ -12,7 +12,6 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::EntityKind;
 
     fn a_sketch() -> (App, usize) {
         let mut app = App::default();
@@ -27,8 +26,8 @@ mod tests {
         let at = |id: u64| sk.points.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
         sk.entities
             .iter()
-            .filter_map(|e| match e.kind {
-                EntityKind::Line { a, b } => Some((at(a)?, at(b)?)),
+            .filter_map(|e| match e.kind.as_line() {
+                Some(qymcad_core::model::LineParts { a, b }) => Some((at(a)?, at(b)?)),
                 _ => None,
             })
             .collect()
@@ -39,8 +38,8 @@ mod tests {
         let sk = &app.project.sketches[si];
         sk.entities
             .iter()
-            .filter_map(|e| match &e.kind {
-                qymcad_core::model::EntityKind::Spline { nodes, .. } => Some(nodes.iter().filter_map(|id| sk.points.iter().find(|p| p.id == *id).map(|p| (p.x, p.y))).collect()),
+            .filter_map(|e| match e.kind.as_spline() {
+                Some(qymcad_core::model::SplineParts { nodes, .. }) => Some(nodes.iter().filter_map(|id| sk.points.iter().find(|p| p.id == *id).map(|p| (p.x, p.y))).collect()),
                 _ => None,
             })
             .collect()
@@ -102,7 +101,7 @@ mod tests {
     /// is added".
     #[test]
     fn a_constraint_goes_on_every_selected_line() {
-        use qymcad_core::model::{Constraint, EntityKind};
+        use qymcad_core::model::Constraint;
         /// A constraint button, its name, and how many constraints of its kind three selected lines should get.
         struct Button {
             code: u8,
@@ -121,8 +120,8 @@ mod tests {
             let at = |id: u64| sk.points.iter().find(|p| p.id == id).map(|p| (p.x, p.y)).expect("a point");
             sk.entities
                 .iter()
-                .filter(|e| match e.kind {
-                    EntityKind::Line { a, b } => (at(a).0 - at(b).0).abs() > 1e-6,
+                .filter(|e| match e.kind.as_line() {
+                    Some(qymcad_core::model::LineParts { a, b }) => (at(a).0 - at(b).0).abs() > 1e-6,
                     _ => false,
                 })
                 .count()
@@ -136,7 +135,7 @@ mod tests {
                 Hand::new(&mut app).sk_tool(1).click2d(x, 0.0).double_click2d(x + lean, 12.0);
                 Hand::new(&mut app).key(egui::Key::Escape);
             }
-            let lines: Vec<(u8, u64)> = app.project.sketches[si].entities.iter().filter(|e| matches!(e.kind, EntityKind::Line { .. })).map(|e| (1u8, e.id)).collect();
+            let lines: Vec<(u8, u64)> = app.project.sketches[si].entities.iter().filter(|e| e.kind.as_line().is_some()).map(|e| (1u8, e.id)).collect();
             assert_eq!(lines.len(), 3, "setup: three lines");
             assert_eq!(slanted(&app, si), 3, "setup: the three lines are slanted");
             let ties = app.project.sketches[si].constraints.iter().filter(|c| matches!(c, Constraint::Parallel { .. } | Constraint::Equal { .. } | Constraint::Collinear { .. })).count();
@@ -175,7 +174,7 @@ mod tests {
     /// points and both constraints stood green.
     #[test]
     fn a_constraint_that_shrinks_a_line_to_a_point_is_refused() {
-        use qymcad_core::model::{Constraint, EntityKind};
+        use qymcad_core::model::Constraint;
         let mut problems = Vec::new();
         for count in [1usize, 3] {
             let (mut app, si) = a_sketch();
@@ -183,7 +182,7 @@ mod tests {
                 Hand::new(&mut app).sk_tool(1).click2d(x, 0.0).double_click2d(x + lean, 12.0);
                 Hand::new(&mut app).key(egui::Key::Escape);
             }
-            let lines: Vec<(u8, u64)> = app.project.sketches[si].entities.iter().filter(|e| matches!(e.kind, EntityKind::Line { .. })).map(|e| (1u8, e.id)).collect();
+            let lines: Vec<(u8, u64)> = app.project.sketches[si].entities.iter().filter(|e| e.kind.as_line().is_some()).map(|e| (1u8, e.id)).collect();
             assert!(Hand::new(&mut app).select2d(&lines), "setup: the lines are picked");
             Hand::new(&mut app).constraint(2);
             let vertical = app.project.sketches[si].constraints.iter().filter(|c| matches!(c, Constraint::Vertical { .. })).count();
@@ -195,8 +194,8 @@ mod tests {
             let shortest = sk
                 .entities
                 .iter()
-                .filter_map(|e| match e.kind {
-                    EntityKind::Line { a, b } => Some((at(a).0 - at(b).0).hypot(at(a).1 - at(b).1)),
+                .filter_map(|e| match e.kind.as_line() {
+                    Some(qymcad_core::model::LineParts { a, b }) => Some((at(a).0 - at(b).0).hypot(at(a).1 - at(b).1)),
                     _ => None,
                 })
                 .fold(f64::MAX, f64::min);
@@ -220,13 +219,13 @@ mod tests {
     /// the rest, and the sketch turned yellow; Collinear on vertical lines did the same.
     #[test]
     fn a_constraint_already_held_is_not_laid_twice() {
-        use qymcad_core::model::{Constraint, EntityKind};
+        use qymcad_core::model::Constraint;
         let (mut app, si) = a_sketch();
         for (x, lean) in [(0.0, 5.0), (20.0, 9.0), (40.0, 3.0)] {
             Hand::new(&mut app).sk_tool(1).click2d(x, 0.0).double_click2d(x + lean, 12.0);
             Hand::new(&mut app).key(egui::Key::Escape);
         }
-        let lines: Vec<(u8, u64)> = app.project.sketches[si].entities.iter().filter(|e| matches!(e.kind, EntityKind::Line { .. })).map(|e| (1u8, e.id)).collect();
+        let lines: Vec<(u8, u64)> = app.project.sketches[si].entities.iter().filter(|e| e.kind.as_line().is_some()).map(|e| (1u8, e.id)).collect();
         let count = |app: &App, vertical: bool| {
             app.project.sketches[si].constraints.iter().filter(|c| if vertical { matches!(c, Constraint::Vertical { .. }) } else { matches!(c, Constraint::Collinear { .. }) }).count()
         };

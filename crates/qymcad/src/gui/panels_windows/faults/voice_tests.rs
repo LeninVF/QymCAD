@@ -61,7 +61,7 @@ fn the_box_of_the_corners_refuses_a_size_in_the_soft_red_of_the_theme() {
         }
         hand.key(egui::Key::Escape);
         let s = &hand.app.project.sketches[si];
-        let corner = s.entities.iter().filter(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. })).map(|e| (1u8, e.id)).collect::<Vec<_>>();
+        let corner = s.entities.iter().filter(|e| e.kind.as_line().is_some()).map(|e| (1u8, e.id)).collect::<Vec<_>>();
         assert_eq!(corner.len(), 2, "setup: two lines meet at a corner");
         assert!(hand.sk_corner_typed("tb-fillet-sketch-hint", None, &corner, 0.0), "{theme}: no place to click on the two lines");
         let why = crate::i18n::tr("cmd-value-zero");

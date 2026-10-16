@@ -6,7 +6,7 @@
 //! Reported behaviour (#72): the lines were left plain, held by nothing, and a dragged corner pulled them out of shape.
 use qymcad_core::feature::Purpose;
 use qymcad_core::geom::Point2;
-use qymcad_core::model::{Constraint, EntityKind, Project};
+use qymcad_core::model::{Constraint, Project};
 
 /// A rectangle 40 x 30, upright or turned by 30 deg about its first corner (10, 10). Answers the project and the sketch.
 fn drawn(turned: bool) -> (Project, usize) {
@@ -37,7 +37,7 @@ fn broken(turned: bool, k: usize) -> (Project, usize, usize) {
 /// The lines of the sketch as unit directions, after a drag of the free corner of the first line by (7, 4).
 fn dragged(p: &mut Project, si: usize) -> Vec<(f64, f64)> {
     let s = &p.sketches[si];
-    let ends: Vec<(u64, u64)> = s.entities.iter().filter_map(|e| if let EntityKind::Line { a, b } = e.kind { Some((a, b)) } else { None }).collect();
+    let ends: Vec<(u64, u64)> = s.entities.iter().filter_map(|e| if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() { Some((a, b)) } else { None }).collect();
     let corner = ends[0].0;
     let q = s.points.iter().find(|q| q.id == corner).map(|q| (q.x, q.y)).expect("a corner");
     p.solve_sketch_drag(si, Some((corner, q.0 + 7.0, q.1 + 4.0)));

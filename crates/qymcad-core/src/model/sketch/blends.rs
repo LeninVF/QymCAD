@@ -59,7 +59,7 @@ impl Project {
     /// Whether both entities are lines or arcs: the corners that keep their own path.
     pub(crate) fn straight_or_round(&self, si: usize, eids: [Id; 2]) -> bool {
         let Some(s) = self.sketches.get(si) else { return false };
-        eids.iter().all(|id| s.entity(*id).is_some_and(|e| matches!(e.kind, EntityKind::Line { .. } | EntityKind::Arc { .. })))
+        eids.iter().all(|id| s.entity(*id).is_some_and(|e| e.kind.straight_or_round_ends().is_some()))
     }
 
     /// The two sides of the corner the pair makes, and the corner point.
@@ -114,16 +114,10 @@ impl Project {
         Some(at)
     }
 
-    /// THE SHARP OF THE CORNER STAYS where the side went on: on the line of a line, the circle of an arc, the ellipse of an
-    /// arc of one. A spline holds no point yet, and the sharp stands where it was.
-    fn hold_sharp(&mut self, si: usize, pid: Id, leg: &Leg, cut_at: Id) {
-        let Some(kind) = self.sketches[si].entity(leg.eid).map(|e| e.kind.clone()) else { return };
-        let held = match kind {
-            EntityKind::Line { .. } => Some(Constraint::PointOnLine { p: pid, a: leg.far, b: cut_at }),
-            EntityKind::Arc { center, .. } => Some(Constraint::PointOnCircle { p: pid, c: center }),
-            EntityKind::Ellipse { c, ma, mi, .. } => Some(Constraint::PointOnEllipse { p: pid, c, ma, mi }),
-            _ => None,
-        };
+    /// THE SHARP OF THE CORNER STAYS where the side went on (`point_on`): on the line of a line - the side as it is cut
+    /// back, from its far end to where the cut meets it - the circle of an arc, the ellipse of an arc of one, a spline.
+    fn hold_sharp(&mut self, si: usize, pid: Id, leg: &Leg) {
+        let held = self.sketches[si].entity(leg.eid).map(|side| crate::model::point_on(side, pid));
         self.sketches[si].constraints.extend(held);
     }
 
@@ -140,21 +134,22 @@ impl Project {
         let (a1, a2) = (angle(legs[0].curve.at(found.at[0])), angle(legs[1].curve.at(found.at[1])));
         let ccw = (a2 - a1).rem_euclid(std::f64::consts::TAU) <= std::f64::consts::PI;
         let arc = self.alloc_id();
-        self.sketches[si].entities.push(SketchEntity { id: arc, kind: EntityKind::Arc { center: cen, a: t1, b: t2, ccw }, construction: false });
+        self.sketches[si].entities.push(SketchEntity { id: arc, kind: crate::model::ArcParts { center: cen, a: t1, b: t2, ccw }.into(), construction: false });
         for (leg, t) in legs.iter().zip([t1, t2]) {
             let kind = self.sketches[si].entity(leg.eid).map(|e| e.kind.clone());
-            let touch = match kind {
-                Some(EntityKind::Line { .. }) => Some(Constraint::Tangent { a: leg.far, b: t, c: cen, r }),
-                Some(EntityKind::Arc { center, .. }) => {
-                    let (Some((cx, cy)), Some((tx, ty))) = (self.point_xy(si, center), self.point_xy(si, t)) else { continue };
+            let (line, arc) = (kind.as_ref().and_then(|k| k.as_line()), kind.as_ref().and_then(|k| k.as_arc()));
+            let touch = match (line, arc) {
+                (Some(_), _) => Some(Constraint::Tangent { a: leg.far, b: t, c: cen, r }),
+                (_, Some(arc)) => {
+                    let (Some((cx, cy)), Some((tx, ty))) = (self.point_xy(si, arc.center), self.point_xy(si, t)) else { continue };
                     let rad = (tx - cx).hypot(ty - cy);
                     let d = (found.centre.x - cx).hypot(found.centre.y - cy);
-                    Some(Constraint::CircleTangent { c1: center, c2: cen, external: ((rad + r) - d).abs() <= ((rad - r).abs() - d).abs() })
+                    Some(Constraint::CircleTangent { c1: arc.center, c2: cen, external: ((rad + r) - d).abs() <= ((rad - r).abs() - d).abs() })
                 }
                 _ => None,
             };
             self.sketches[si].constraints.extend(touch);
-            self.hold_sharp(si, pid, leg, t);
+            self.hold_sharp(si, pid, leg);
         }
         let off = fillet_label_angle(&self.sketches[si].points, cen, t1, t2);
         self.sketches[si].constraints.push(Constraint::Diameter { c: cen, d: r, off, expr: String::new(), driven: false, diam: false, at: None });
@@ -171,7 +166,7 @@ impl Project {
         let (sharp, at1, at2) = (legs[0].arm().corner(), legs[0].curve.at(places[0]), legs[1].curve.at(places[1]));
         let (Some(t1), Some(t2)) = (self.cut_leg_back(si, &legs[0], places[0]), self.cut_leg_back(si, &legs[1], places[1])) else { return false };
         let seg = self.alloc_id();
-        self.sketches[si].entities.push(SketchEntity { id: seg, kind: EntityKind::Line { a: t1, b: t2 }, construction: false });
+        self.sketches[si].entities.push(SketchEntity { id: seg, kind: crate::model::LineParts { a: t1, b: t2 }.into(), construction: false });
         let leg_dim = |ends: [DimEnd; 2], side: Side, d: f64| {
             let [a, b] = ends_facing(ends, side);
             Constraint::Distance { a, b, d, off: 0.0, expr: String::new(), driven: false, axis: 0, at: None }
@@ -183,8 +178,8 @@ impl Project {
             crate::feature::ChamferMode::DistAngle => vec![leg_dim([end_c, end_1], Side::AwayFrom(at2), sharp.dist(at1))],
         };
         self.sketches[si].constraints.extend(dims);
-        for (leg, t) in legs.iter().zip([t1, t2]) {
-            self.hold_sharp(si, pid, leg, t);
+        for leg in &legs {
+            self.hold_sharp(si, pid, leg);
         }
         self.regen_sketch(si);
         true

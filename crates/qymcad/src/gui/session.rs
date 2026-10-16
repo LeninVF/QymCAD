@@ -427,59 +427,22 @@ impl Drop for Session {
 /// THE BOX AROUND WHAT IS DRAWN IN A SKETCH, in the coordinates of the sheet: the points a person put there, and the
 /// reach of the round and the free shapes, which have no point on their rims.
 fn box_of_sketch(sk: &qymcad_core::model::Sketch, system: &std::collections::HashSet<u64>) -> ([f64; 2], [f64; 2]) {
-    use qymcad_core::model::EntityKind;
     let mut min = [f64::MAX, f64::MAX];
     let mut max = [f64::MIN, f64::MIN];
     let mut take = |x: f64, y: f64| {
         min = [min[0].min(x), min[1].min(y)];
         max = [max[0].max(x), max[1].max(y)];
     };
-    let at = |id: u64| sk.points.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
+    let _at = |id: u64| sk.points.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
     for p in sk.points.iter().filter(|q| !system.contains(&q.id)) {
         take(p.x, p.y);
     }
+    // every curve in the box of the points it is laid out by: an arc by its own sweep - boxed as its whole circle, the
+    // upper half left by a trim of a circle of radius 10 read as reaching down to y = -10 - and a spline past the box of
+    // its nodes where a handle pulls it
     for e in &sk.entities {
-        match e.kind {
-            EntityKind::Circle { center, r } => {
-                if let Some((cx, cy)) = at(center) {
-                    take(cx - r, cy - r);
-                    take(cx + r, cy + r);
-                }
-            }
-            // AN ARC STANDS IN THE BOX OF ITS OWN SWEEP - its ends, and of the circle's four extremes only those it passes
-            // through. Boxed as its whole circle, the upper half left by a trim of a circle of radius 10 read as reaching
-            // down to y = -10, the half that had been cut away.
-            EntityKind::Arc { center, a, b, ccw } => {
-                if let (Some((cx, cy)), Some((ax, ay)), Some((bx, by))) = (at(center), at(a), at(b)) {
-                    let r = (ax - cx).hypot(ay - cy);
-                    take(ax, ay);
-                    take(bx, by);
-                    let (a0, a1) = ((ay - cy).atan2(ax - cx), (by - cy).atan2(bx - cx));
-                    let sweep = if ccw { (a1 - a0).rem_euclid(std::f64::consts::TAU) } else { (a0 - a1).rem_euclid(std::f64::consts::TAU) };
-                    for k in 0..4 {
-                        let t = k as f64 * std::f64::consts::FRAC_PI_2;
-                        let from = if ccw { (t - a0).rem_euclid(std::f64::consts::TAU) } else { (a0 - t).rem_euclid(std::f64::consts::TAU) };
-                        if from <= sweep {
-                            take(cx + r * t.cos(), cy + r * t.sin());
-                        }
-                    }
-                }
-            }
-            EntityKind::Ellipse { c, ma, mi, span: None } => {
-                if let (Some((cx, cy)), Some((mx, my)), Some((nx, ny))) = (at(c), at(ma), at(mi)) {
-                    let (a, b) = ((mx - cx).hypot(my - cy), (nx - cx).hypot(ny - cy));
-                    take(cx - a.max(b), cy - a.max(b));
-                    take(cx + a.max(b), cy + a.max(b));
-                }
-            }
-            EntityKind::Line { .. } => {}
-            // a spline and an arc of an ellipse by the points they are laid out by: a handle pulls a spline past the box of
-            // its nodes
-            EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
-                for q in qymcad_ui_state::entity_outline(sk, e) {
-                    take(q.x, q.y);
-                }
-            }
+        for q in qymcad_ui_state::entity_outline(sk, e) {
+            take(q.x, q.y);
         }
     }
     if min[0] == f64::MAX {

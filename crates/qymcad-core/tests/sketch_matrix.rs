@@ -186,20 +186,8 @@ fn matrix_tangent_dumbbell_trim() {
     }
     // after the first trim the circle became an arc, possibly with a new id: find the arc entity centred at
     // (0,0)
-    let mid2 = p.sketches[si]
-        .entities
-        .iter()
-        .find(|e| {
-            matches!(e.kind, qymcad_core::model::EntityKind::Arc { .. } | qymcad_core::model::EntityKind::Circle { .. }) && {
-                let pid = match e.kind {
-                    qymcad_core::model::EntityKind::Arc { center, .. } => center,
-                    qymcad_core::model::EntityKind::Circle { center, .. } => center,
-                    _ => unreachable!(),
-                };
-                p.sketches[si].points.iter().any(|q| q.id == pid && q.x.abs() < 1e-6 && q.y.abs() < 1e-6)
-            }
-        })
-        .map(|e| e.id);
+    let mid2 =
+        p.sketches[si].entities.iter().find(|e| e.kind.round_centre().is_some_and(|pid| p.sketches[si].points.iter().any(|q| q.id == pid && q.x.abs() < 1e-6 && q.y.abs() < 1e-6))).map(|e| e.id);
     match mid2 {
         Some(id) => {
             if !p.trim_curve(si, id, -rr, 0.0) {

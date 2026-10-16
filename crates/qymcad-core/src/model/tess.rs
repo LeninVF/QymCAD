@@ -97,16 +97,7 @@ pub(super) fn arc_center_from_bulge(p0x: f64, p0y: f64, p1x: f64, p1y: f64, bulg
 pub(super) fn entity_bulge_loops(pts: &[SketchPoint], ents: &[SketchEntity]) -> Vec<Vec<crate::offset::BVert>> {
     use std::f64::consts::TAU;
     let pt = |id: Id| pts.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
-    let segs: Vec<(usize, Id, Id)> = ents
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| !e.construction)
-        .filter_map(|(i, e)| match e.kind {
-            EntityKind::Line { a, b } => Some((i, a, b)),
-            EntityKind::Arc { a, b, .. } => Some((i, a, b)),
-            _ => None,
-        })
-        .collect();
+    let segs: Vec<(usize, Id, Id)> = ents.iter().enumerate().filter(|(_, e)| !e.construction).filter_map(|(i, e)| e.kind.straight_or_round_ends().map(|[a, b]| (i, a, b))).collect();
     let mut adj: std::collections::HashMap<Id, Vec<usize>> = std::collections::HashMap::new();
     for (k, &(_, a, b)) in segs.iter().enumerate() {
         adj.entry(a).or_default().push(k);
@@ -127,8 +118,8 @@ pub(super) fn entity_bulge_loops(pts: &[SketchPoint], ents: &[SketchEntity]) -> 
             let (ei, a, b) = segs[cur_k];
             let to = if cur_pt == a { b } else { a };
             let (Some((fx, fy)), Some((_tx, _ty))) = (pt(cur_pt), pt(to)) else { break };
-            let bulge = match ents[ei].kind {
-                EntityKind::Arc { center, a: aa, b: _bb, ccw } => {
+            let bulge = match ents[ei].kind.as_arc() {
+                Some(crate::model::ArcParts { center, a: aa, b: _bb, ccw }) => {
                     if let (Some((cx, cy)), Some((sx, sy)), Some((ex, ey))) = (pt(center), pt(cur_pt), pt(to)) {
                         let (sa_, ea_) = ((sy - cy).atan2(sx - cx), (ey - cy).atan2(ex - cx));
                         let dir_ccw = if cur_pt == aa { ccw } else { !ccw };
@@ -164,15 +155,7 @@ pub(super) fn entity_bulge_loops(pts: &[SketchPoint], ents: &[SketchEntity]) -> 
 pub(super) fn entity_bulge_chains(pts: &[SketchPoint], ents: &[SketchEntity]) -> Vec<Vec<crate::offset::BVert>> {
     use std::f64::consts::TAU;
     let pt = |id: Id| pts.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
-    let segs: Vec<(usize, Id, Id)> = ents
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| !e.construction)
-        .filter_map(|(i, e)| match e.kind {
-            EntityKind::Line { a, b } | EntityKind::Arc { a, b, .. } => Some((i, a, b)),
-            _ => None,
-        })
-        .collect();
+    let segs: Vec<(usize, Id, Id)> = ents.iter().enumerate().filter(|(_, e)| !e.construction).filter_map(|(i, e)| e.kind.straight_or_round_ends().map(|[a, b]| (i, a, b))).collect();
     let mut adj: std::collections::HashMap<Id, Vec<usize>> = std::collections::HashMap::new();
     for (k, &(_, a, b)) in segs.iter().enumerate() {
         adj.entry(a).or_default().push(k);
@@ -201,8 +184,8 @@ pub(super) fn entity_bulge_chains(pts: &[SketchPoint], ents: &[SketchEntity]) ->
             let (ei, a, b) = segs[cur_k];
             let to = if cur_pt == a { b } else { a };
             let Some((fx, fy)) = pt(cur_pt) else { break };
-            let bulge = match ents[ei].kind {
-                EntityKind::Arc { center, a: aa, ccw, .. } => match (pt(center), pt(cur_pt), pt(to)) {
+            let bulge = match ents[ei].kind.as_arc() {
+                Some(crate::model::ArcParts { center, a: aa, ccw, .. }) => match (pt(center), pt(cur_pt), pt(to)) {
                     (Some((cx, cy)), Some((sx, sy)), Some((ex, ey))) => {
                         let (sa_, ea_) = ((sy - cy).atan2(sx - cx), (ey - cy).atan2(ex - cx));
                         let dir_ccw = if cur_pt == aa { ccw } else { !ccw };
@@ -293,7 +276,7 @@ pub(super) fn tessellate_sketch_multi(points: &[SketchPoint], entities: &[Sketch
         if e.construction {
             continue;
         }
-        if let EntityKind::Circle { center, r } = e.kind {
+        if let Some(crate::model::CircleParts { center, r }) = e.kind.as_circle() {
             if let Some(c) = pt(center) {
                 let rr = r.max(0.01);
                 // a chord sag of about r/600 keeps the circle visually smooth at any radius
@@ -303,7 +286,7 @@ pub(super) fn tessellate_sketch_multi(points: &[SketchPoint], entities: &[Sketch
         }
         // an ellipse is a closed contour of its own: an analytic entity with adaptive tessellation; an arc of one is an
         // open chain of its own
-        if let EntityKind::Ellipse { c, ma, mi, span } = e.kind {
+        if let Some(crate::model::EllipseParts { c, ma, mi, span }) = e.kind.as_ellipse() {
             match (pt(c), pt(ma), pt(mi), span) {
                 (Some(pc), Some(pma), Some(pmi), None) => out.push(with_exact_edges(ellipse_contour(pc, pma, pmi), &pt, e)),
                 (Some(pc), Some(pma), Some(pmi), Some(s)) => {
@@ -316,16 +299,7 @@ pub(super) fn tessellate_sketch_multi(points: &[SketchPoint], entities: &[Sketch
         }
     }
     // lines and arcs are gathered into loops by the connectivity of their endpoints
-    let segs: Vec<(usize, Id, Id)> = entities
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| !e.construction)
-        .filter_map(|(i, e)| match e.kind {
-            EntityKind::Line { a, b } => Some((i, a, b)),
-            EntityKind::Arc { a, b, .. } => Some((i, a, b)),
-            _ => None,
-        })
-        .collect();
+    let segs: Vec<(usize, Id, Id)> = entities.iter().enumerate().filter(|(_, e)| !e.construction).filter_map(|(i, e)| e.kind.straight_or_round_ends().map(|[a, b]| (i, a, b))).collect();
     // Positional welding of a loop: endpoints within `WELD_TOL` count as one vertex. The profile then closes
     // even when adjacent lines end at different, unwelded nodes at the same position — a common case at a
     // corner sitting on the origin, which the "merge coincident points" command leaves alone as a system point.
@@ -377,8 +351,8 @@ pub(super) fn tessellate_sketch_multi(points: &[SketchPoint], entities: &[Sketch
             used[cur_k] = true;
             let (ei, a, b) = segs[cur_k];
             let to = if cl(cur_pt) == cl(a) { b } else { a };
-            match entities[ei].kind {
-                EntityKind::Arc { center, a: aa, b: bb, ccw } => {
+            match entities[ei].kind.as_arc() {
+                Some(crate::model::ArcParts { center, a: aa, b: bb, ccw }) => {
                     if let (Some(c), Some(pa), Some(pb)) = (pt(center), pt(aa), pt(bb)) {
                         let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
                         let (from_pt, to_pt, dir) = if cl(cur_pt) == cl(aa) { (pa, pb, ccw) } else { (pb, pa, !ccw) };
@@ -791,75 +765,49 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
                                                                // the curves that enter the arrangement as the segments of their points, as the curves they are, to give the kernel
     let exact: std::collections::HashMap<Id, Curve> = entities
         .iter()
-        .filter(|e| !e.construction && matches!(e.kind, EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. }))
+        .filter(|e| !e.construction && (e.kind.as_spline().is_some() || e.kind.as_ellipse().is_some_and(|el| el.span.is_some())))
         .filter_map(|e| Curve::of_placed(&|id: Id| pt(id).map(|(x, y)| Point2::new(x, y)), e).map(|c| (e.id, c)))
         .collect();
     for e in entities {
         if e.construction {
             continue;
         }
-        match e.kind {
-            // A SPLINE ENTERS AS THE SEGMENTS OF ITS TESSELLATION, so it is cut by the lines and arcs and by itself, and a
-            // region closed partly by it, or by it crossing itself, is a face like any other. Its pieces carry its id.
-            EntityKind::Spline { ref nodes, ref handles, ends } => {
-                let cps: Vec<Point2> = nodes.iter().filter_map(|id| pt(*id)).map(|(x, y)| Point2::new(x, y)).collect();
-                if cps.len() < 2 {
-                    continue;
-                }
-                let line = tessellate_spline_hermite(&cps, handles, ends);
-                let n = line.points.len();
-                let spans = if ends == crate::feature::Ends::Closed { n } else { n.saturating_sub(1) };
-                for k in 0..spans {
-                    let (a, b) = (line.points[k], line.points[(k + 1) % n]);
-                    if a.dist(b) > 1e-9 {
-                        curves.push(ArrCurve::Line { a: (a.x, a.y), b: (b.x, b.y) });
-                        curve_eid.push(e.id);
-                    }
-                }
-            }
-            EntityKind::Line { a, b } => {
-                if let (Some(pa), Some(pb)) = (pt(a), pt(b)) {
-                    if (pa.0 - pb.0).hypot(pa.1 - pb.1) > 1e-9 {
-                        curves.push(ArrCurve::Line { a: pa, b: pb });
-                        curve_eid.push(e.id);
-                    }
-                }
-            }
-            EntityKind::Circle { center, r } => {
-                if let Some(c) = pt(center) {
-                    curves.push(ArrCurve::Circle { c, r: r.max(1e-6) });
+        let placed = |id: Id| pt(id).map(|(x, y)| Point2::new(x, y));
+        let Some(curve) = Curve::of_placed(&placed, e) else { continue };
+        let xy = |p: Point2| (p.x, p.y);
+        match curve {
+            Curve::Line { a, b } => {
+                if a.dist(b) > 1e-9 {
+                    curves.push(ArrCurve::Line { a: xy(a), b: xy(b) });
                     curve_eid.push(e.id);
                 }
             }
-            EntityKind::Arc { center, a, b, ccw } => {
-                if let (Some(c), Some(pa), Some(pb)) = (pt(center), pt(a), pt(b)) {
-                    let r = (pa.0 - c.0).hypot(pa.1 - c.1);
-                    if r > 1e-9 {
-                        curves.push(ArrCurve::Arc { c, r, a0: (pa.1 - c.1).atan2(pa.0 - c.0), a1: (pb.1 - c.1).atan2(pb.0 - c.0), ccw, pa, pb });
+            Curve::Round { centre, r, .. } if curve.closed() => {
+                curves.push(ArrCurve::Circle { c: xy(centre), r: r.max(1e-6) });
+                curve_eid.push(e.id);
+            }
+            Curve::Round { centre, r, sweep, .. } => {
+                if r > 1e-9 {
+                    let ([pa, pb], c) = (curve.ends(), xy(centre));
+                    curves.push(ArrCurve::Arc { c, r, a0: (pa.y - centre.y).atan2(pa.x - centre.x), a1: (pb.y - centre.y).atan2(pb.x - centre.x), ccw: sweep >= 0.0, pa: xy(pa), pb: xy(pb) });
+                    curve_eid.push(e.id);
+                }
+            }
+            // an ellipse is a closed region of its own; its intersections are not part of the arrangement yet
+            Curve::Oval { centre, major, minor, .. } if curve.closed() => {
+                let contour = ellipse_contour(centre, centre + major, centre + minor);
+                out_ellipse.push((with_exact_edges(contour, &placed, e), vec![e.id]));
+            }
+            // A SPLINE AND AN ARC OF AN ELLIPSE ENTER AS THE SEGMENTS OF THEIR POINTS, so they are cut by the lines and arcs
+            // and by themselves, and a region closed partly by them, or by a spline crossing itself, is a face like any
+            // other; their pieces carry their id
+            _ => {
+                let line = curve.polyline();
+                for w in line.windows(2) {
+                    if w[0].dist(w[1]) > 1e-9 {
+                        curves.push(ArrCurve::Line { a: xy(w[0]), b: xy(w[1]) });
                         curve_eid.push(e.id);
                     }
-                }
-            }
-            // AN ARC OF AN ELLIPSE ENTERS AS THE SEGMENTS OF ITS POINTS, as a spline does, so with lines or arcs across its
-            // ends it closes a region; its pieces carry its id
-            EntityKind::Ellipse { c, ma, mi, span: Some(s) } => {
-                let at = |id: Id| pt(id).map(|(x, y)| Point2::new(x, y));
-                if let (Some(pc), Some(pma), Some(pmi), Some(from), Some(to)) = (at(c), at(ma), at(mi), at(s.from), at(s.to)) {
-                    for w in ellipse_arc_points([pc, pma, pmi], [from, to], s.winding).windows(2) {
-                        if w[0].dist(w[1]) > 1e-9 {
-                            let (a, b) = ((w[0].x, w[0].y), (w[1].x, w[1].y));
-                            curves.push(ArrCurve::Line { a, b });
-                            curve_eid.push(e.id);
-                        }
-                    }
-                }
-            }
-            EntityKind::Ellipse { c, ma, mi, span: None } => {
-                // an ellipse is a closed region of its own; its intersections are not part of the arrangement yet
-                if let (Some(pc), Some(pma), Some(pmi)) = (pt(c), pt(ma), pt(mi)) {
-                    let placed = |id: Id| pt(id).map(|(x, y)| Point2::new(x, y));
-                    let contour = ellipse_contour(crate::geom::Point2::new(pc.0, pc.1), crate::geom::Point2::new(pma.0, pma.1), crate::geom::Point2::new(pmi.0, pmi.1));
-                    out_ellipse.push((with_exact_edges(contour, &placed, e), vec![e.id]));
                 }
             }
         }
@@ -1289,7 +1237,7 @@ mod tests {
     /// the lines of the left rectangle vanished from the sheet and its points stayed.
     #[test]
     fn a_line_touching_a_fillet_off_by_a_solve_keeps_the_face_of_the_rectangle() {
-        use crate::model::{EntityKind, SketchEntity, SketchPoint};
+        use crate::model::{SketchEntity, SketchPoint};
         let pts: Vec<SketchPoint> = [
             (5, 0.0, 0.0),
             (6, -125.0, 24.99999999357503),
@@ -1326,8 +1274,8 @@ mod tests {
         .iter()
         .map(|&(id, x, y)| SketchPoint { id, x, y })
         .collect();
-        let l = |id, a, b| SketchEntity { id, kind: EntityKind::Line { a, b }, construction: false };
-        let arc = |id, center, a, b, ccw| SketchEntity { id, kind: EntityKind::Arc { center, a, b, ccw }, construction: false };
+        let l = |id, a, b| SketchEntity { id, kind: crate::model::LineParts { a, b }.into(), construction: false };
+        let arc = |id, center, a, b, ccw| SketchEntity { id, kind: crate::model::ArcParts { center, a, b, ccw }.into(), construction: false };
         let all: Vec<SketchEntity> = vec![
             l(10, 6, 7),
             l(11, 7, 53),

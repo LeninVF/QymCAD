@@ -137,7 +137,7 @@ pub fn draw_sketch_points(pn: &Painting, painter: &egui::Painter, rect: Rect, si
 /// Draw the associative dimensions and constraints of the selected sketch in the viewport.
 pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: usize) {
     let sh = qymcad_ui_state::Sheet { view: pn.view, rect };
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
     let Some(s) = pn.project.sketches.get(si) else { return };
     let dim_col = pn.scheme.pal.dimension();
     let font = egui::FontId::proportional(pn.set.dim_font);
@@ -176,58 +176,14 @@ pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: 
         painter.circle_filled(sh, r, col);
         painter.circle_stroke(sh, r, Stroke::new(1.0, pn.scheme.pal.dim_helper_ring()));
     }
-    let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
-    let pt_of = |id: Id| points_by_id.get(&id).copied().map(|p| Point2::new(p.x, p.y));
     for e in &s.entities {
         if !e.construction {
             continue;
         }
-        match e.kind {
-            qymcad_core::model::EntityKind::Line { a, b } => {
-                if let (Some(pa), Some(pb)) = (pt_of(a), pt_of(b)) {
-                    let (sa, sb) = (sh.at(pa), sh.at(pb));
-                    painter.add(egui::Shape::dashed_line(&[sa, sb], Stroke::new(1.0, aux_col), 6.0, 4.0));
-                }
-            }
-            qymcad_core::model::EntityKind::Circle { center, r } => {
-                if let Some(c) = pt_of(center) {
-                    let sc = sh.at(c);
-                    let rp = (sh.at(Point2::new(c.x + r, c.y)).x - sc.x).abs();
-                    // a dashed circle, as segments
-                    let n = 48;
-                    let pts: Vec<Pos2> = (0..=n)
-                        .map(|k| {
-                            let a = std::f64::consts::TAU * k as f64 / n as f64;
-                            sc + egui::vec2((rp as f64 * a.cos()) as f32, (rp as f64 * a.sin()) as f32)
-                        })
-                        .collect();
-                    painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, aux_col), 6.0, 4.0));
-                }
-            }
-            qymcad_core::model::EntityKind::Arc { center, a, b, ccw } => {
-                if let (Some(c), Some(pa), Some(pb)) = (pt_of(center), pt_of(a), pt_of(b)) {
-                    let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
-                    let a0 = (pa.y - c.y).atan2(pa.x - c.x);
-                    let a1 = (pb.y - c.y).atan2(pb.x - c.x);
-                    let arc = qymcad_core::geom::tessellate_arc(c.x, c.y, r, a0, a1, ccw, 0.02);
-                    let sp: Vec<Pos2> = arc.iter().map(|p| sh.at(Point2::new(p.x, p.y))).collect();
-                    if sp.len() >= 2 {
-                        painter.add(egui::Shape::dashed_line(&sp, Stroke::new(1.0, aux_col), 6.0, 4.0));
-                    }
-                }
-            }
-            qymcad_core::model::EntityKind::Ellipse { c, ma, mi, span: None } => {
-                let pts: Vec<Pos2> = qymcad_ui_state::ellipse_outline_world(pn.project, si, c, ma, mi).iter().map(|p| sh.at(*p)).collect();
-                if pts.len() >= 2 {
-                    painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, aux_col), 6.0, 4.0));
-                }
-            }
-            qymcad_core::model::EntityKind::Spline { .. } | qymcad_core::model::EntityKind::Ellipse { span: Some(_), .. } => {
-                let pts: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).iter().map(|p| sh.at(*p)).collect();
-                if pts.len() >= 2 {
-                    painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, aux_col), 6.0, 4.0));
-                }
-            }
+        // a curve of construction geometry of any kind, dashed as it is drawn
+        let pts: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).iter().map(|p| sh.at(*p)).collect();
+        if pts.len() >= 2 {
+            painter.add(egui::Shape::dashed_line(&pts, Stroke::new(1.0, aux_col), 6.0, 4.0));
         }
     }
     // THE CENTRE LINES OF THE CIRCLES, dashed and faint: the axes a dimension, a line or a tangent is laid off
@@ -291,20 +247,7 @@ pub fn draw_sketch_dims(pn: &Painting, painter: &egui::Painter, rect: Rect, si: 
             Constraint::EdgeDistance { c1, c2, d, m1, m2, off: doff, .. } => {
                 // a tangent dimension: the dimension line runs between the RIMS of the circles (centre +/- radius along the line of centres)
                 let (Some(p1), Some(p2)) = (qymcad_ui_state::sketch_pt(pn.project, si, c1), qymcad_ui_state::sketch_pt(pn.project, si, c2)) else { continue };
-                let r_of = |cid: Id| -> f64 {
-                    for e in &s.entities {
-                        match e.kind {
-                            EntityKind::Circle { center, r } if center == cid => return r,
-                            EntityKind::Arc { center, a, .. } if center == cid => {
-                                if let (Some(pc), Some(pa)) = (qymcad_ui_state::sketch_pt(pn.project, si, center), qymcad_ui_state::sketch_pt(pn.project, si, a)) {
-                                    return ((pa.x - pc.x).powi(2) + (pa.y - pc.y).powi(2)).sqrt();
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    0.0
-                };
+                let r_of = |cid: Id| -> f64 { s.entities.iter().find_map(|e| qymcad_core::model::circle_of(s, e).filter(|k| k.center == cid)).map_or(0.0, |k| k.r) };
                 let (r1, r2) = (r_of(c1), r_of(c2));
                 let len = ((p2.x - p1.x).powi(2) + (p2.y - p1.y).powi(2)).sqrt().max(1e-9);
                 let (ux, uy) = ((p2.x - p1.x) / len, (p2.y - p1.y) / len);

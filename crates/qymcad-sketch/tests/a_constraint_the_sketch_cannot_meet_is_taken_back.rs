@@ -56,8 +56,8 @@ fn equal_on_two_dimensioned_circles_makes_the_second_radius_a_reference() {
     let r2 = p.sketches[si]
         .entities
         .iter()
-        .find_map(|e| match e.kind {
-            qymcad_core::model::EntityKind::Circle { center, r } if center == c2 => Some(r),
+        .find_map(|e| match e.kind.as_circle() {
+            Some(qymcad_core::model::CircleParts { center, r }) if center == c2 => Some(r),
             _ => None,
         })
         .expect("the second radius");

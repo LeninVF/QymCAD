@@ -3,7 +3,7 @@
 //! stays a slot - its sides touching both ends, its ends of one radius.
 use qymcad_core::feature::Purpose;
 use qymcad_core::geom::Point2;
-use qymcad_core::model::{Constraint, EntityKind, Project, SlotSize};
+use qymcad_core::model::{Constraint, Project, SlotSize};
 
 /// AN END OF THE SLOT: its centre and its radius.
 struct End {
@@ -30,8 +30,8 @@ fn a_length_and_a_width_set_are_the_slot_s() {
     let ends: Vec<End> = s
         .entities
         .iter()
-        .filter_map(|e| match e.kind {
-            EntityKind::Arc { center, a, .. } => Some(End { centre: at(center), r: at(center).dist(at(a)) }),
+        .filter_map(|e| match e.kind.as_arc() {
+            Some(qymcad_core::model::ArcParts { center, a, .. }) => Some(End { centre: at(center), r: at(center).dist(at(a)) }),
             _ => None,
         })
         .collect();
@@ -40,7 +40,7 @@ fn a_length_and_a_width_set_are_the_slot_s() {
     assert!((length - 15.0).abs() < 1e-6, "the centres stand {length} apart, not 15");
     assert!(ends.iter().all(|e| (e.r - 4.0).abs() < 1e-6), "the ends are of radii {:?}, not 4", ends.iter().map(|e| e.r).collect::<Vec<f64>>());
     for e in &s.entities {
-        if let EntityKind::Line { a, b } = e.kind {
+        if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
             let (pa, pb) = (at(a), at(b));
             let u = Point2::new(pb.x - pa.x, pb.y - pa.y);
             let off = |c: Point2| ((c.x - pa.x) * u.y - (c.y - pa.y) * u.x).abs() / u.x.hypot(u.y);

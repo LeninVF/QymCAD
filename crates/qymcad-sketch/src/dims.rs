@@ -365,10 +365,7 @@ pub fn dim_click_inner(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
         if let Some(eid) = qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si) {
             // a circle gets a parametric diameter dimension (a Diameter constraint); an arc has its radius
             // edited
-            let center = sk.project.sketches[si].entities.iter().find(|e| e.id == eid).and_then(|e| match e.kind {
-                qymcad_core::model::EntityKind::Circle { center, .. } => Some(center),
-                _ => None,
-            });
+            let center = sk.project.sketches[si].entity(eid).and_then(|e| e.kind.as_circle()).map(|k| k.center);
             if let Some(c) = center {
                 let laid = sk.project.sketches[si].constraints.len();
                 if let Some(ci) = sk.project.ensure_diameter(si, c, true) {
@@ -663,14 +660,6 @@ pub fn make_between_dim(sk: &mut qymcad_ui_state::SketchCtx, si: usize, r1: qymc
 /// THE SIZE OF A CURVE A DIMENSION TAKES FROM ONE CLICK: a circle's diameter, an arc's radius, an ellipse's major half
 /// axis (the distance from its centre to the end of that axis). `None` for a curve with no such size - a line, a spline.
 fn curve_size(project: &Project, si: usize, eid: Id) -> Option<qymcad_core::model::Constraint> {
-    use qymcad_core::model::{Constraint, EntityKind};
     let s = project.sketches.get(si)?;
-    let e = s.entity(eid)?;
-    let at = |id: Id| s.point(id).map(|q| Point2::new(q.x, q.y));
-    Some(match e.kind {
-        EntityKind::Circle { center, r } => Constraint::Diameter { c: center, d: 2.0 * r, off: 0.0, expr: String::new(), driven: false, diam: true, at: None },
-        EntityKind::Arc { center, a, .. } => Constraint::Diameter { c: center, d: at(center)?.dist(at(a)?), off: 0.0, expr: String::new(), driven: false, diam: false, at: None },
-        EntityKind::Ellipse { c, ma, .. } => Constraint::Distance { a: c, b: ma, d: at(c)?.dist(at(ma)?), off: 0.0, expr: String::new(), driven: false, axis: 0, at: None },
-        _ => return None,
-    })
+    qymcad_core::model::size_dimension(s, s.entity(eid)?)
 }

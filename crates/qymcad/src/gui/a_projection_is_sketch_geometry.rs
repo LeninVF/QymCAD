@@ -8,7 +8,7 @@
 mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
 
     /// A part with a cube and a sketch on its top face, the outline of that face projected into it. Answers the sketch.
     fn a_projected_outline(app: &mut App) -> usize {
@@ -59,8 +59,8 @@ mod tests {
         let mut hand = Hand::new(&mut app);
         hand.sk_tool(1).click2d(at.0, at.1).click2d(at.0 + 7.0, at.1 + 11.0).key(egui::Key::Escape).key(egui::Key::Escape);
         let s = &hand.app.project.sketches[si];
-        let drawn = s.entities.iter().rev().find_map(|e| match e.kind {
-            EntityKind::Line { a, .. } if !s.projected_entities().contains(&e.id) => Some(a),
+        let drawn = s.entities.iter().rev().find_map(|e| match e.kind.as_line() {
+            Some(qymcad_core::model::LineParts { a, .. }) if !s.projected_entities().contains(&e.id) => Some(a),
             _ => None,
         });
         let start = drawn.expect("a line was drawn");
@@ -74,15 +74,15 @@ mod tests {
             let si = a_projected_outline(&mut app);
             let s = &app.project.sketches[si];
             let side = s.entities.iter().find(|e| s.projected_entities().contains(&e.id)).expect("a projected side");
-            let EntityKind::Line { a, b } = side.kind else { panic!("the side is a line") };
+            let Some(qymcad_core::model::LineParts { a, b }) = side.kind.as_line() else { panic!("the side is a line") };
             let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("the end");
             let ((ax, ay), (bx, by)) = (at(a), at(b));
             let p = (ax + (bx - ax) * t, ay + (by - ay) * t);
             let mut hand = Hand::new(&mut app);
             hand.sk_tool(1).click2d(p.0, p.1).click2d(p.0 + 9.0, p.1 + 13.0).key(egui::Key::Escape).key(egui::Key::Escape);
             let s = &hand.app.project.sketches[si];
-            let start = s.entities.iter().rev().find_map(|e| match e.kind {
-                EntityKind::Line { a, .. } if !s.projected_entities().contains(&e.id) => Some(a),
+            let start = s.entities.iter().rev().find_map(|e| match e.kind.as_line() {
+                Some(qymcad_core::model::LineParts { a, .. }) if !s.projected_entities().contains(&e.id) => Some(a),
                 _ => None,
             });
             let Some(start) = start else {
@@ -105,7 +105,7 @@ mod tests {
     fn a_projected_side(app: &App, si: usize) -> (u64, (f64, f64)) {
         let s = &app.project.sketches[si];
         let side = s.entities.iter().find(|e| s.projected_entities().contains(&e.id)).expect("a projected side");
-        let EntityKind::Line { a, b } = side.kind else { panic!("the side is a line") };
+        let Some(qymcad_core::model::LineParts { a, b }) = side.kind.as_line() else { panic!("the side is a line") };
         let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("the end");
         let ((ax, ay), (bx, by)) = (at(a), at(b));
         (side.id, ((ax + bx) / 2.0, (ay + by) / 2.0))
@@ -134,7 +134,7 @@ mod tests {
     /// The first end of `side` and where it stands.
     fn projected_points_of(hand: &Hand, si: usize, side: u64) -> (u64, (f64, f64)) {
         let s = &hand.app.project.sketches[si];
-        let Some(EntityKind::Line { a, .. }) = s.entities.iter().find(|e| e.id == side).map(|e| e.kind.clone()) else { panic!("the side") };
+        let Some(qymcad_core::model::LineParts { a, .. }) = s.entity(side).and_then(|e| e.kind.as_line()) else { panic!("the side") };
         (a, s.points.iter().find(|q| q.id == a).map(|q| (q.x, q.y)).expect("the end"))
     }
 
@@ -183,7 +183,7 @@ mod tests {
             // the side runs level when its ends stand at one height
             let level = {
                 let s = &app.project.sketches[si];
-                let Some(EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == side).map(|e| e.kind.clone()) else { panic!("the side") };
+                let Some(qymcad_core::model::LineParts { a, b }) = s.entity(side).and_then(|e| e.kind.as_line()) else { panic!("the side") };
                 let y = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| q.y).unwrap_or_default();
                 (y(a) - y(b)).abs() < 1e-6
             };
@@ -200,7 +200,7 @@ mod tests {
                 Cut::Trim => {
                     // a line of its own across the side, a little off its middle, and the shorter piece of the side trimmed
                     let s = &hand.app.project.sketches[si];
-                    let Some(EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == side).map(|e| e.kind.clone()) else { panic!("the side") };
+                    let Some(qymcad_core::model::LineParts { a, b }) = s.entity(side).and_then(|e| e.kind.as_line()) else { panic!("the side") };
                     let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("the end");
                     let ((ax, ay), (bx, by)) = (at(a), at(b));
                     let cross = (ax + (bx - ax) * 0.25, ay + (by - ay) * 0.25);
@@ -232,8 +232,8 @@ mod tests {
                 .entities
                 .iter()
                 .filter(|e| !driven.contains(&e.id))
-                .filter_map(|e| match e.kind {
-                    EntityKind::Line { a, b } if along(at(a)) && along(at(b)) => Some((a, b)),
+                .filter_map(|e| match e.kind.as_line() {
+                    Some(qymcad_core::model::LineParts { a, b }) if along(at(a)) && along(at(b)) => Some((a, b)),
                     _ => None,
                 })
                 .collect();

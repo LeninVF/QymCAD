@@ -130,10 +130,7 @@ pub fn try_constraint_inner(
         }
         // the middle of an arc: on its circle and as far from both its ends
         11 if pts.len() == 1 => {
-            let arc = picked.iter().find_map(|e| match e.kind {
-                qymcad_core::model::EntityKind::Arc { center, a, b, .. } => Some([center, a, b]),
-                _ => None,
-            });
+            let arc = picked.iter().find_map(|e| e.kind.as_arc()).map(|k| [k.center, k.a, k.b]);
             if let Some([c, a, b]) = arc {
                 new.push(Constraint::PointOnCircle { p: pts[0], c });
                 new.push(Constraint::Equal { a: pts[0], b: a, c: pts[0], d: b });

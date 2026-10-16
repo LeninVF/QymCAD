@@ -662,7 +662,7 @@ pub fn open_shape_size(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
             return true;
         }
         // a straight side of a slot: an end of it is an arc, which opens its own radius below
-        let straight = sk.project.sketches[si].entity(eid).is_some_and(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. }));
+        let straight = sk.project.sketches[si].entity(eid).is_some_and(|e| e.kind.as_line().is_some());
         if straight && sk.project.slot_size(si, eid, qymcad_core::model::SlotSize::Length).is_some() {
             sk.place.set(PlacingShape::Slot(eid));
             sk.place.focus = true;
@@ -671,10 +671,7 @@ pub fn open_shape_size(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
     }
     if let Some(eid) = qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si) {
         // a circle has its diameter edited, or the field of its size opened; an arc the field of its radius
-        let center = sk.project.sketches[si].entities.iter().find(|e| e.id == eid).and_then(|e| match e.kind {
-            qymcad_core::model::EntityKind::Circle { center, .. } => Some(center),
-            _ => None,
-        });
+        let center = sk.project.sketches[si].entity(eid).and_then(|e| e.kind.as_circle()).map(|k| k.center);
         // the circumscribed circle of a polygon (the vertices hang on it) opens the polygon popup (the radius plus the
         // angle), while an ordinary circle gets a diameter
         let is_poly_rim = center.is_some_and(|c| sk.project.sketches[si].constraints.iter().any(|x| matches!(x, qymcad_core::model::Constraint::PointOnCircle { c: cc, .. } if *cc == c)));
@@ -811,7 +808,7 @@ pub fn sketch_rotate_popup(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Cont
 
 /// The in-place editors of dimension values in the viewport (a double click, or the radius tool).
 pub fn dim_editor(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context, rect: Rect) {
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
     let qymcad_ui_state::Sel::Sketch(si) = *sk.sel else {
         sk.inline.clear();
         sk.inline.clear();
@@ -819,13 +816,7 @@ pub fn dim_editor(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context, rect
     };
     // the radius of a circle or an arc entity
     if let Some(eid) = sk.inline.circle() {
-        let info = sk.project.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).and_then(|e| match e.kind {
-            EntityKind::Circle { center, r } => Some((center, r, false)),
-            EntityKind::Arc { center, a, .. } => qymcad_ui_state::sketch_pt(&*sk.project, si, a)
-                .zip(qymcad_ui_state::sketch_pt(&*sk.project, si, center))
-                .map(|(pa, c)| (center, ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt(), true)),
-            _ => None,
-        });
+        let info = sk.project.sketches.get(si).and_then(|s| s.entity(eid).and_then(|e| qymcad_core::model::circle_of(s, e).map(|k| (k.center, k.r, e.kind.as_arc().is_some()))));
         if let (Some((_center, r, is_arc)), Some(cp)) = (info, info.and_then(|(c, ..)| qymcad_ui_state::sketch_pt(&*sk.project, si, c))) {
             let at = (qymcad_ui_state::Sheet { view: *sk.view, rect }).at(Point2::new(cp.x + r, cp.y));
             let mut rr = r;
@@ -903,12 +894,10 @@ pub fn dim_editor(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context, rect
                     }
                 } else {
                     // A DIAMETER TYPED IS LAID AS A DIMENSION, of the value typed
-                    let centre = sk.project.sketches.get_mut(si).and_then(|s| s.entities.iter_mut().find(|e| e.id == eid)).and_then(|e| match &mut e.kind {
-                        EntityKind::Circle { r, center } => {
-                            *r = rr;
-                            Some(*center)
-                        }
-                        _ => None,
+                    let centre = sk.project.sketches.get_mut(si).and_then(|s| s.entities.iter_mut().find(|e| e.id == eid)).and_then(|e| {
+                        let centre = e.kind.as_circle()?.center;
+                        e.kind.set_radius(rr);
+                        Some(centre)
                     });
                     if let Some(ci) = centre.and_then(|c| sk.project.ensure_diameter(si, c, true)) {
                         if let Some(Constraint::Diameter { d, .. }) = sk.project.sketches[si].constraints.get_mut(ci) {

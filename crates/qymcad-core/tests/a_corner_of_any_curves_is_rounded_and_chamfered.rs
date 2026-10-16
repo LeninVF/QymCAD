@@ -8,7 +8,7 @@
 use qymcad_core::feature::{ChamferMode, Ends, Purpose, Winding};
 use qymcad_core::geom::Point2;
 use qymcad_core::model::curve::Curve;
-use qymcad_core::model::{entity_ends, remap_entity_point, ChamferLegs, EllipseArcSpec, EntityKind, Id, Project};
+use qymcad_core::model::{entity_ends, ChamferLegs, EllipseArcSpec, Id, Project};
 
 fn p2(at: [f64; 2]) -> Point2 {
     Point2::new(at[0], at[1])
@@ -66,7 +66,11 @@ fn weld(p: &mut Project, si: usize) -> Id {
     let keep = there[0];
     for gone in &there[1..] {
         for e in s.entities.iter_mut() {
-            remap_entity_point(e, *gone, keep);
+            e.kind.each_point_mut(|id| {
+                if id == gone {
+                    *id = keep;
+                }
+            });
         }
     }
     s.points.retain(|q| q.id == keep || !there.contains(&q.id));
@@ -111,7 +115,10 @@ fn made(cut: Cut, before: &Laid) -> Result<(), String> {
     let new_curve = Curve::of(s, new).ok_or("no curve of the cut")?;
     let [a, b] = entity_ends(new).ok_or("the cut has no ends")?;
     let ends = new_curve.ends();
-    let wrong = !matches!((cut, &new.kind), (Cut::Fillet, EntityKind::Arc { .. }) | (Cut::Chamfer | Cut::ChamferTwo, EntityKind::Line { .. }));
+    let wrong = !match cut {
+        Cut::Fillet => new.kind.as_arc().is_some(),
+        Cut::Chamfer | Cut::ChamferTwo => new.kind.as_line().is_some(),
+    };
     if wrong || s.entities.len() != 3 {
         return Err(format!("the sketch holds {} entities, the last {:?}", s.entities.len(), new.kind));
     }

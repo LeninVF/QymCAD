@@ -5,7 +5,7 @@
 //! Reported behaviour (#71): turned, the rectangle's dimensions stayed horizontal and vertical, measuring along the
 //! axes; by an angle, a horizontal width of 40 held the projection of the turned side at 40 and pulled the side longer.
 use qymcad_core::feature::Purpose;
-use qymcad_core::model::{Constraint, EntityKind, Project};
+use qymcad_core::model::{Constraint, Project};
 
 #[test]
 fn an_angle_on_a_side_turns_the_dimensions_of_the_rectangle() {
@@ -22,8 +22,8 @@ fn an_angle_on_a_side_turns_the_dimensions_of_the_rectangle() {
     p.solve_sketch(si);
     // a fixed line from (10, 10) at -20 deg, the angle measured between it and the bottom side
     let a = p.add_line_entity(si, 10.0, 10.0, 40.0, 10.0 - 30.0 * 20f64.to_radians().tan(), Purpose::Real);
-    let line = match p.sketches[si].entities.iter().find(|e| e.id == a).map(|e| e.kind.clone()) {
-        Some(EntityKind::Line { a, b }) => (a, b),
+    let line = match p.sketches[si].entities.iter().find(|e| e.id == a).and_then(|e| e.kind.as_line()) {
+        Some(qymcad_core::model::LineParts { a, b }) => (a, b),
         _ => panic!("a line"),
     };
     p.sketches[si].constraints.extend([Constraint::Fixed { p: line.0 }, Constraint::Fixed { p: line.1 }]);

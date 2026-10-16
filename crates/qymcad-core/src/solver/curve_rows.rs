@@ -30,28 +30,8 @@ impl Now<'_> {
     /// THE CURVE OF `on` where its points stand now: a line between its ends, or on the straight it lies on where `reach`
     /// says so, a circle or an arc whole on its circle, an ellipse whole, a spline as drawn.
     fn curve(&self, on: &CurveRef, reach: Reach) -> Option<Curve> {
-        Some(match on {
-            CurveRef::Point { .. } => return None,
-            CurveRef::Line { a, b } => {
-                let (a, b) = (self.point(*a)?, self.point(*b)?);
-                let k = if reach == Reach::Straight { LINE_REACH } else { 0.0 };
-                let run = b - a;
-                Curve::Line { a: a - Point2::new(run.x * k, run.y * k), b: b + Point2::new(run.x * k, run.y * k) }
-            }
-            CurveRef::Round { c } => Curve::Round { centre: self.point(*c)?, r: self.ridx.get(c).map(|&i| self.x[i])?, from: 0.0, sweep: std::f64::consts::TAU },
-            CurveRef::Arc { c, a, b, winding } => {
-                let (centre, pa, pb) = (self.point(*c)?, self.point(*a)?, self.point(*b)?);
-                let (from, to) = ((pa.y - centre.y).atan2(pa.x - centre.x), (pb.y - centre.y).atan2(pb.x - centre.x));
-                let tau = std::f64::consts::TAU;
-                let sweep = if *winding == crate::feature::Winding::Ccw { (to - from).rem_euclid(tau) } else { -(from - to).rem_euclid(tau) };
-                Curve::Round { centre, r: centre.dist(pa), from, sweep }
-            }
-            CurveRef::Oval { c, ma, mi } => {
-                let centre = self.point(*c)?;
-                Curve::Oval { centre, major: self.point(*ma)? - centre, minor: self.point(*mi)? - centre, from: 0.0, sweep: std::f64::consts::TAU }
-            }
-            CurveRef::Spline { nodes, handles, ends } => Curve::spline(nodes.iter().map(|id| self.point(*id)).collect::<Option<_>>()?, handles, *ends),
-        })
+        let c = Curve::of_ref(on, &|id| self.point(id), &|c| self.ridx.get(&c).map(|&i| self.x[i]))?;
+        Some(if reach == Reach::Straight { c.reaching(LINE_REACH) } else { c })
     }
 }
 

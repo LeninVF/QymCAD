@@ -11,7 +11,6 @@ use super::*;
 /// here at all.
 pub fn draw_projection_overlay(project: &Project, scheme: &SchemeUi, sel: Sel, view: View2d, painter: &egui::Painter, rect: Rect) {
     let sh = qymcad_ui_state::Sheet { view, rect };
-    use qymcad_core::model::EntityKind;
     let Sel::Sketch(si) = sel else { return };
     let Some(s) = project.sketches.get(si) else { return };
     if s.projections.is_empty() {
@@ -27,22 +26,8 @@ pub fn draw_projection_overlay(project: &Project, scheme: &SchemeUi, sel: Sel, v
             // construction geometry drawn by hand
             let construction = e.construction;
             let stroke = if construction { Stroke::new(1.0, scheme.pal.sketch_driven_construction()) } else { stroke };
-            let path: Vec<Pos2> = match e.kind {
-                EntityKind::Line { a, b } => pt(a).zip(pt(b)).map(|(pa, pb)| vec![sh.at(pa), sh.at(pb)]).unwrap_or_default(),
-                EntityKind::Circle { center, r } => pt(center)
-                    .map(|c| qymcad_core::geom::tessellate_arc(c.x, c.y, r, 0.0, std::f64::consts::TAU, true, 0.02).iter().map(|q| sh.at(Point2::new(q.x, q.y))).collect())
-                    .unwrap_or_default(),
-                EntityKind::Arc { center, a, b, ccw } => match (pt(center), pt(a), pt(b)) {
-                    (Some(c), Some(pa), Some(pb)) => {
-                        let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
-                        let (a0, a1) = ((pa.y - c.y).atan2(pa.x - c.x), (pb.y - c.y).atan2(pb.x - c.x));
-                        qymcad_core::geom::tessellate_arc(c.x, c.y, r, a0, a1, ccw, 0.02).iter().map(|q| sh.at(Point2::new(q.x, q.y))).collect()
-                    }
-                    _ => Vec::new(),
-                },
-                EntityKind::Ellipse { .. } => Vec::new(),
-                EntityKind::Spline { .. } => qymcad_ui_state::entity_outline(s, e).iter().map(|p| sh.at(*p)).collect(),
-            };
+            // the projected curve as it is drawn, an ellipse and a spline as any other
+            let path: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).iter().map(|p| sh.at(*p)).collect();
             if path.len() < 2 {
                 continue;
             }

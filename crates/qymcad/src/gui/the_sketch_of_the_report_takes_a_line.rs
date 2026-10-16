@@ -153,7 +153,7 @@ mod tests {
 
     /// The new lines of the sketch since `had` curves, in their order.
     fn new_lines(hand: &Hand, had: usize) -> Vec<u64> {
-        hand.app.project.sketches[0].entities[had..].iter().filter(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. })).map(|e| e.id).collect()
+        hand.app.project.sketches[0].entities[had..].iter().filter(|e| e.kind.as_line().is_some()).map(|e| e.id).collect()
     }
 
     #[test]

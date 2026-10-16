@@ -9,7 +9,7 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
 
     /// A line drawn by hand from (10,0) to (30,0), with its left end pinned.
     fn a_pinned_line() -> (App, usize, u64) {
@@ -20,8 +20,8 @@ mod tests {
         let (a, _) = app.project.sketches[si]
             .entities
             .iter()
-            .find_map(|e| match e.kind {
-                EntityKind::Line { a, b } => Some((a, b)),
+            .find_map(|e| match e.kind.as_line() {
+                Some(qymcad_core::model::LineParts { a, b }) => Some((a, b)),
                 _ => None,
             })
             .expect("setup: the line was not drawn");

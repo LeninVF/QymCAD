@@ -70,21 +70,18 @@ pub fn note_at(project: &Project, view: &View2d, rect: Rect, pos: Pos2, si: usiz
 /// (PointOnCircle towards its centre). Returns the Id of the centre (so the radius can be retyped).
 /// The centre of the circle of the polygon curve `eid` belongs to - a side or the circle itself.
 pub fn polygon_of_curve(project: &Project, si: usize, eid: Id) -> Option<Id> {
-    use qymcad_core::model::{EntityKind, FigureShape};
+    use qymcad_core::model::FigureShape;
     let s = project.sketches.get(si)?;
     let f = s.figures.iter().find(|f| f.shape == FigureShape::Polygon && f.curves.contains(&eid))?;
-    f.curves.iter().find_map(|c| match s.entity(*c)?.kind {
-        EntityKind::Circle { center, .. } => Some(center),
-        _ => None,
-    })
+    f.curves.iter().find_map(|c| s.entity(*c)?.kind.as_circle().map(|k| k.center))
 }
 
 pub fn polygon_under(project: &Project, view: &View2d, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
     let sh = Sheet { view: *view, rect };
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
     let s = project.sketches.get(si)?;
     for e in &s.entities {
-        let EntityKind::Circle { center, r } = e.kind else { continue };
+        let Some(qymcad_core::model::CircleParts { center, r }) = e.kind.as_circle() else { continue };
         if !e.construction {
             continue;
         }
@@ -121,19 +118,8 @@ pub fn line_screen_dir(project: &Project, view: &View2d, si: usize, a: Id, b: Id
 }
 
 pub fn sel_circle_centers(project: &Project, sel_sk: &SketchSelection, si: usize) -> Vec<Id> {
-    use qymcad_core::model::EntityKind;
     let Some(s) = project.sketches.get(si) else { return Vec::new() };
-    sel_sk
-        .items
-        .iter()
-        .filter(|(k, _)| *k == 1)
-        .filter_map(|(_, eid)| {
-            s.entities.iter().find(|e| e.id == *eid).and_then(|e| match e.kind {
-                EntityKind::Circle { center, .. } | EntityKind::Arc { center, .. } => Some(center),
-                _ => None,
-            })
-        })
-        .collect()
+    sel_sk.items.iter().filter(|(k, _)| *k == 1).filter_map(|(_, eid)| s.entity(*eid).and_then(|e| qymcad_core::model::circle_of(s, e)).map(|c| c.center)).collect()
 }
 
 /// The text object under a screen point (by the bounding box of its glyphs). For selecting, moving and editing.
@@ -166,13 +152,8 @@ pub fn center_radius(dc: &DrawCtx, si: usize, c: Id) -> Option<f64> {
 
 /// The radius of the circle or arc of sketch `si` centred at point `c`.
 pub fn radius_of(project: &Project, si: usize, c: Id) -> Option<f64> {
-    use qymcad_core::model::EntityKind;
     let s = project.sketches.get(si)?;
-    s.entities.iter().find_map(|e| match e.kind {
-        EntityKind::Circle { center, r } if center == c => Some(r),
-        EntityKind::Arc { center, a, .. } if center == c => sketch_pt(project, si, a).zip(sketch_pt(project, si, center)).map(|(pa, pc)| ((pa.x - pc.x).powi(2) + (pa.y - pc.y).powi(2)).sqrt()),
-        _ => None,
-    })
+    s.entities.iter().find_map(|e| qymcad_core::model::circle_of(s, e).filter(|k| k.center == c).map(|k| k.r))
 }
 
 /// TAKE DRAWING TOOL `kind` IN HAND: every other tool put down in one move (`exit_draw_tools`), whatever the one before

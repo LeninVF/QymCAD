@@ -3,7 +3,7 @@
 //! takes; alone it is an open chain; the whole ellipse stays a closed region of its own.
 use qymcad_core::feature::{Purpose, Winding};
 use qymcad_core::geom::Point2;
-use qymcad_core::model::{EllipseArcSpec, EntityKind, Project};
+use qymcad_core::model::{EllipseArcSpec, Project};
 
 /// The upper half of the ellipse of semi-axes 10 and 4 about the origin, from its right end round to its left.
 fn upper_half() -> EllipseArcSpec {
@@ -49,7 +49,7 @@ fn the_ends_of_an_arc_of_an_ellipse_stay_on_it_when_its_axis_is_dragged() {
     let mut p = Project::default();
     let si = p.new_sketch("s");
     let eid = p.add_ellipse_arc_entity(si, upper_half(), Purpose::Real);
-    let EntityKind::Ellipse { c, ma, mi, span: Some(span) } = p.sketches[si].entities.iter().find(|e| e.id == eid).map(|e| e.kind.clone()).expect("the arc") else { panic!("no span") };
+    let Some(qymcad_core::model::EllipseParts { c, ma, mi, span: Some(span) }) = p.sketches[si].entity(eid).and_then(|e| e.kind.as_ellipse()) else { panic!("no span") };
     let at = |p: &Project, id: u64| p.sketches[si].points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y)).expect("the point");
     // the major end dragged out to 14: the ellipse grows along X and the ends of its arc go with it
     let k = p.sketches[si].points.iter().position(|q| q.id == ma).expect("the major end");

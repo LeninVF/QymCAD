@@ -6,7 +6,6 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::EntityKind;
 
     /// The two legs of the chamfer cut, measured from the sharp corner it was cut from: along the line drawn
     /// horizontally, and along the one drawn upright; `None` while the corner is not cut.
@@ -14,8 +13,8 @@ mod tests {
         let sk = &app.project.sketches[si];
         let at = |id: u64| sk.points.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
         let c = at(corner)?;
-        let cut = sk.entities.iter().skip(2).find_map(|e| match e.kind {
-            EntityKind::Line { a, b } => Some((at(a)?, at(b)?)),
+        let cut = sk.entities.iter().skip(2).find_map(|e| match e.kind.as_line() {
+            Some(qymcad_core::model::LineParts { a, b }) => Some((at(a)?, at(b)?)),
             _ => None,
         })?;
         let leg = |p: (f64, f64)| (p.0 - c.0).hypot(p.1 - c.1);
@@ -35,8 +34,8 @@ mod tests {
         let ends: Vec<u64> = app.project.sketches[si]
             .entities
             .iter()
-            .flat_map(|e| match e.kind {
-                EntityKind::Line { a, b } => vec![a, b],
+            .flat_map(|e| match e.kind.as_line() {
+                Some(qymcad_core::model::LineParts { a, b }) => vec![a, b],
                 _ => Vec::new(),
             })
             .collect();

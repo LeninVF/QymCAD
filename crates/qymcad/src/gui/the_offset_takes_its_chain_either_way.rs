@@ -14,7 +14,7 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::EntityKind;
+
     use qymcad_ui_state::EditTool;
 
     /// A zigzag of three lines: up, down, up.
@@ -25,7 +25,7 @@ mod tests {
     }
 
     fn arcs(app: &App) -> usize {
-        app.project.sketches[0].entities.iter().filter(|e| matches!(e.kind, EntityKind::Arc { .. })).count()
+        app.project.sketches[0].entities.iter().filter(|e| e.kind.as_arc().is_some()).count()
     }
 
     #[test]

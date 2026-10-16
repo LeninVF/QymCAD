@@ -160,7 +160,7 @@ mod tests {
         let o = app.project.sketches[si]
             .entities
             .iter()
-            .find_map(|e| if let qymcad_core::model::EntityKind::Circle { center, .. } = e.kind { Some(point_near(&app, si, center)) } else { None })
+            .find_map(|e| if let Some(qymcad_core::model::CircleParts { center, .. }) = e.kind.as_circle() { Some(point_near(&app, si, center)) } else { None })
             .expect("the circle");
         if (c.0 - o.0).abs() > 1e-6 {
             sins.push(format!("the centre made vertical with a circle's centre {o:?} stands at {c:?}; status: {}", app.status));

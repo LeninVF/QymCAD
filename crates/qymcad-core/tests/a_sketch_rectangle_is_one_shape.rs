@@ -7,7 +7,7 @@
 //! deleting those constraints by hand, and a rectangle drawn from its centre kept no centre.
 use qymcad_core::feature::Purpose;
 use qymcad_core::geom::Point2;
-use qymcad_core::model::{Constraint, EntityKind, Project};
+use qymcad_core::model::{Constraint, Project};
 
 /// The three ways a rectangle is drawn: two corners, a centre and a corner, three points (turned by 30 deg).
 fn drawn(way: usize) -> (Project, usize) {
@@ -66,7 +66,7 @@ fn a_rectangle_is_held_by_its_shape_and_keeps_a_centre() {
         }
         // four sides; two construction diagonals for a rectangle drawn from its centre, none for one drawn by its corners;
         // the centre on the middle of both diagonals all the same
-        let lines = |construction: bool| s.entities.iter().filter(|e| e.construction == construction && matches!(e.kind, EntityKind::Line { .. })).count();
+        let lines = |construction: bool| s.entities.iter().filter(|e| e.construction == construction && e.kind.as_line().is_some()).count();
         let diagonals = if way == 1 { 2 } else { 0 };
         if lines(false) != 4 || lines(true) != diagonals {
             sins.push(format!("way {way}: {} sides and {} diagonals, not 4 and {diagonals}", lines(false), lines(true)));
@@ -131,7 +131,7 @@ fn a_rectangle_losing_a_side_is_four_plain_lines() {
     if let Some(c) = s.constraints.iter().find(|c| matches!(c, Constraint::Parallel { .. } | Constraint::Perpendicular { .. } | Constraint::Orientation { .. } | Constraint::Midpoint { .. })) {
         sins.push(format!("a constraint of the rectangle stayed: {c:?}"));
     }
-    if s.entities.iter().filter(|e| matches!(e.kind, EntityKind::Line { .. })).count() != 3 {
+    if s.entities.iter().filter(|e| e.kind.as_line().is_some()).count() != 3 {
         sins.push("the other three sides did not stay".to_string());
     }
     assert!(sins.is_empty(), "{}", sins.join("\n"));
@@ -241,8 +241,8 @@ fn an_angle_dimension_on_a_side_turns_the_rectangle() {
     let (mut p, si) = drawn(0);
     // a fixed line from (0, 0) at -20 deg, the angle measured between it and the first side, both run from their meeting
     let a = p.add_line_entity(si, 0.0, 0.0, 30.0, -30.0 * 20f64.to_radians().tan(), Purpose::Real);
-    let line = match p.sketches[si].entities.iter().find(|e| e.id == a).map(|e| e.kind.clone()) {
-        Some(EntityKind::Line { a, b }) => (a, b),
+    let line = match p.sketches[si].entities.iter().find(|e| e.id == a).and_then(|e| e.kind.as_line()) {
+        Some(qymcad_core::model::LineParts { a, b }) => (a, b),
         _ => panic!("a line"),
     };
     p.sketches[si].constraints.extend([Constraint::Fixed { p: line.0 }, Constraint::Fixed { p: line.1 }]);

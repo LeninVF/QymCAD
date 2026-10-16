@@ -5,7 +5,7 @@
 //! Reported behaviour: Rotate of a rectangle 45 x 35 with its sizes, rounded R3 all round, was refused as held - the
 //! rectangle stood on the axes and every arc had flipped outward into three quarters of a circle.
 use qymcad_core::feature::Purpose;
-use qymcad_core::model::{Constraint, EntityKind, Project};
+use qymcad_core::model::{Constraint, Project};
 
 /// A rectangle 45 x 35 at (0, 0) with its width and height laid as dimensions, its four corners rounded R3.
 fn rounded() -> (Project, usize) {
@@ -27,8 +27,8 @@ fn sweeps(p: &Project, si: usize) -> Vec<f64> {
     let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("a point of the arc");
     s.entities
         .iter()
-        .filter_map(|e| match e.kind {
-            EntityKind::Arc { center, a, b, ccw } => {
+        .filter_map(|e| match e.kind.as_arc() {
+            Some(qymcad_core::model::ArcParts { center, a, b, ccw }) => {
                 let (c, pa, pb) = (at(center), at(a), at(b));
                 let (a0, a1) = ((pa.1 - c.1).atan2(pa.0 - c.0), (pb.1 - c.1).atan2(pb.0 - c.0));
                 Some(if ccw { (a1 - a0).rem_euclid(std::f64::consts::TAU) } else { (a0 - a1).rem_euclid(std::f64::consts::TAU) }.to_degrees())
@@ -49,8 +49,8 @@ fn a_rounded_rectangle_turns_by_its_sides() {
     p.rotate_entities(si, &sides, 22.5, 17.5, 30.0);
     let s = &p.sketches[si];
     let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("a point");
-    let turn = s.entities.iter().find(|e| e.id == sides[0]).and_then(|e| match e.kind {
-        EntityKind::Line { a, b } => Some((at(b).1 - at(a).1).atan2(at(b).0 - at(a).0).to_degrees().rem_euclid(180.0)),
+    let turn = s.entities.iter().find(|e| e.id == sides[0]).and_then(|e| match e.kind.as_line() {
+        Some(qymcad_core::model::LineParts { a, b }) => Some((at(b).1 - at(a).1).atan2(at(b).0 - at(a).0).to_degrees().rem_euclid(180.0)),
         _ => None,
     });
     let arcs = sweeps(&p, si);

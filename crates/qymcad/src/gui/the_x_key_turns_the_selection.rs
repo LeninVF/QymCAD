@@ -9,7 +9,6 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::EntityKind;
 
     /// Two lines drawn apart, the select tool taken.
     fn two_lines() -> (App, usize) {
@@ -24,7 +23,7 @@ mod tests {
 
     /// Whether each line of the sketch is construction geometry, in the order they were drawn.
     fn construction(app: &App, si: usize) -> Vec<bool> {
-        app.project.sketches[si].entities.iter().filter(|e| matches!(e.kind, EntityKind::Line { .. })).map(|e| e.construction).collect()
+        app.project.sketches[si].entities.iter().filter(|e| e.kind.as_line().is_some()).map(|e| e.construction).collect()
     }
 
     #[test]

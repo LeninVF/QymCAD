@@ -174,8 +174,8 @@ impl Project {
             .entities
             .iter()
             .filter(|e| only.is_none_or(|o| o.contains(&e.id)))
-            .filter_map(|e| match e.kind {
-                EntityKind::Line { a, b } => Some((e.id, a, b)),
+            .filter_map(|e| match e.kind.as_line() {
+                Some(crate::model::LineParts { a, b }) => Some((e.id, a, b)),
                 _ => None,
             })
             .collect();
@@ -310,8 +310,8 @@ impl Project {
     /// the two points of touching (a chord) or of an arc length dimension, and the sketch is solved.
     pub(crate) fn give_fillet_its_size(&mut self, si: usize, size: FilletSize) {
         let Some(s) = self.sketches.get(si) else { return };
-        let Some(last) = s.entities.iter().filter(|e| matches!(e.kind, EntityKind::Arc { .. })).max_by_key(|e| e.id).cloned() else { return };
-        let EntityKind::Arc { center: centre, a, b, ccw } = last.kind else { return };
+        let Some(last) = s.entities.iter().filter(|e| e.kind.as_arc().is_some()).max_by_key(|e| e.id).cloned() else { return };
+        let Some(crate::model::ArcParts { center: centre, a, b, ccw }) = last.kind.as_arc() else { return };
         let Some(ci) = self.fillet_radius_constraint(si, last.id) else { return };
         let end = |id: Id| self.point_xy(si, id).map(|(x, y)| sketch::DimEnd { id, at: crate::geom::Point2::new(x, y) });
         let (Some(end_a), Some(end_b), Some((cx, cy))) = (end(a), end(b), self.point_xy(si, centre)) else { return };

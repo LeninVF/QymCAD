@@ -15,8 +15,8 @@ fn state(p: &Project) -> String {
     let circles: Vec<String> = s
         .entities
         .iter()
-        .filter_map(|e| match e.kind {
-            qymcad_core::model::EntityKind::Circle { center, r } => Some(format!("{center}:{:x}", r.to_bits())),
+        .filter_map(|e| match e.kind.as_circle() {
+            Some(qymcad_core::model::CircleParts { center, r }) => Some(format!("{center}:{:x}", r.to_bits())),
             _ => None,
         })
         .collect();

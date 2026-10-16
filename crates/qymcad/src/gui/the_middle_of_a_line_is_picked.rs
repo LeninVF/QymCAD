@@ -11,7 +11,7 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
 
     /// A line from (0, 0) to (40, 0) and a circle about (25, 30), the select tool taken.
     fn a_line_and_a_circle() -> (App, usize) {
@@ -28,11 +28,11 @@ mod tests {
     }
 
     fn centre(app: &App, si: usize) -> u64 {
-        app.project.sketches[si].entities.iter().find_map(|e| if let EntityKind::Circle { center, .. } = e.kind { Some(center) } else { None }).expect("the circle")
+        app.project.sketches[si].entities.iter().find_map(|e| if let Some(qymcad_core::model::CircleParts { center, .. }) = e.kind.as_circle() { Some(center) } else { None }).expect("the circle")
     }
 
     fn line_ends(app: &App, si: usize) -> (u64, u64) {
-        app.project.sketches[si].entities.iter().find_map(|e| if let EntityKind::Line { a, b } = e.kind { Some((a, b)) } else { None }).expect("the line")
+        app.project.sketches[si].entities.iter().find_map(|e| if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() { Some((a, b)) } else { None }).expect("the line")
     }
 
     #[test]

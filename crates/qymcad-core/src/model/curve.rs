@@ -13,7 +13,10 @@ use super::*;
 
 mod blend;
 mod edges;
+mod marks;
+pub mod kinds;
 mod meet;
+pub mod refs;
 mod shift;
 mod stretch;
 pub use blend::{chamfer, rounding, Arm, Rounding};
@@ -51,6 +54,15 @@ pub struct At {
 /// A whole turn.
 const TURN: f64 = std::f64::consts::TAU;
 
+/// AN ARC OF A CIRCLE BY ITS CENTRE AND ITS ENDS, and the way it runs from the first to the second.
+#[derive(Clone, Copy, Debug)]
+struct ArcEnds {
+    centre: Point2,
+    from: Point2,
+    to: Point2,
+    winding: crate::feature::Winding,
+}
+
 impl Curve {
     /// THE CURVE OF ENTITY `e` of sketch `s`, where its points stand; `None` when a point of it is missing.
     pub fn of(s: &Sketch, e: &SketchEntity) -> Option<Curve> {
@@ -59,15 +71,12 @@ impl Curve {
 
     /// THE CURVE OF ENTITY `e` with its points where `at` puts them; `None` when a point of it is missing.
     pub fn of_placed(at: &dyn Fn(Id) -> Option<Point2>, e: &SketchEntity) -> Option<Curve> {
-        let angle = |c: Point2, p: Point2| (p.y - c.y).atan2(p.x - c.x);
         Some(match &e.kind {
             EntityKind::Line { a, b } => Curve::Line { a: at(*a)?, b: at(*b)? },
             EntityKind::Circle { center, r } => Curve::Round { centre: at(*center)?, r: *r, from: 0.0, sweep: TURN },
             EntityKind::Arc { center, a, b, ccw } => {
-                let (c, pa, pb) = (at(*center)?, at(*a)?, at(*b)?);
-                let (from, to) = (angle(c, pa), angle(c, pb));
-                let sweep = if *ccw { (to - from).rem_euclid(TURN) } else { -(from - to).rem_euclid(TURN) };
-                Curve::Round { centre: c, r: c.dist(pa), from, sweep }
+                let winding = if *ccw { crate::feature::Winding::Ccw } else { crate::feature::Winding::Cw };
+                Curve::arc_of(ArcEnds { centre: at(*center)?, from: at(*a)?, to: at(*b)?, winding })
             }
             EntityKind::Ellipse { c, ma, mi, span } => {
                 let (pc, pa, pi) = (at(*c)?, at(*ma)?, at(*mi)?);
@@ -88,6 +97,49 @@ impl Curve {
             }
             EntityKind::Spline { nodes, handles, ends } => Curve::spline(nodes.iter().map(|id| at(*id)).collect::<Option<_>>()?, handles, *ends),
         })
+    }
+
+    /// THE ARC ABOUT ITS CENTRE FROM ONE END ROUND TO THE OTHER, the way `winding` says, of the radius its first end
+    /// stands at.
+    fn arc_of(ends: ArcEnds) -> Curve {
+        let ArcEnds { centre, from, to, winding } = ends;
+        let angle = |p: Point2| (p.y - centre.y).atan2(p.x - centre.x);
+        let (a0, a1) = (angle(from), angle(to));
+        let sweep = match winding {
+            crate::feature::Winding::Ccw => (a1 - a0).rem_euclid(TURN),
+            crate::feature::Winding::Cw => -(a0 - a1).rem_euclid(TURN),
+        };
+        Curve::Round { centre, r: centre.dist(from), from: a0, sweep }
+    }
+
+    /// THE CURVE A CONSTRAINT REFERS TO (`CurveRef`), its points where `at` puts them and the radius of a circle about a
+    /// centre where `radius` reads it: a line between its ends, a circle whole, an arc between its ends, an ellipse whole,
+    /// a spline as drawn. `None` for a point, or where a point or a radius is missing.
+    pub fn of_ref(on: &crate::model::CurveRef, at: &dyn Fn(Id) -> Option<Point2>, radius: &dyn Fn(Id) -> Option<f64>) -> Option<Curve> {
+        use crate::model::CurveRef;
+        Some(match on {
+            CurveRef::Point { .. } => return None,
+            CurveRef::Line { a, b } => Curve::Line { a: at(*a)?, b: at(*b)? },
+            CurveRef::Round { c } => Curve::Round { centre: at(*c)?, r: radius(*c)?, from: 0.0, sweep: TURN },
+            CurveRef::Arc { c, a, b, winding } => Curve::arc_of(ArcEnds { centre: at(*c)?, from: at(*a)?, to: at(*b)?, winding: *winding }),
+            CurveRef::Oval { c, ma, mi } => {
+                let centre = at(*c)?;
+                Curve::Oval { centre, major: at(*ma)? - centre, minor: at(*mi)? - centre, from: 0.0, sweep: TURN }
+            }
+            CurveRef::Spline { nodes, handles, ends } => Curve::spline(nodes.iter().map(|id| at(*id)).collect::<Option<_>>()?, handles, *ends),
+        })
+    }
+
+    /// THE CURVE REACHING `k` OF ITS LENGTHS PAST EACH END ALONG THE STRAIGHT IT LIES ON, where it is a line - as a line is
+    /// touched anywhere along it; a curve of any other kind as it is.
+    pub fn reaching(&self, k: f64) -> Curve {
+        match *self {
+            Curve::Line { a, b } => {
+                let run = b - a;
+                Curve::Line { a: a - Point2::new(run.x * k, run.y * k), b: b + Point2::new(run.x * k, run.y * k) }
+            }
+            _ => self.clone(),
+        }
     }
 
     /// THE SPLINE THROUGH `nodes` with `handles`, open or closed, as the sketch draws it.

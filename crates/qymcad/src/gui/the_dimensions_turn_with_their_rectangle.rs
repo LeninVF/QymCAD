@@ -9,7 +9,7 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
 
     /// A rectangle 40 x 30 from (10, 10), its width dimensioned below it and its height to the right, by the dimension
     /// tool. Answers the app, the sketch, and the indices of the two dimensions. Off the origin: a corner drawn on it is
@@ -78,7 +78,7 @@ mod tests {
         let (mut app, si, dims) = dimensioned_rectangle();
         let mut sins = along_their_sides(&app, si, dims, "as drawn");
         assert!(sins.is_empty(), "setup: {sins:?}");
-        let side = app.project.sketches[si].entities.iter().find(|e| matches!(e.kind, EntityKind::Line { .. })).map(|e| e.id).expect("a side");
+        let side = app.project.sketches[si].entities.iter().find(|e| e.kind.as_line().is_some()).map(|e| e.id).expect("a side");
         let spot = Hand::new(&mut app).spot2d((1, side)).expect("a place to pick the side");
         Hand::new(&mut app).sk_rotate(spot, (30.0, 25.0), 30.0);
         sins.extend(along_their_sides(&app, si, dims, "turned by 30 deg"));

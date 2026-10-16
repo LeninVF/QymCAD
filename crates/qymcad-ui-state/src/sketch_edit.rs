@@ -231,30 +231,25 @@ impl Rim {
 }
 
 pub fn active_edges(dc: &DrawCtx, si: usize) -> ActiveEdges {
-    use qymcad_core::model::EntityKind;
     let mut lines = Vec::new();
     let mut circs = Vec::new();
     if let Some(s) = dc.project.sketches.get(si) {
         let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
         let pt = |id: Id| points_by_id.get(&id).copied().map(|p| Point2::new(p.x, p.y));
         for e in &s.entities {
-            match e.kind {
-                EntityKind::Line { a, b } => {
-                    if let (Some(pa), Some(pb)) = (pt(a), pt(b)) {
-                        lines.push((pa, pb));
-                    }
+            // the lines and the round curves; an ellipse and a spline offer their snaps through `curve_snaps`
+            if let Some(l) = e.kind.as_line() {
+                if let (Some(pa), Some(pb)) = (pt(l.a), pt(l.b)) {
+                    lines.push((pa, pb));
                 }
-                EntityKind::Circle { center, r } => {
-                    if let Some(c) = pt(center) {
-                        circs.push(Rim { centre: c, radius: r, arc: None });
-                    }
+            } else if let Some(k) = e.kind.as_circle() {
+                if let Some(c) = pt(k.center) {
+                    circs.push(Rim { centre: c, radius: k.r, arc: None });
                 }
-                EntityKind::Arc { center, a, b, ccw } => {
-                    if let (Some(c), Some(pa), Some(pb)) = (pt(center), pt(a), pt(b)) {
-                        circs.push(Rim { centre: c, radius: ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt(), arc: Some(RimArc { from: pa, to: pb, ccw }) });
-                    }
+            } else if let Some(arc) = e.kind.as_arc() {
+                if let (Some(c), Some(pa), Some(pb)) = (pt(arc.center), pt(arc.a), pt(arc.b)) {
+                    circs.push(Rim { centre: c, radius: ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt(), arc: Some(RimArc { from: pa, to: pb, ccw: arc.ccw }) });
                 }
-                EntityKind::Ellipse { .. } | EntityKind::Spline { .. } => {} // drawn by its own outline (as a profile)
             }
         }
     }
@@ -272,12 +267,8 @@ pub struct CentreLine {
 /// draws them. The pointer is carried along them and snaps where they cross the lines of the sketch, so a line, a
 /// dimension or a tangent is laid off the axes of a circle.
 pub fn circle_centre_lines(project: &Project, si: usize) -> Vec<CentreLine> {
-    use qymcad_core::model::EntityKind;
     let Some(s) = project.sketches.get(si) else { return Vec::new() };
-    let rims = s.entities.iter().filter_map(|e| match e.kind {
-        EntityKind::Circle { center, r } => sketch_pt(project, si, center).map(|c| CentreReach { centre: c, reach: r * 1.25 }),
-        _ => None,
-    });
+    let rims = s.entities.iter().filter_map(|e| e.kind.as_circle()).filter_map(|k| sketch_pt(project, si, k.center).map(|c| CentreReach { centre: c, reach: k.r * 1.25 }));
     rims.flat_map(|reach| {
         let (c, r) = (reach.centre, reach.reach);
         [CentreLine { from: Point2::new(c.x - r, c.y), to: Point2::new(c.x + r, c.y) }, CentreLine { from: Point2::new(c.x, c.y - r), to: Point2::new(c.x, c.y + r) }]
@@ -291,45 +282,15 @@ struct CentreReach {
     reach: f64,
 }
 
-/// The entity nearest to a screen point (within 12 px): for a line the distance to the segment, for
-/// a circle or an arc the distance to the rim.
+/// The curve nearest to a screen point (within 12 px), of whatever kind: the distance to the curve as it is drawn.
 pub fn entity_near(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
     let s = pick.project.sketches.get(si)?;
-    let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
-    let scr = |id: Id| points_by_id.get(&id).copied().map(|q| (Sheet { view: *pick.view, rect }).at(Point2::new(q.x, q.y)));
-    let seg_d = |p: Pos2, a: Pos2, b: Pos2| -> f32 {
-        let (vx, vy) = (b.x - a.x, b.y - a.y);
-        let l2 = vx * vx + vy * vy;
-        if l2 < 1e-6 {
-            return p.distance(a);
-        }
-        let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / l2;
-        let t = t.clamp(0.0, 1.0);
-        p.distance(Pos2::new(a.x + vx * t, a.y + vy * t))
+    let sh = Sheet { view: *pick.view, rect };
+    let off = |e: &qymcad_core::model::SketchEntity| {
+        let line: Vec<Pos2> = entity_outline(s, e).into_iter().map(|p| sh.at(p)).collect();
+        line.windows(2).map(|w| screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min)
     };
-    use qymcad_core::model::EntityKind;
-    let mut best: Option<(f32, Id)> = None;
-    for e in &s.entities {
-        let d = match e.kind {
-            EntityKind::Line { a, b } => match (scr(a), scr(b)) {
-                (Some(pa), Some(pb)) => seg_d(pos, pa, pb),
-                _ => continue,
-            },
-            EntityKind::Circle { center, r } => match scr(center) {
-                Some(c) => (pos.distance(c) - (r * pick.view.scale as f64) as f32).abs(),
-                _ => continue,
-            },
-            EntityKind::Arc { center, a, .. } => match (scr(center), scr(a)) {
-                (Some(c), Some(pa)) => (pos.distance(c) - c.distance(pa)).abs(),
-                _ => continue,
-            },
-            _ => continue,
-        };
-        if d < 12.0 && best.is_none_or(|(bd, _)| d < bd) {
-            best = Some((d, e.id));
-        }
-    }
-    best.map(|(_, id)| id)
+    s.entities.iter().map(|e| (off(e), e.id)).filter(|(d, _)| *d < 12.0).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, id)| id)
 }
 
 /// Store the picked contour `cid` into the sweep or loft slot.

@@ -5,7 +5,6 @@
 use crate::gui::hand::Hand;
 use crate::gui::App;
 use qymcad_core::feature::SketchPlane;
-use qymcad_core::model::EntityKind;
 
 #[test]
 fn every_corner_of_a_rectangle_rounded_to_half_its_short_side_is_a_slot() {
@@ -27,16 +26,16 @@ fn every_corner_of_a_rectangle_rounded_to_half_its_short_side_is_a_slot() {
         .entities
         .iter()
         .filter(|e| !e.construction)
-        .filter_map(|e| match e.kind {
-            EntityKind::Line { a, b } => Some((at(a).0 - at(b).0).hypot(at(a).1 - at(b).1)),
+        .filter_map(|e| match e.kind.as_line() {
+            Some(qymcad_core::model::LineParts { a, b }) => Some((at(a).0 - at(b).0).hypot(at(a).1 - at(b).1)),
             _ => None,
         })
         .collect();
     let radii: Vec<f64> = s
         .entities
         .iter()
-        .filter_map(|e| match e.kind {
-            EntityKind::Arc { center, a, .. } => Some((at(center).0 - at(a).0).hypot(at(center).1 - at(a).1)),
+        .filter_map(|e| match e.kind.as_arc() {
+            Some(qymcad_core::model::ArcParts { center, a, .. }) => Some((at(center).0 - at(a).0).hypot(at(center).1 - at(a).1)),
             _ => None,
         })
         .collect();

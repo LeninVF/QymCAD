@@ -6,7 +6,6 @@
 use crate::gui::hand::Hand;
 use crate::gui::App;
 use qymcad_core::feature::SketchPlane;
-use qymcad_core::model::EntityKind;
 
 #[test]
 fn trim_takes_the_spline_under_the_pointer_and_not_the_line_beside_it() {
@@ -25,9 +24,9 @@ fn trim_takes_the_spline_under_the_pointer_and_not_the_line_beside_it() {
     let kinds: Vec<&str> = hand.app.project.sketches[si]
         .entities
         .iter()
-        .map(|e| match e.kind {
-            EntityKind::Line { .. } => "line",
-            EntityKind::Spline { .. } => "spline",
+        .map(|e| match (e.kind.as_line(), e.kind.as_spline()) {
+            (Some(_), _) => "line",
+            (_, Some(_)) => "spline",
             _ => "other",
         })
         .collect();

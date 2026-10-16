@@ -6,7 +6,7 @@
 //! the sweep of points no entity used did not count a spline among the users of its points.
 use qymcad_core::feature::{Ends, Purpose};
 use qymcad_core::geom::Point2;
-use qymcad_core::model::{EntityKind, Project};
+use qymcad_core::model::Project;
 
 /// A point of the sheet by its two coordinates.
 fn p2(at: [f64; 2]) -> Point2 {
@@ -16,7 +16,7 @@ fn p2(at: [f64; 2]) -> Point2 {
 /// Where the nodes of spline `eid` stand, `None` for a node that is gone or no such spline.
 fn nodes(p: &Project, si: usize, eid: u64) -> Option<Vec<Point2>> {
     let s = &p.sketches[si];
-    let EntityKind::Spline { nodes, .. } = &s.entities.iter().find(|e| e.id == eid)?.kind else { return None };
+    let nodes = s.entities.iter().find(|e| e.id == eid)?.kind.as_spline()?.nodes;
     nodes.iter().map(|id| s.points.iter().find(|q| q.id == *id).map(|q| Point2::new(q.x, q.y))).collect()
 }
 

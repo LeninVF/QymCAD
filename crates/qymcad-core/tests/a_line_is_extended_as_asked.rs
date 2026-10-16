@@ -24,7 +24,7 @@ fn lines(across: &[f64]) -> (Project, usize, u64, Vec<u64>) {
 /// Where the ends of line `eid` stand, x of the start and of the end.
 fn ends_x(p: &Project, si: usize, eid: u64) -> (f64, f64) {
     let e = p.sketches[si].entities.iter().find(|e| e.id == eid).expect("the line");
-    let qymcad_core::model::EntityKind::Line { a, b } = e.kind else { panic!("not a line") };
+    let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() else { panic!("not a line") };
     let x = |id| p.sketches[si].points.iter().find(|q| q.id == id).map(|q| q.x).expect("the point");
     (x(a), x(b))
 }
@@ -70,15 +70,15 @@ fn a_line_is_extended_to_where_it_is_asked() {
 /// whose end is the end of a fillet moved the drawing and extended nothing.
 #[test]
 fn an_end_joined_to_other_geometry_is_not_extended() {
-    use qymcad_core::model::{Constraint, EndKept, EntityKind};
+    use qymcad_core::model::{Constraint, EndKept};
     let mut failures = Vec::new();
     for joined in ["another line ends there", "a dimension holds it"] {
         let (mut p, si, line, _) = lines(&[-15.0, 20.0]);
-        let EntityKind::Line { a, b } = p.sketches[si].entities.iter().find(|e| e.id == line).expect("the line").kind else { panic!("a line") };
+        let Some(qymcad_core::model::LineParts { a, b }) = p.sketches[si].entities.iter().find(|e| e.id == line).expect("the line").kind.as_line() else { panic!("a line") };
         if joined == "another line ends there" {
             let free = p.sketch_point_at(si, 10.0, 8.0, 1e-9);
             let id = p.alloc_id();
-            p.sketches[si].entities.push(qymcad_core::model::SketchEntity { id, kind: EntityKind::Line { a: b, b: free }, construction: false });
+            p.sketches[si].entities.push(qymcad_core::model::SketchEntity { id, kind: qymcad_core::model::LineParts { a: b, b: free }.into(), construction: false });
         } else {
             p.sketches[si].constraints.push(Constraint::Distance { a, b, d: 10.0, off: 3.0, expr: String::new(), driven: false, axis: 0, at: None });
         }

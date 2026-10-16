@@ -8,9 +8,8 @@ use crate::model::curve::Curve;
 /// geometry left out, as the lines and arcs leave it.
 fn free_offsets(s: &Sketch, ents: &[SketchEntity], dist: f64) -> Vec<Curve> {
     ents.iter()
-        .filter(|e| !e.construction)
+        .filter(|e| !e.construction && (e.kind.as_ellipse().is_some() || e.kind.as_spline().is_some()))
         .filter_map(|e| Curve::of(s, e))
-        .filter(|c| matches!(c, Curve::Oval { .. } | Curve::Spline { .. }))
         .flat_map(|c| {
             // a closed curve running counter-clockwise has its inside on its left
             let left = if !c.closed() {
@@ -42,7 +41,7 @@ impl Project {
         let ents: Vec<SketchEntity> = s.entities.iter().filter(|e| eids.contains(&e.id)).cloned().collect();
         let mut out = Vec::new();
         for e in &ents {
-            if let EntityKind::Circle { center, r } = e.kind {
+            if let Some(crate::model::CircleParts { center, r }) = e.kind.as_circle() {
                 let nr = r + dist;
                 if let (Some(c), true) = (s.points.iter().find(|p| p.id == center), nr > 0.05) {
                     out.push((0..=72).map(|k| f64::from(k) / 72.0 * std::f64::consts::TAU).map(|t| Point2::new(c.x + nr * t.cos(), c.y + nr * t.sin())).collect());
@@ -84,13 +83,13 @@ impl Project {
         // centres concentric and the radii apart by the distance, a dimension of the offset. Laid free, the copy was a
         // circle of its own - five freedoms where the pair has two, and moving or resizing the source left it behind.
         for e in &ents {
-            if let EntityKind::Circle { center, r } = e.kind {
+            if let Some(crate::model::CircleParts { center, r }) = e.kind.as_circle() {
                 if let Some(c) = pts.iter().find(|p| p.id == center) {
                     let nr = r + dist;
                     if nr > 0.05 {
                         let copy = self.add_circle_entity(si, c.x, c.y, nr, crate::feature::Purpose::of(e.construction));
-                        let copy_centre = self.sketches[si].entities.iter().find(|x| x.id == copy).and_then(|x| match x.kind {
-                            EntityKind::Circle { center, .. } => Some(center),
+                        let copy_centre = self.sketches[si].entities.iter().find(|x| x.id == copy).and_then(|x| match x.kind.as_circle() {
+                            Some(crate::model::CircleParts { center, .. }) => Some(center),
                             _ => None,
                         });
                         if let Some(cc) = copy_centre.filter(|cc| *cc != center) {
@@ -109,16 +108,16 @@ impl Project {
         let src_lines: Vec<SourceLine> = ents
             .iter()
             .filter(|e| !e.construction)
-            .filter_map(|e| match e.kind {
-                EntityKind::Line { a, b } => Some(SourceLine { a, b, pa: at_of(&pts, a)?, pb: at_of(&pts, b)? }),
+            .filter_map(|e| match e.kind.as_line() {
+                Some(crate::model::LineParts { a, b }) => Some(SourceLine { a, b, pa: at_of(&pts, a)?, pb: at_of(&pts, b)? }),
                 _ => None,
             })
             .collect();
         let src_arcs: Vec<SourceArc> = ents
             .iter()
             .filter(|e| !e.construction)
-            .filter_map(|e| match e.kind {
-                EntityKind::Arc { center, a, b, .. } => {
+            .filter_map(|e| match e.kind.as_arc() {
+                Some(crate::model::ArcParts { center, a, b, .. }) => {
                     let (c, p) = (at_of(&pts, center)?, at_of(&pts, a)?);
                     Some(SourceArc { center, a, b, at: c, radius: (p.0 - c.0).hypot(p.1 - c.1) })
                 }
@@ -137,14 +136,14 @@ impl Project {
                     let (v, w) = (oloop[k], oloop[(k + 1) % n]);
                     let (a, b) = (ids[k], ids[(k + 1) % n]);
                     if v.bulge.abs() < 1e-9 {
-                        kinds.push((EntityKind::Line { a, b }, offset_line_source(&src_lines, (v.x, v.y), (w.x, w.y), dist)));
+                        kinds.push((LineParts { a, b }.into(), offset_line_source(&src_lines, (v.x, v.y), (w.x, w.y), dist)));
                     } else {
                         let (cx, cy, ccw) = arc_center_from_bulge(v.x, v.y, w.x, w.y, v.bulge);
                         // a centre of its own even where the source's stands: the radius of an arc is kept by its centre
                         let center = self.alloc_id();
                         self.sketches[si].points.push(SketchPoint { id: center, x: cx, y: cy });
                         let rc = (v.x - cx).hypot(v.y - cy);
-                        kinds.push((EntityKind::Arc { center, a, b, ccw }, offset_arc_source(&src_arcs, &src_lines, (cx, cy), rc, dist)));
+                        kinds.push((ArcParts { center, a, b, ccw }.into(), offset_arc_source(&src_arcs, &src_lines, (cx, cy), rc, dist)));
                     }
                 }
                 let held = side_of_place(hold_offset(&ids, &kinds, dist, OffsetShape::Closed), &self.sketches[si]);
@@ -172,13 +171,13 @@ impl Project {
                     let (v, w) = (piece[k], piece[k + 1]);
                     let (a, b) = (ids[k], ids[k + 1]);
                     if v.bulge.abs() < 1e-9 {
-                        kinds.push((EntityKind::Line { a, b }, offset_line_source(&src_lines, (v.x, v.y), (w.x, w.y), dist)));
+                        kinds.push((LineParts { a, b }.into(), offset_line_source(&src_lines, (v.x, v.y), (w.x, w.y), dist)));
                     } else {
                         let (cx, cy, ccw) = arc_center_from_bulge(v.x, v.y, w.x, w.y, v.bulge);
                         let center = self.alloc_id();
                         self.sketches[si].points.push(SketchPoint { id: center, x: cx, y: cy });
                         let rc = (v.x - cx).hypot(v.y - cy);
-                        kinds.push((EntityKind::Arc { center, a, b, ccw }, offset_arc_source(&src_arcs, &src_lines, (cx, cy), rc, dist)));
+                        kinds.push((ArcParts { center, a, b, ccw }.into(), offset_arc_source(&src_arcs, &src_lines, (cx, cy), rc, dist)));
                     }
                 }
                 // an end of the copy stands square to an end of the source where it is the offset away from it; a piece

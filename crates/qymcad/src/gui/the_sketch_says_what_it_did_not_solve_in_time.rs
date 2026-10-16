@@ -27,8 +27,8 @@ mod tests {
         let said = crate::i18n::tr1("sk-unsolved-left", "n", &left.to_string());
         assert!(hand.shows(&said), "the panel of the sketch does not say {said:?}");
         let s = &hand.app.project.sketches[si];
-        let b = s.entities.iter().find_map(|e| match e.kind {
-            qymcad_core::model::EntityKind::Line { b, .. } => Some(b),
+        let b = s.entities.iter().find_map(|e| match e.kind.as_line() {
+            Some(qymcad_core::model::LineParts { b, .. }) => Some(b),
             _ => None,
         });
         let end = s.points.iter().find(|q| Some(q.id) == b).map(|q| (q.x, q.y)).expect("the line has ends");

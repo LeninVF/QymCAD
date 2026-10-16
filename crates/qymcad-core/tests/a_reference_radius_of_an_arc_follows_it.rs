@@ -4,7 +4,7 @@
 //! the reference still said 20.
 use qymcad_core::feature::{Purpose, Winding};
 use qymcad_core::geom::Point2;
-use qymcad_core::model::{Constraint, EntityKind, Project};
+use qymcad_core::model::{Constraint, Project};
 
 #[test]
 fn a_reference_radius_of_an_arc_follows_its_driving_one() {
@@ -12,7 +12,7 @@ fn a_reference_radius_of_an_arc_follows_its_driving_one() {
     let si = p.new_sketch("arc");
     p.add_arc_entity(si, Point2::new(0.0, 0.0), Point2::new(20.0, 0.0), Point2::new(0.0, 20.0), Winding::Ccw, Purpose::Real);
     let s = &p.sketches[si];
-    let centre = s.entities.iter().find_map(|e| if let EntityKind::Arc { center, .. } = e.kind { Some(center) } else { None }).expect("the arc");
+    let centre = s.entities.iter().find_map(|e| if let Some(qymcad_core::model::ArcParts { center, .. }) = e.kind.as_arc() { Some(center) } else { None }).expect("the arc");
     let radius = |d: f64, driven: bool| Constraint::Diameter { c: centre, d, off: 0.0, expr: String::new(), driven, diam: false, at: None };
     p.sketches[si].constraints.push(radius(25.0, false));
     p.sketches[si].constraints.push(radius(20.0, true));
@@ -27,7 +27,7 @@ fn a_reference_radius_of_an_arc_follows_a_drag_of_its_end() {
     let si = p.new_sketch("arc");
     p.add_arc_entity(si, Point2::new(0.0, 0.0), Point2::new(20.0, 0.0), Point2::new(0.0, 20.0), Winding::Ccw, Purpose::Real);
     let s = &p.sketches[si];
-    let (centre, end) = s.entities.iter().find_map(|e| if let EntityKind::Arc { center, a, .. } = e.kind { Some((center, a)) } else { None }).expect("the arc");
+    let (centre, end) = s.entities.iter().find_map(|e| if let Some(qymcad_core::model::ArcParts { center, a, .. }) = e.kind.as_arc() { Some((center, a)) } else { None }).expect("the arc");
     p.sketches[si].constraints.push(Constraint::Fixed { p: centre });
     p.sketches[si].constraints.push(Constraint::Diameter { c: centre, d: 20.0, off: 0.0, expr: String::new(), driven: true, diam: false, at: None });
     p.solve_sketch(si);

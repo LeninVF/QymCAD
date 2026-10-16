@@ -273,22 +273,20 @@ fn edits_the_key_used_to_miss_change_it() {
     });
     check("the radius of a circle was changed", &mut p, &|p| {
         for e in &mut p.sketches[0].entities {
-            if let qymcad_core::model::EntityKind::Circle { r, .. } = &mut e.kind {
-                *r = 8.0;
-            }
+            e.kind.set_radius(8.0);
         }
     });
     check("a note was written in a sketch", &mut p, &|p| p.sketches[0].notes.push(Note { x: 1.0, y: 2.0, text: "check".into() }));
     check("a note was retyped", &mut p, &|p| p.sketches[0].notes[0].text = "checked".into());
     check("a spline was drawn", &mut p, &|p| {
         let pts: Vec<_> = p.sketches[0].points.iter().take(3).map(|q| q.id).collect();
-        let kind = EntityKind::Spline { nodes: pts, handles: vec![Handle::default(); 3], ends: qymcad_core::feature::Ends::Open };
+        let kind = EntityKind::spline(pts, vec![Handle::default(); 3], qymcad_core::feature::Ends::Open);
         p.sketches[0].entities.push(SketchEntity { id: 9_000_001, kind, construction: false });
     });
     check("a tangent of a spline was set", &mut p, &|p| {
         for e in &mut p.sketches[0].entities {
-            if let EntityKind::Spline { handles, .. } = &mut e.kind {
-                handles[1].arrive = Some([1.0, 0.0]);
+            if let Some(sp) = e.kind.as_spline_mut() {
+                sp.handles[1].arrive = Some([1.0, 0.0]);
             }
         }
     });

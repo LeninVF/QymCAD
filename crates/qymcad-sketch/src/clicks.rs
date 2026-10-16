@@ -107,10 +107,10 @@ pub fn sketch_select_click(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos:
         match hit {
             Some((3, w)) => qymcad_ui_state::mirror_about_axis(qymcad_ui_state::editing_in!(sk), &mut *sk.sel_sk, w as usize),
             Some((0, p)) => qymcad_ui_state::mirror_about_point(qymcad_ui_state::editing_in!(sk), &mut *sk.sel_sk, p),
-            Some((1, eid)) => match sk.project.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).map(|e| e.kind.clone()) {
+            Some((1, eid)) => match sk.project.sketches.get(si).and_then(|s| s.entity(eid)).and_then(|e| e.kind.as_line()) {
                 // CONSTRUCTION GEOMETRY SERVES AS WELL: what matters is that two points make a line, and a
                 // construction line is exactly what people draw to mirror about.
-                Some(qymcad_core::model::EntityKind::Line { a, b }) => qymcad_ui_state::mirror_about_line(qymcad_ui_state::editing_in!(sk), &mut *sk.sel_sk, a, b),
+                Some(line) => qymcad_ui_state::mirror_about_line(qymcad_ui_state::editing_in!(sk), &mut *sk.sel_sk, line.a, line.b),
                 _ => *sk.status = Notice::info(qymcad_i18n::tr("sk-mirror-pick-axis")),
             },
             _ => *sk.status = Notice::info(qymcad_i18n::tr("sk-mirror-pick-axis")),
@@ -803,7 +803,7 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                     qymcad_ui_state::begin_edit(&mut *sk.edits, &*sk.project, qymcad_i18n::tr(tool));
                     // the curve nearest the pointer, of whatever kind; a line goes by the ways of a line
                     let target = qymcad_pick::edit_target(&sk.pick(), rect, pos, si);
-                    let line_eid = target.filter(|e| sk.project.sketches[si].entity(*e).is_some_and(|x| matches!(x.kind, qymcad_core::model::EntityKind::Line { .. })));
+                    let line_eid = target.filter(|e| sk.project.sketches[si].entity(*e).is_some_and(|x| x.kind.as_line().is_some()));
                     // EXTEND HOLDS A LINE, or takes the line clicked: the click applies what the preview shows
                     if sk.armed.click_op() == 2 && (sk.tool.extend.is_some() || line_eid.is_some()) {
                         extend_click(sk, ExtendAt { rect, pos, si, line: line_eid });

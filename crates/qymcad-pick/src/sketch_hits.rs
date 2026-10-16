@@ -66,14 +66,13 @@ pub fn nearest_sketch_point(pick: &PickCtx, rect: Rect, screen: Pos2, si: usize)
 /// selected.
 pub fn nearest_line_id(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize, only: &[Id]) -> Option<Id> {
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
-    use qymcad_core::model::EntityKind;
     let s = pick.project.sketches.get(si)?;
     let mut best: Option<(f32, Id)> = None;
     for e in &s.entities {
         if !only.is_empty() && !only.contains(&e.id) {
             continue;
         }
-        if let EntityKind::Line { a, b } = e.kind {
+        if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
             if let (Some(pa), Some(pb)) = (sketch_pt(pick.project, si, a), sketch_pt(pick.project, si, b)) {
                 let d = screen_dist_seg(pos, sh.at(pa), sh.at(pb));
                 if d <= grab(pick.set, Grab::Curve) && best.is_none_or(|(bd, _)| d < bd) {
@@ -88,12 +87,11 @@ pub fn nearest_line_id(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize, only: &
 /// The line entity nearest to a screen point -> its ends (a, b).
 pub fn nearest_line_entity(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<(Id, Id)> {
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
-    use qymcad_core::model::EntityKind;
     let s = pick.project.sketches.get(si)?;
     // the hierarchy: an ordinary line outranks a construction one (for dimensions and constraints)
     let mut best: Option<(u8, f32, (Id, Id))> = None;
     for e in &s.entities {
-        if let EntityKind::Line { a, b } = e.kind {
+        if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
             if let (Some(pa), Some(pb)) = (sketch_pt(pick.project, si, a), sketch_pt(pick.project, si, b)) {
                 let d = screen_dist_seg(pos, sh.at(pa), sh.at(pb));
                 if d <= grab(pick.set, Grab::Curve) {
@@ -156,11 +154,10 @@ pub fn nearest_point_within_where(pick: &PickCtx, rect: Rect, pos: Pos2, si: usi
 /// The nearest line entity -> the Id of the entity (for trimming).
 pub fn nearest_line_eid(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
-    use qymcad_core::model::EntityKind;
     let s = pick.project.sketches.get(si)?;
     let mut best: Option<(f32, Id)> = None;
     for e in &s.entities {
-        if let EntityKind::Line { a, b } = e.kind {
+        if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
             if let (Some(pa), Some(pb)) = (sketch_pt(pick.project, si, a), sketch_pt(pick.project, si, b)) {
                 let d = screen_dist_seg(pos, sh.at(pa), sh.at(pb));
                 if d <= grab(pick.set, Grab::Curve) && best.is_none_or(|(bd, _)| d < bd) {
@@ -195,33 +192,30 @@ pub fn arc_screen_dist(sh: &qymcad_ui_state::Sheet, pos: Pos2, c: Point2, pa: Po
 /// diameter or radius label (the position of the label is where `draw_sketch_dims` draws it).
 pub fn nearest_circle_entity(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
-    use qymcad_core::model::EntityKind;
+    use qymcad_core::model::{ArcParts, CircleParts};
     let s = pick.project.sketches.get(si)?;
     let mut best: Option<(f32, Id)> = None;
     for e in &s.entities {
         // an arc is caught along its own sweep (see `arc_screen_dist`)
         let mut past_ends: Option<f32> = None;
-        let (center, r, label) = match e.kind {
-            EntityKind::Circle { center, r } => {
-                let Some(c) = sketch_pt(pick.project, si, center) else { continue };
-                let sc = sh.at(c);
-                let ed = sh.at(Point2::new(c.x + r, c.y));
-                // the diameter label sits above the middle of the leader from the centre to the rim
-                (c, r, ((sc.to_vec2() + ed.to_vec2()) / 2.0 + egui::vec2(0.0, -8.0)).to_pos2())
-            }
-            EntityKind::Arc { center, a, b, .. } => {
-                let (Some(c), Some(pa), Some(pb)) = (sketch_pt(pick.project, si, center), sketch_pt(pick.project, si, a), sketch_pt(pick.project, si, b)) else { continue };
-                let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
-                // the radius label sits at the rim of the arc towards its middle (as in
-                // `draw_sketch_dims`)
-                let mid = Point2::new((pa.x + pb.x) / 2.0 - c.x, (pa.y + pb.y) / 2.0 - c.y);
-                let ml = (mid.x * mid.x + mid.y * mid.y).sqrt().max(1e-9);
-                let edge = Point2::new(c.x + mid.x / ml * r, c.y + mid.y / ml * r);
-                let EntityKind::Arc { ccw, .. } = e.kind else { continue };
-                past_ends = Some(arc_screen_dist(&sh, pos, c, pa, pb, ccw));
-                (c, r, (sh.at(edge).to_vec2() + egui::vec2(10.0, -8.0)).to_pos2())
-            }
-            _ => continue,
+        let (center, r, label) = if let Some(CircleParts { center, r }) = e.kind.as_circle() {
+            let Some(c) = sketch_pt(pick.project, si, center) else { continue };
+            let sc = sh.at(c);
+            let ed = sh.at(Point2::new(c.x + r, c.y));
+            // the diameter label sits above the middle of the leader from the centre to the rim
+            (c, r, ((sc.to_vec2() + ed.to_vec2()) / 2.0 + egui::vec2(0.0, -8.0)).to_pos2())
+        } else if let Some(ArcParts { center, a, b, ccw }) = e.kind.as_arc() {
+            let (Some(c), Some(pa), Some(pb)) = (sketch_pt(pick.project, si, center), sketch_pt(pick.project, si, a), sketch_pt(pick.project, si, b)) else { continue };
+            let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
+            // the radius label sits at the rim of the arc towards its middle (as in
+            // `draw_sketch_dims`)
+            let mid = Point2::new((pa.x + pb.x) / 2.0 - c.x, (pa.y + pb.y) / 2.0 - c.y);
+            let ml = (mid.x * mid.x + mid.y * mid.y).sqrt().max(1e-9);
+            let edge = Point2::new(c.x + mid.x / ml * r, c.y + mid.y / ml * r);
+            past_ends = Some(arc_screen_dist(&sh, pos, c, pa, pb, ccw));
+            (c, r, (sh.at(edge).to_vec2() + egui::vec2(10.0, -8.0)).to_pos2())
+        } else {
+            continue;
         };
         let sc = sh.at(center);
         let rp = (sh.at(Point2::new(center.x + r, center.y)).x - sc.x).abs();
@@ -263,7 +257,6 @@ pub fn nearest_curve_eid(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Op
 /// line is about the radius, and the point of tangency lies inside the segment). Returns (the Id of the
 /// centre, the radius). For the automatic tangency.
 pub fn nearest_tangent_circle(project: &Project, si: usize, p1: Point2, p2: Point2) -> Option<(Id, f64)> {
-    use qymcad_core::model::EntityKind;
     let s = project.sketches.get(si)?;
     let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
     let pt = |id: Id| points_by_id.get(&id).copied().map(|q| (q.x, q.y));
@@ -274,13 +267,15 @@ pub fn nearest_tangent_circle(project: &Project, si: usize, p1: Point2, p2: Poin
     }
     let mut best: Option<(f64, (Id, f64))> = None;
     for e in &s.entities {
-        let (center, r) = match e.kind {
-            EntityKind::Circle { center, r } => (center, r),
-            EntityKind::Arc { center, a, .. } => match (pt(center), pt(a)) {
-                (Some((cx, cy)), Some((ax, ay))) => (center, ((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt()),
+        let (center, r) = if let Some(c) = e.kind.as_circle() {
+            (c.center, c.r)
+        } else if let Some(arc) = e.kind.as_arc() {
+            match (pt(arc.center), pt(arc.a)) {
+                (Some((cx, cy)), Some((ax, ay))) => (arc.center, ((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt()),
                 _ => continue,
-            },
-            _ => continue,
+            }
+        } else {
+            continue;
         };
         let Some((cx, cy)) = pt(center) else { continue };
         // the signed perpendicular distance from the centre to the line, plus where the projection
@@ -300,7 +295,6 @@ pub fn nearest_tangent_circle(project: &Project, si: usize, p1: Point2, p2: Poin
 /// tolerance of 2% guard against false matches of length with distant unrelated geometry. The line's
 /// own ends (ea, eb) are excluded.
 pub fn nearest_equal_line(project: &Project, si: usize, p1: Point2, p2: Point2, ea: Id, eb: Id) -> Option<(Id, Id)> {
-    use qymcad_core::model::EntityKind;
     let s = project.sketches.get(si)?;
     let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
     let pt = |id: Id| points_by_id.get(&id).copied().map(|q| (q.x, q.y));
@@ -311,7 +305,7 @@ pub fn nearest_equal_line(project: &Project, si: usize, p1: Point2, p2: Point2, 
     let near = |x: f64, y: f64, p: Point2| (x - p.x).abs() < 1e-4 && (y - p.y).abs() < 1e-4;
     let mut best: Option<(f64, (Id, Id))> = None;
     for e in &s.entities {
-        let EntityKind::Line { a, b } = e.kind else { continue };
+        let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() else { continue };
         if (a == ea && b == eb) || (a == eb && b == ea) {
             continue;
         }
@@ -341,7 +335,6 @@ pub fn nearest_equal_line(project: &Project, si: usize, p1: Point2, p2: Point2, 
 /// sketch within 3.4 deg used to be taken wherever it stood, and a second triangle drawn beside the first was tied to it
 /// by three Parallels - an edit of one moved the other.
 pub fn nearest_parallel_line(project: &Project, si: usize, p1: Point2, p2: Point2, ea: Id, eb: Id) -> Option<(Id, Id)> {
-    use qymcad_core::model::EntityKind;
     let s = project.sketches.get(si)?;
     let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
     let pt = |id: Id| points_by_id.get(&id).copied().map(|q| Point2::new(q.x, q.y));
@@ -366,7 +359,7 @@ pub fn nearest_parallel_line(project: &Project, si: usize, p1: Point2, p2: Point
     }
     let mut best: Option<(f64, (Id, Id))> = None;
     for e in &s.entities {
-        let EntityKind::Line { a, b } = e.kind else { continue };
+        let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() else { continue };
         if (a == ea && b == eb) || (a == eb && b == ea) {
             continue;
         }
@@ -461,7 +454,6 @@ pub fn sketch_at_3d(pn: &Painting, rect: Rect, screen: Pos2) -> Option<usize> {
 /// The tangent direction at the point `p` (the end of an existing line or arc), plus the base edge.
 /// For a tangent arc: the new arc starts off smoothly from the end of the previous curve.
 pub fn arc_tangent_ref(dc: &DrawCtx, si: usize, p: Point2) -> Option<((f64, f64), EdgeRef)> {
-    use qymcad_core::model::EntityKind;
     let s = dc.project.sketches.get(si)?;
     let near = |q: Point2| (q.x - p.x).abs() < 1e-6 && (q.y - p.y).abs() < 1e-6;
     let norm = |x: f64, y: f64| {
@@ -469,29 +461,25 @@ pub fn arc_tangent_ref(dc: &DrawCtx, si: usize, p: Point2) -> Option<((f64, f64)
         (x / l, y / l)
     };
     for e in &s.entities {
-        match e.kind {
-            EntityKind::Line { a, b } => {
-                if let (Some(pa), Some(pb)) = (sketch_pt(dc.project, si, a), sketch_pt(dc.project, si, b)) {
-                    if near(pa) {
-                        return Some((norm(pa.x - pb.x, pa.y - pb.y), EdgeRef::Line { a, b }));
-                    }
-                    if near(pb) {
-                        return Some((norm(pb.x - pa.x, pb.y - pa.y), EdgeRef::Line { a, b }));
-                    }
+        if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
+            if let (Some(pa), Some(pb)) = (sketch_pt(dc.project, si, a), sketch_pt(dc.project, si, b)) {
+                if near(pa) {
+                    return Some((norm(pa.x - pb.x, pa.y - pb.y), EdgeRef::Line { a, b }));
+                }
+                if near(pb) {
+                    return Some((norm(pb.x - pa.x, pb.y - pa.y), EdgeRef::Line { a, b }));
                 }
             }
-            EntityKind::Arc { center, a, b, .. } => {
-                if let (Some(pc), Some(pa), Some(pb)) = (sketch_pt(dc.project, si, center), sketch_pt(dc.project, si, a), sketch_pt(dc.project, si, b)) {
-                    let r = ((pa.x - pc.x).powi(2) + (pa.y - pc.y).powi(2)).sqrt();
-                    if near(pa) {
-                        return Some((norm(-(pa.y - pc.y), pa.x - pc.x), EdgeRef::Circle { center, r }));
-                    }
-                    if near(pb) {
-                        return Some((norm(-(pb.y - pc.y), pb.x - pc.x), EdgeRef::Circle { center, r }));
-                    }
+        } else if let Some(qymcad_core::model::ArcParts { center, a, b, .. }) = e.kind.as_arc() {
+            if let (Some(pc), Some(pa), Some(pb)) = (sketch_pt(dc.project, si, center), sketch_pt(dc.project, si, a), sketch_pt(dc.project, si, b)) {
+                let r = ((pa.x - pc.x).powi(2) + (pa.y - pc.y).powi(2)).sqrt();
+                if near(pa) {
+                    return Some((norm(-(pa.y - pc.y), pa.x - pc.x), EdgeRef::Circle { center, r }));
+                }
+                if near(pb) {
+                    return Some((norm(-(pb.y - pc.y), pb.x - pc.x), EdgeRef::Circle { center, r }));
                 }
             }
-            _ => {}
         }
     }
     None

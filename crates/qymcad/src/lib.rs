@@ -34,6 +34,8 @@ pub fn run() -> ExitCode {
 #[cfg(test)]
 mod comment_ratchet;
 #[cfg(test)]
+mod curve_kinds_guard;
+#[cfg(test)]
 mod dependency_ratchet;
 mod file_size_ratchet;
 mod god_object_ratchet;

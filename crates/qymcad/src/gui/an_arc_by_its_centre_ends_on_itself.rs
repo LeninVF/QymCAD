@@ -8,7 +8,6 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::EntityKind;
 
     /// An arc drawn by its centre (0, 0), its start (40, 0) and a third click at `end`: where its end point stands, and
     /// where it stands after the sketch is solved once more.
@@ -22,8 +21,8 @@ mod tests {
         hand.click2d(0.0, 0.0).click2d(40.0, 0.0).click2d(end.0, end.1).key(egui::Key::Escape);
         let at = |app: &App| {
             let s = &app.project.sketches[si];
-            let b = s.entities.iter().find_map(|e| match e.kind {
-                EntityKind::Arc { b, .. } => Some(b),
+            let b = s.entities.iter().find_map(|e| match e.kind.as_arc() {
+                Some(qymcad_core::model::ArcParts { b, .. }) => Some(b),
                 _ => None,
             });
             let b = b.expect("an arc was drawn");

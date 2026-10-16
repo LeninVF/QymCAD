@@ -183,13 +183,7 @@ fn structure_stamp(s: &Sketch) -> u64 {
     }
     for e in &s.entities {
         mix(e.id ^ u64::from(e.construction) << 63);
-        match e.kind {
-            EntityKind::Line { a, b } => [a, b].into_iter().for_each(&mut mix),
-            EntityKind::Arc { center, a, b, .. } => [center, a, b].into_iter().for_each(&mut mix),
-            EntityKind::Circle { center, .. } => mix(center),
-            EntityKind::Ellipse { .. } => entity_points(e).into_iter().for_each(&mut mix),
-            EntityKind::Spline { ref nodes, .. } => nodes.iter().copied().for_each(&mut mix),
-        }
+        entity_points(e).into_iter().for_each(&mut mix);
     }
     use std::hash::{Hash, Hasher};
     let mut kinds = std::collections::hash_map::DefaultHasher::new();
@@ -270,8 +264,8 @@ impl Project {
         let mut own_points: Vec<SketchPoint> = sess.points.iter().map(|&i| s.points[i]).collect();
         let was: Vec<(f64, f64)> = own_points.iter().map(|p| (p.x, p.y)).collect();
         let radius = |s: &Sketch, r: &PartRadius| match r.from {
-            RadiusFrom::Circle(e) => match s.entities[e].kind {
-                EntityKind::Circle { r, .. } => r,
+            RadiusFrom::Circle(e) => match s.entities[e].kind.as_circle() {
+                Some(crate::model::CircleParts { r, .. }) => r,
                 _ => 0.001,
             },
             RadiusFrom::Arc { centre, end } => (s.points[end].x - s.points[centre].x).hypot(s.points[end].y - s.points[centre].y).max(0.001),
@@ -292,11 +286,12 @@ impl Project {
         for ((r, solved), &old) in sess.radii.iter().zip(&own_radii).zip(&radii_was) {
             let value = if same(solved.value, old) { old } else { solved.value };
             if let RadiusFrom::Circle(e) = r.from {
-                if let EntityKind::Circle { r: cr, .. } = &mut s.entities[e].kind {
-                    if cr.to_bits() != value.to_bits() {
+                let kind = &mut s.entities[e].kind;
+                if let Some(was) = kind.as_circle().map(|c| c.r) {
+                    if was.to_bits() != value.to_bits() {
                         resized.push(r.centre);
                     }
-                    *cr = value;
+                    kind.set_radius(value);
                 }
             }
         }
@@ -320,15 +315,10 @@ impl Project {
                 }
             }
             // a circle's radius, and an arc's from its first end (`update_driven_dims`)
-            let at = |id: Id| sess.place.get(&id).map(|&i| (s.points[i].x, s.points[i].y));
+            let at = |id: Id| sess.place.get(&id).map(|&i| Point2::new(s.points[i].x, s.points[i].y));
             for e in &s.entities {
-                let radius = match e.kind {
-                    EntityKind::Circle { center, r } => Some((center, r)),
-                    EntityKind::Arc { center, a, .. } => at(center).zip(at(a)).map(|((cx, cy), (ax, ay))| (center, (ax - cx).hypot(ay - cy))),
-                    _ => None,
-                };
-                if let Some((center, r)) = radius.filter(|(c, _)| pos.contains_key(c)) {
-                    crad.insert(center, r);
+                if let Some(c) = e.kind.circle_by(&at).filter(|c| pos.contains_key(&c.center)) {
+                    crad.insert(c.center, c.r);
                 }
             }
             for &ci in &sess.driven {
@@ -348,7 +338,7 @@ impl Project {
         // a constraint on a curve of any kind reads where it touches anew before every solve, which a session holding its
         // constraints from the first frame would not: dragged so, a circle made to touch an ellipse came away 10 deg off
         let on_curves = s.constraints.iter().any(|c| matches!(c, Constraint::PointOnCurve { .. } | Constraint::TangentCurves { .. }));
-        if s.entities.iter().any(|e| matches!(e.kind, EntityKind::Spline { .. })) || !s.texts.is_empty() || origin_drawn || frame_missing || on_curves {
+        if s.entities.iter().any(|e| e.kind.as_spline().is_some()) || !s.texts.is_empty() || origin_drawn || frame_missing || on_curves {
             return None;
         }
         let place: HashMap<Id, usize> = s.points.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
@@ -356,19 +346,19 @@ impl Project {
         let mut radii = Vec::new();
         let mut from = Vec::new();
         for (k, e) in s.entities.iter().enumerate() {
-            match e.kind {
-                EntityKind::Circle { center, r } => {
-                    radii.push(crate::solver::RadiusVar { center, value: r });
-                    from.push(PartRadius { centre: center, from: RadiusFrom::Circle(k) });
+            match e.kind.radius_source() {
+                Some(RadiusSource::Held(circle)) => {
+                    radii.push(crate::solver::RadiusVar { center: circle.center, value: circle.r });
+                    from.push(PartRadius { centre: circle.center, from: RadiusFrom::Circle(k) });
                 }
-                EntityKind::Arc { center, a, .. } => {
+                Some(RadiusSource::ToEnd { center, end: a }) => {
                     if let (Some(&c), Some(&end)) = (place.get(&center), place.get(&a)) {
                         let value = (s.points[end].x - s.points[c].x).hypot(s.points[end].y - s.points[c].y).max(0.001);
                         radii.push(crate::solver::RadiusVar { center, value });
                         from.push(PartRadius { centre: center, from: RadiusFrom::Arc { centre: c, end } });
                     }
                 }
-                _ => {}
+                None => {}
             }
         }
         let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).cloned().collect();

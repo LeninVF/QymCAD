@@ -255,7 +255,7 @@ pub(crate) fn draw_extend_preview(pn: &Painting, painter: &egui::Painter, rect: 
     let sh = qymcad_ui_state::Sheet { view: pn.view, rect };
     let pick = PickCtx { project: pn.project, set: pn.set, view: &pn.view };
     let Some(s) = pn.project.sketches.get(held.si) else { return };
-    let Some(qymcad_core::model::EntityKind::Line { a, b }) = s.entities.iter().find(|e| e.id == held.line).map(|e| e.kind.clone()) else { return };
+    let Some(qymcad_core::model::LineParts { a, b }) = s.entity(held.line).and_then(|e| e.kind.as_line()) else { return };
     let at = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y));
     let (Some(pa), Some(pb)) = (at(a), at(b)) else { return };
     let green = pn.scheme.pal.add();

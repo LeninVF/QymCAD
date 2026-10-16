@@ -10,7 +10,7 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use qymcad_core::model::{Constraint, EntityKind};
+    use qymcad_core::model::Constraint;
 
     /// A sketch with the lines drawn through `clicks` by the line tool, one chain, and the select tool taken.
     fn drawn(clicks: &[(f64, f64)]) -> (App, usize) {
@@ -31,7 +31,7 @@ mod tests {
     fn lines_at(app: &App, si: usize, at: (f64, f64)) -> Vec<(u8, u64)> {
         let s = &app.project.sketches[si];
         let near = |id: u64| s.points.iter().any(|q| q.id == id && (q.x - at.0).hypot(q.y - at.1) < 1e-6);
-        s.entities.iter().filter(|e| matches!(e.kind, EntityKind::Line { a, b } if near(a) || near(b))).map(|e| (1u8, e.id)).collect()
+        s.entities.iter().filter(|e| e.kind.as_line().is_some_and(|qymcad_core::model::LineParts { a, b }| near(a) || near(b))).map(|e| (1u8, e.id)).collect()
     }
 
     /// The constraints the corner holds itself by that are drawn as badges anyway.

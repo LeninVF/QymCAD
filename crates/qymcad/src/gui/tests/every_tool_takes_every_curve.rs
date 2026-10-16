@@ -217,7 +217,6 @@ fn dense(s: &qymcad_core::model::Sketch, e: &qymcad_core::model::SketchEntity) -
 
 /// THE SKETCH OPEN FOR EDITING, read in words: the one place that knows how each kind of curve is kept.
 pub(super) fn drawing(app: &App) -> Drawing {
-    use qymcad_core::model::EntityKind;
     let Some(si) = qymcad_ui_state::edit_si(&app.project, &app.sketch_ses) else { return Drawing::default() };
     let s = &app.project.sketches[si];
     let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y)).unwrap_or(Point2::new(f64::NAN, f64::NAN));
@@ -225,22 +224,22 @@ pub(super) fn drawing(app: &App) -> Drawing {
         .entities
         .iter()
         .map(|e| {
-            let (kind, path) = match e.kind {
-                EntityKind::Line { a, b } => ("line", (0..=16).map(|i| along([at(a), at(b)], i as f64 / 16.0)).collect()),
-                EntityKind::Circle { center, r } => ("circle", round(Turn { centre: at(center), radii: Point2::new(r, r), rot: 0.0, from: 0.0, sweep: std::f64::consts::TAU })),
-                EntityKind::Arc { center, a, b, ccw } => {
-                    let (c, pa, pb) = (at(center), at(a), at(b));
-                    let r = c.dist(pa);
-                    let (ta, tb) = ((pa.y - c.y).atan2(pa.x - c.x), (pb.y - c.y).atan2(pb.x - c.x));
-                    let sweep = if ccw { (tb - ta).rem_euclid(std::f64::consts::TAU) } else { -(ta - tb).rem_euclid(std::f64::consts::TAU) };
-                    ("arc", round(Turn { centre: c, radii: Point2::new(r, r), rot: 0.0, from: ta, sweep }))
-                }
-                EntityKind::Ellipse { span: Some(_), .. } => ("arc of an ellipse", dense(s, e)),
-                EntityKind::Ellipse { span: None, .. } => ("ellipse", dense(s, e)),
-                EntityKind::Spline { ends, .. } => {
-                    let closed = ends == qymcad_core::feature::Ends::Closed;
-                    (if closed { "closed spline" } else { "open spline" }, dense(s, e))
-                }
+            let k = &e.kind;
+            let (kind, path) = if let Some(l) = k.as_line() {
+                ("line", (0..=16).map(|i| along([at(l.a), at(l.b)], i as f64 / 16.0)).collect::<Vec<Point2>>())
+            } else if let Some(c) = k.as_circle() {
+                ("circle", round(Turn { centre: at(c.center), radii: Point2::new(c.r, c.r), rot: 0.0, from: 0.0, sweep: std::f64::consts::TAU }))
+            } else if let Some(arc) = k.as_arc() {
+                let (c, pa, pb) = (at(arc.center), at(arc.a), at(arc.b));
+                let r = c.dist(pa);
+                let (ta, tb) = ((pa.y - c.y).atan2(pa.x - c.x), (pb.y - c.y).atan2(pb.x - c.x));
+                let sweep = if arc.ccw { (tb - ta).rem_euclid(std::f64::consts::TAU) } else { -(ta - tb).rem_euclid(std::f64::consts::TAU) };
+                ("arc", round(Turn { centre: c, radii: Point2::new(r, r), rot: 0.0, from: ta, sweep }))
+            } else if let Some(el) = k.as_ellipse() {
+                (if el.span.is_some() { "arc of an ellipse" } else { "ellipse" }, dense(s, e))
+            } else {
+                let closed = k.as_spline().is_some_and(|sp| sp.ends == qymcad_core::feature::Ends::Closed);
+                (if closed { "closed spline" } else { "open spline" }, dense(s, e))
             };
             Curve { key: Picked { kind: 1, id: e.id }, kind, construction: e.construction, path }
         })

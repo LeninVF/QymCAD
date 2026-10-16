@@ -123,8 +123,8 @@ fn a_touching_holds_while_a_curve_is_dragged() {
     p.solve_sketch(si);
     let centre = |p: &Project| {
         let s = &p.sketches[si];
-        match &s.entities[1].kind {
-            qymcad_core::model::EntityKind::Ellipse { c, .. } => s.points.iter().find(|q| q.id == *c).map(|q| (q.id, Point2::new(q.x, q.y))),
+        match s.entities[1].kind.as_ellipse() {
+            Some(qymcad_core::model::EllipseParts { c, .. }) => s.points.iter().find(|q| q.id == c).map(|q| (q.id, Point2::new(q.x, q.y))),
             _ => None,
         }
         .expect("the centre of the ellipse")

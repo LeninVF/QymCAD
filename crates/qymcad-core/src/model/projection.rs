@@ -276,8 +276,8 @@ impl Project {
                 }
             }
             for eid in &p.entities {
-                if let Some(EntityKind::Circle { r, .. }) = s.entities.iter().find(|x| x.id == *eid).map(|e| &e.kind) {
-                    r.to_bits().hash(&mut h);
+                if let Some(c) = s.entity(*eid).and_then(|e| e.kind.as_circle()) {
+                    c.r.to_bits().hash(&mut h);
                 }
             }
         }
@@ -390,12 +390,12 @@ impl Project {
             match c {
                 Curve2::Line(a, b) => {
                     let old = match kinds.as_slice() {
-                        [EntityKind::Line { a, b }] => Some((olds[0], *a, *b)),
+                        [k] => k.as_line().map(|l| (olds[0], l.a, l.b)),
                         _ => None,
                     };
                     let pa = self.proj_point(si, &mut placing, old.map(|o| o.1), *a);
                     let pb = self.proj_point(si, &mut placing, old.map(|o| o.2), *b);
-                    let e = self.proj_entity(si, old.map(|o| o.0), EntityKind::Line { a: pa, b: pb });
+                    let e = self.proj_entity(si, old.map(|o| o.0), crate::model::LineParts { a: pa, b: pb }.into());
                     if let Some((_, oa, ob)) = old.filter(|o| (o.1, o.2) != (pa, pb)) {
                         rehung.push(Rehung { from: Ends { a: oa, b: ob }, to: Ends { a: pa, b: pb } });
                     }
@@ -405,41 +405,41 @@ impl Project {
                 }
                 Curve2::Circle(c0, r) => {
                     let old = match kinds.as_slice() {
-                        [EntityKind::Circle { center, .. }] => Some((olds[0], *center)),
+                        [k] => k.as_circle().map(|c| (olds[0], c.center)),
                         _ => None,
                     };
                     // the centre of a circle is shared with nobody: it carries the radius variable of the solver
                     let pc = self.proj_centre(si, &mut placing, old.map(|o| o.1), *c0);
-                    let e = self.proj_entity(si, old.map(|o| o.0), EntityKind::Circle { center: pc, r: *r });
+                    let e = self.proj_entity(si, old.map(|o| o.0), crate::model::CircleParts { center: pc, r: *r }.into());
                     ents.push(e);
                     edges.push(*edge);
                     pts.push(pc);
                 }
                 Curve2::Arc { centre, from, to, ccw } => {
                     let old = match kinds.as_slice() {
-                        [EntityKind::Arc { center, a, b, .. }] => Some((olds[0], *center, *a, *b)),
+                        [k] => k.as_arc().map(|arc| (olds[0], arc.center, arc.a, arc.b)),
                         _ => None,
                     };
                     let pc = self.proj_centre(si, &mut placing, old.map(|o| o.1), *centre);
                     let pa = self.proj_point(si, &mut placing, old.map(|o| o.2), *from);
                     let pb = self.proj_point(si, &mut placing, old.map(|o| o.3), *to);
-                    let e = self.proj_entity(si, old.map(|o| o.0), EntityKind::Arc { center: pc, a: pa, b: pb, ccw: *ccw });
+                    let e = self.proj_entity(si, old.map(|o| o.0), crate::model::ArcParts { center: pc, a: pa, b: pb, ccw: *ccw }.into());
                     ents.push(e);
                     edges.push(*edge);
                     pts.extend([pc, pa, pb]);
                 }
                 Curve2::Poly(p) => {
                     // the chain of points the old segments ran through, when they were as many lines as the new
-                    let chain: Option<Vec<Id>> = (kinds.len() + 1 == p.len() && kinds.iter().all(|k| matches!(k, EntityKind::Line { .. }))).then(|| {
+                    let chain: Option<Vec<Id>> = (kinds.len() + 1 == p.len() && kinds.iter().all(|k| k.as_line().is_some())).then(|| {
                         kinds
                             .iter()
                             .enumerate()
                             .flat_map(|(n, k)| {
-                                if let EntityKind::Line { a, b } = k {
+                                if let Some(crate::model::LineParts { a, b }) = k.as_line() {
                                     if n == 0 {
-                                        vec![*a, *b]
+                                        vec![a, b]
                                     } else {
-                                        vec![*b]
+                                        vec![b]
                                     }
                                 } else {
                                     Vec::new()
@@ -450,7 +450,7 @@ impl Project {
                     let ids: Vec<Id> = p.iter().enumerate().map(|(n, q)| self.proj_point(si, &mut placing, chain.as_ref().map(|c| c[n]), *q)).collect();
                     for (n, w) in ids.windows(2).filter(|w| w[0] != w[1]).enumerate() {
                         let old = chain.as_ref().and(olds.get(n).copied());
-                        let e = self.proj_entity(si, old, EntityKind::Line { a: w[0], b: w[1] });
+                        let e = self.proj_entity(si, old, crate::model::LineParts { a: w[0], b: w[1] }.into());
                         ents.push(e);
                         edges.push(*edge);
                     }

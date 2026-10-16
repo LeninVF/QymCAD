@@ -103,14 +103,7 @@ pub fn sketch_drag_start(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Contex
                 if sk.project.is_typed_sketch(si) {
                     // the points of arcs (the centre, the tangencies of fillets) are not dragged, or
                     // the fillet breaks
-                    let mut arc_pts: std::collections::HashSet<Id> = sk.project.sketches[si]
-                        .entities
-                        .iter()
-                        .flat_map(|e| match e.kind {
-                            qymcad_core::model::EntityKind::Arc { center, a, b, .. } => vec![center, a, b],
-                            _ => vec![],
-                        })
-                        .collect();
+                    let mut arc_pts: std::collections::HashSet<Id> = sk.project.sketches[si].entities.iter().filter_map(|e| e.kind.as_arc()).flat_map(|arc| [arc.center, arc.a, arc.b]).collect();
                     // reference points (the origin, the axes, materialised midpoints) are not dragged
                     arc_pts.extend(sk.project.sketches[si].system_ids());
                     for c in &sk.project.sketches[si].constraints {
@@ -137,7 +130,7 @@ pub fn sketch_drag_start(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Contex
                         .rects
                         .iter()
                         .map(|r| r.centre)
-                        .chain(s.entities.iter().filter_map(|e| if let qymcad_core::model::EntityKind::Arc { center, .. } = e.kind { Some(center) } else { None }))
+                        .chain(s.entities.iter().filter_map(|e| if let Some(qymcad_core::model::ArcParts { center, .. }) = e.kind.as_arc() { Some(center) } else { None }))
                         .collect();
                     for c in centres {
                         if !pinned.contains(&c) && !s.carried_with(c).is_empty() {
@@ -242,7 +235,7 @@ pub fn power_trim_sweep(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, prev: P
         let w = qymcad_ui_state::to_world(&*sk.view, rect, at);
         // the curve nearest the trail, of whatever kind, as a click takes it
         let Some(eid) = qymcad_pick::edit_target(&sk.pick(), rect, at, si) else { continue };
-        let is_line = sk.project.sketches[si].entity(eid).is_some_and(|e| matches!(e.kind, qymcad_core::model::EntityKind::Line { .. }));
+        let is_line = sk.project.sketches[si].entity(eid).is_some_and(|e| e.kind.as_line().is_some());
         // ONE SPAN, ONE CUT PER DRAG: the key is the entity plus the span that was hit. Without it a
         // trembling cursor standing still would go on trimming the neighbouring pieces.
         let span = trim_span_key(&*sk.project, si, eid, w.x, w.y);
@@ -283,7 +276,6 @@ pub fn translate_selected(sk: &mut qymcad_ui_state::SketchCtx, dx: f64, dy: f64)
 /// Used for dimensions and constraints between any geometry.
 pub fn resolve_sketch_ref(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos2, si: usize) -> Option<qymcad_ui_state::SketchRef> {
     let sh = qymcad_ui_state::Sheet { view: *sk.view, rect };
-    use qymcad_core::model::EntityKind;
     // 1) the nearest point (the centres of circles and arcs are points too)
     if let Some(id) = qymcad_pick::nearest_sketch_point(&sk.pick(), rect, pos, si) {
         return Some(qymcad_ui_state::SketchRef::Point(id));
@@ -292,7 +284,7 @@ pub fn resolve_sketch_ref(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: 
     if let Some(s) = sk.project.sketches.get(si) {
         let mut best: Option<(f32, (Id, Id))> = None;
         for e in &s.entities {
-            if let EntityKind::Line { a, b } = e.kind {
+            if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
                 if let (Some(pa), Some(pb)) = (qymcad_ui_state::sketch_pt(&*sk.project, si, a), qymcad_ui_state::sketch_pt(&*sk.project, si, b)) {
                     let mid = Point2::new((pa.x + pb.x) * 0.5, (pa.y + pb.y) * 0.5);
                     let d = sh.at(mid).distance(pos);
@@ -350,21 +342,18 @@ pub fn resolve_dim_ref(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
 
 /// The base edge under a screen point (a line, a circle or an arc) — for a tangent circle.
 pub fn ref_edge_at(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos2, si: usize) -> Option<qymcad_ui_state::EdgeRef> {
-    use qymcad_core::model::EntityKind;
     let (k, eid) = sketch_hit(&sk.pick(), rect, pos, si)?;
     if k != 1 {
         return None;
     }
     let s = sk.project.sketches.get(si)?;
-    let e = s.entities.iter().find(|e| e.id == eid)?;
-    match e.kind {
-        EntityKind::Line { a, b } => Some(qymcad_ui_state::EdgeRef::Line { a, b }),
-        EntityKind::Circle { center, r } => Some(qymcad_ui_state::EdgeRef::Circle { center, r }),
-        EntityKind::Arc { center, a, .. } => {
-            let (pc, pa) = (qymcad_ui_state::sketch_pt(&*sk.project, si, center)?, qymcad_ui_state::sketch_pt(&*sk.project, si, a)?);
-            Some(qymcad_ui_state::EdgeRef::Circle { center, r: ((pa.x - pc.x).powi(2) + (pa.y - pc.y).powi(2)).sqrt() })
-        }
-        EntityKind::Ellipse { .. } | EntityKind::Spline { .. } => None,
+    let e = s.entity(eid)?;
+    // a line by its ends, a circle or an arc by the circle it lies on; an ellipse and a spline are no edge a tangent arc
+    // is built off
+    match (e.kind.as_line(), qymcad_core::model::circle_of(s, e)) {
+        (Some(l), _) => Some(qymcad_ui_state::EdgeRef::Line { a: l.a, b: l.b }),
+        (_, Some(c)) => Some(qymcad_ui_state::EdgeRef::Circle { center: c.center, r: c.r }),
+        _ => None,
     }
 }
 

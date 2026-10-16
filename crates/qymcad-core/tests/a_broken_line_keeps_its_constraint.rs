@@ -5,7 +5,7 @@
 //! Reported behaviour: after a break only one half stayed horizontal - two constraints and seven freedoms where there
 //! are three and six.
 use qymcad_core::feature::Purpose;
-use qymcad_core::model::{Constraint, EntityKind, Project};
+use qymcad_core::model::{Constraint, Project};
 
 #[test]
 fn a_broken_horizontal_line_is_two_horizontal_lines() {
@@ -13,8 +13,8 @@ fn a_broken_horizontal_line_is_two_horizontal_lines() {
     p.new_document();
     let si = p.new_sketch("S");
     let l = p.add_line_entity(si, -20.0, 0.0, 20.0, 0.0, Purpose::Real);
-    let (a, b) = match p.sketches[si].entities.iter().find(|e| e.id == l).map(|e| e.kind.clone()) {
-        Some(EntityKind::Line { a, b }) => (a, b),
+    let (a, b) = match p.sketches[si].entities.iter().find(|e| e.id == l).and_then(|e| e.kind.as_line()) {
+        Some(qymcad_core::model::LineParts { a, b }) => (a, b),
         _ => panic!("the line"),
     };
     p.sketches[si].constraints.push(Constraint::Horizontal { a, b });
@@ -23,8 +23,8 @@ fn a_broken_horizontal_line_is_two_horizontal_lines() {
     let lines: Vec<(u64, u64)> = p.sketches[si]
         .entities
         .iter()
-        .filter_map(|e| match e.kind {
-            EntityKind::Line { a, b } => Some((a, b)),
+        .filter_map(|e| match e.kind.as_line() {
+            Some(qymcad_core::model::LineParts { a, b }) => Some((a, b)),
             _ => None,
         })
         .collect();

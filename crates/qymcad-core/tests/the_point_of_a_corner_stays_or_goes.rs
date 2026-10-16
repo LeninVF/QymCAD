@@ -7,7 +7,7 @@
 //! And where the rest of the drawing still needs the point - a third line at a T, or the two lines of the far square
 //! at the point two squares share - it stays as it is.
 use qymcad_core::feature::Purpose;
-use qymcad_core::model::{entity_points, ChamferLegs, Constraint, EntityKind, Project};
+use qymcad_core::model::{entity_points, ChamferLegs, Constraint, Project};
 
 /// An L of two lines meeting at (20, 0), with the point of the corner and the far end of the bottom line.
 fn an_angle() -> (Project, usize, u64, u64, u64) {
@@ -91,7 +91,7 @@ fn the_point_stays_while_a_line_still_comes_to_it() {
         p.vertex_edges(si, corner)
             .into_iter()
             .find(|&e| {
-                let Some(EntityKind::Line { a, b }) = p.sketches[si].entities.iter().find(|x| x.id == e).map(|x| x.kind.clone()) else { return false };
+                let Some(qymcad_core::model::LineParts { a, b }) = p.sketches[si].entities.iter().find(|x| x.id == e).and_then(|x| x.kind.as_line()) else { return false };
                 let other = if a == corner { b } else { a };
                 p.sketches[si].points.iter().any(|q| q.id == other && (q.x - to.0).abs() < 1e-6 && (q.y - to.1).abs() < 1e-6)
             })

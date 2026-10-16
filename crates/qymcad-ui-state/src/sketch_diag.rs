@@ -110,7 +110,6 @@ impl std::hash::Hasher for Mix {
 /// what they tie, and the values of its dimensions - everything the diagnostics depend on but where the points stand.
 /// O(n) per frame is pennies against the Jacobian.
 pub fn sketch_shape_key(project: &qymcad_core::model::Project, si: usize) -> u64 {
-    use qymcad_core::model::EntityKind;
     use std::hash::{Hash, Hasher};
     let mut h = Mix::default();
     if let Some(s) = project.sketches.get(si) {
@@ -120,20 +119,7 @@ pub fn sketch_shape_key(project: &qymcad_core::model::Project, si: usize) -> u64
         for e in &s.entities {
             e.id.hash(&mut h);
             e.construction.hash(&mut h);
-            match e.kind {
-                EntityKind::Line { a, b } => [0, a, b, 0].hash(&mut h),
-                EntityKind::Arc { center, a, b, ccw } => [1, center, a, b, ccw as u64].hash(&mut h),
-                EntityKind::Circle { center, .. } => [2, center].hash(&mut h),
-                EntityKind::Ellipse { c, ma, mi, span } => {
-                    [3, c, ma, mi].hash(&mut h);
-                    span.hash(&mut h);
-                }
-                EntityKind::Spline { ref nodes, ends, .. } => {
-                    4.hash(&mut h);
-                    nodes.hash(&mut h);
-                    ends.hash(&mut h);
-                }
-            }
+            e.kind.hash_shape(&mut h);
         }
         for c in &s.constraints {
             std::mem::discriminant(c).hash(&mut h);
@@ -159,7 +145,7 @@ pub fn sketch_place_key(project: &qymcad_core::model::Project, si: usize) -> u64
             p.y.to_bits().hash(&mut h);
         }
         for e in &s.entities {
-            if let qymcad_core::model::EntityKind::Circle { r, .. } = e.kind {
+            if let Some(qymcad_core::model::CircleParts { r, .. }) = e.kind.as_circle() {
                 r.to_bits().hash(&mut h);
             }
         }

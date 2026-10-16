@@ -1363,7 +1363,7 @@ mod tests {
             app.project.regen_sketch(si);
             std::fs::create_dir_all(img_dir().join("sketch-delete")).expect("the frame directory");
             save("sketch-delete/00.png", &shot_sketch_fixed(&mut app, si, 4.2));
-            let circle = app.project.sketches[si].entities.iter().find(|e| matches!(e.kind, qymcad_core::model::EntityKind::Circle { .. })).map(|e| e.id).expect("the circle in the sketch");
+            let circle = app.project.sketches[si].entities.iter().find(|e| e.kind.as_circle().is_some()).map(|e| e.id).expect("the circle in the sketch");
             app.project.delete_entities(si, &[circle]);
             app.project.regen_sketch(si);
             save("sketch-delete/01.png", &shot_sketch_fixed(&mut app, si, 4.2));

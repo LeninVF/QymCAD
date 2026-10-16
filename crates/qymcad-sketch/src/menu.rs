@@ -76,9 +76,12 @@ pub fn sketch_context_menu(sk: &mut qymcad_ui_state::SketchCtx, ui: &mut egui::U
         ui.close();
     }
     // an arc length dimension, for the picked arc
-    let arc_eid = sk.sel_sk.items.iter().filter(|(k, _)| *k == 1).find_map(|(_, id)| {
-        sk.project.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == *id)).and_then(|e| matches!(e.kind, qymcad_core::model::EntityKind::Arc { .. }).then_some(*id))
-    });
+    let arc_eid = sk
+        .sel_sk
+        .items
+        .iter()
+        .filter(|(k, _)| *k == 1)
+        .find_map(|(_, id)| sk.project.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == *id)).and_then(|e| e.kind.as_arc().is_some().then_some(*id)));
     if let Some(aid) = arc_eid {
         if ui.button(qymcad_i18n::tr("sk-arc-length-dim")).clicked() {
             if let Some(ci) = sk.project.ensure_arc_length(si, aid) {
@@ -100,10 +103,7 @@ pub fn sketch_context_menu(sk: &mut qymcad_ui_state::SketchCtx, ui: &mut egui::U
                 .iter()
                 .filter_map(|&(k, id)| {
                     if k == 1 {
-                        s.entities.iter().find(|e| e.id == id).and_then(|e| match e.kind {
-                            qymcad_core::model::EntityKind::Circle { center, .. } | qymcad_core::model::EntityKind::Arc { center, .. } => Some((center, -1i8)),
-                            _ => None,
-                        })
+                        s.entity(id).and_then(|e| e.kind.round_centre()).map(|c| (c, -1i8))
                     } else if k == 0 {
                         Some((id, 0i8))
                     } else {
@@ -170,7 +170,7 @@ pub(crate) fn open_the_size_of_the_new_shape(sk: &mut qymcad_ui_state::SketchCtx
 
 /// The arc the tool has just added, the last entity of the sketch, has the field of its radius opened.
 pub(crate) fn open_the_size_of_the_new_arc(sk: &mut qymcad_ui_state::SketchCtx, si: usize, purpose: qymcad_core::feature::Purpose) {
-    let last = sk.project.sketches[si].entities.last().filter(|e| matches!(e.kind, qymcad_core::model::EntityKind::Arc { .. })).map(|e| e.id);
+    let last = sk.project.sketches[si].entities.last().filter(|e| e.kind.as_arc().is_some()).map(|e| e.id);
     if let Some(eid) = last {
         open_the_size_of_the_new_shape(sk, eid, purpose);
     }

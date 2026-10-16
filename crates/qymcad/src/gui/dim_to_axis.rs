@@ -129,8 +129,8 @@ mod tests {
         Hand::new(&mut app).sk_tool(3).click2d(0.0, 0.0).click2d(25.0, 0.0);
         app.project.ensure_axis(si, 0); // as a dimension to the axis would
         app.project.regen_sketch(si);
-        let centre = match app.project.sketches[si].entities.iter().find_map(|e| match e.kind {
-            qymcad_core::model::EntityKind::Circle { center, .. } => Some(center),
+        let centre = match app.project.sketches[si].entities.iter().find_map(|e| match e.kind.as_circle() {
+            Some(qymcad_core::model::CircleParts { center, .. }) => Some(center),
             _ => None,
         }) {
             Some(c) => c,
@@ -201,8 +201,8 @@ mod tests {
         let (eid, centre) = app.project.sketches[si]
             .entities
             .iter()
-            .find_map(|e| match e.kind {
-                qymcad_core::model::EntityKind::Circle { center, .. } => Some((e.id, center)),
+            .find_map(|e| match e.kind.as_circle() {
+                Some(qymcad_core::model::CircleParts { center, .. }) => Some((e.id, center)),
                 _ => None,
             })
             .expect("setup: no circle");

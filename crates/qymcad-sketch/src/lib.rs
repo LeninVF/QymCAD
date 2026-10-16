@@ -61,18 +61,10 @@ fn curve_length(project: &Project, si: usize, eid: Id) -> f64 {
 /// The number is the ordinal among entities OF THE SAME kind rather than a running id: "Line 3" can be
 /// found by eye, while "Line 47" says nothing.
 pub fn sketch_entity_name(project: &qymcad_core::model::Project, si: usize, eid: Id) -> String {
-    use qymcad_core::model::EntityKind as EK;
     let Some(s) = project.sketches.get(si) else { return String::new() };
     let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return String::new() };
-    let key = match e.kind {
-        EK::Line { .. } => "ent-line",
-        EK::Arc { .. } => "ent-arc",
-        EK::Circle { .. } => "ent-circle",
-        EK::Ellipse { .. } => "ent-ellipse",
-        EK::Spline { .. } => "ent-spline",
-    };
-    let same = |k: &EK| std::mem::discriminant(k) == std::mem::discriminant(&e.kind);
-    let n = s.entities.iter().filter(|x| same(&x.kind)).position(|x| x.id == eid).unwrap_or(0) + 1;
+    let key = e.kind.name_key();
+    let n = s.entities.iter().filter(|x| x.kind.name_key() == key).position(|x| x.id == eid).unwrap_or(0) + 1;
     qymcad_i18n::tr2("ent-named", "what", &qymcad_i18n::tr(key), "n", &n.to_string())
 }
 
@@ -162,12 +154,7 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
     // a system id of 0 means "not materialised yet" and must not match a real point
     let p_eq = |sys: Id, id: Id| sys != 0 && sys == id;
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
-    use qymcad_core::model::EntityKind;
     let s = pick.project.sketches.get(si)?;
-    // the points by id from a table: looked up along the list for both ends of every entity, a drawing of 70 000
-    // segments took 4 s a frame under the pointer
-    let at: std::collections::HashMap<Id, Point2> = s.points.iter().map(|p| (p.id, Point2::new(p.x, p.y))).collect();
-    let pt = |id: Id| at.get(&id).copied();
     // the ends of THE AXES are not picked as ordinary points (they mark infinite lines); the origin
     // deliberately STAYS pickable (it is needed for a coincidence with the origin) - hence `axis_pts`
     // rather than `system_ids`
@@ -205,51 +192,9 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
     const CONSTRUCTION_YIELDS: f32 = 2.0;
     let mut best_e: Option<(f32, Id)> = None;
     for e in &s.entities {
-        let d = match e.kind {
-            // a spline and an arc of an ellipse by the points they are laid out by
-            EntityKind::Spline { .. } | EntityKind::Ellipse { span: Some(_), .. } => {
-                let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).into_iter().map(|p| sh.at(p)).collect();
-                line.windows(2).map(|w| qymcad_ui_state::screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min)
-            }
-            EntityKind::Line { a, b } => match (pt(a), pt(b)) {
-                (Some(pa), Some(pb)) => qymcad_ui_state::screen_dist_seg(pos, sh.at(pa), sh.at(pb)),
-                _ => f32::INFINITY,
-            },
-            EntityKind::Circle { center, r } => match pt(center) {
-                Some(c) => {
-                    let sc = sh.at(c);
-                    let rp = (sh.at(Point2::new(c.x + r, c.y)).x - sc.x).abs();
-                    (sc.distance(pos) - rp).abs()
-                }
-                None => f32::INFINITY,
-            },
-            EntityKind::Arc { center, a, b, ccw } => match (pt(center), pt(a), pt(b)) {
-                (Some(c), Some(pa), Some(pb)) => qymcad_pick::arc_screen_dist(&sh, pos, c, pa, pb, ccw),
-                _ => f32::INFINITY,
-            },
-            EntityKind::Ellipse { c, ma, mi, span: None } => match (pt(c), pt(ma), pt(mi)) {
-                (Some(pc), Some(pma), Some(pmi)) => {
-                    // the distance to the outline of the ellipse, measured over samples
-                    let major = ((pma.x - pc.x).powi(2) + (pma.y - pc.y).powi(2)).sqrt().max(1e-6);
-                    let minor = ((pmi.x - pc.x).powi(2) + (pmi.y - pc.y).powi(2)).sqrt().max(1e-6);
-                    let (ux, uy) = ((pma.x - pc.x) / major, (pma.y - pc.y) / major);
-                    let (vx, vy) = (-uy, ux);
-                    let (mut best, mut prev) = (f32::INFINITY, None::<Pos2>);
-                    for k in 0..=48 {
-                        let t = std::f64::consts::TAU * k as f64 / 48.0;
-                        let (ct, st) = (t.cos(), t.sin());
-                        let wp = Point2::new(pc.x + major * ct * ux + minor * st * vx, pc.y + major * ct * uy + minor * st * vy);
-                        let sp = sh.at(wp);
-                        if let Some(pp) = prev {
-                            best = best.min(qymcad_ui_state::screen_dist_seg(pos, pp, sp));
-                        }
-                        prev = Some(sp);
-                    }
-                    best
-                }
-                _ => f32::INFINITY,
-            },
-        };
+        // the distance to the curve as it is drawn, whatever its kind
+        let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).into_iter().map(|p| sh.at(p)).collect();
+        let d = line.windows(2).map(|w| qymcad_ui_state::screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min);
         if d <= qymcad_ui_state::grab::grab(pick.set, Grab::Curve) {
             let weighed = if e.construction { d + CONSTRUCTION_YIELDS } else { d };
             if best_e.is_none_or(|(bd, _)| weighed < bd) {
@@ -375,15 +320,14 @@ fn angle_of(project: &Project, text: &str) -> Result<f64, String> {
 /// The size of every line and circle of sketch `si`, in the order of its entities: a line's length, a circle's
 /// radius. Nothing for an arc or an ellipse, whose size its points hold.
 fn shape_sizes(project: &Project, si: usize) -> Vec<f64> {
-    use qymcad_core::model::EntityKind;
     let Some(s) = project.sketches.get(si) else { return Vec::new() };
     let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
     let at = |id: Id| points_by_id.get(&id).copied().map(|p| (p.x, p.y));
     s.entities
         .iter()
-        .filter_map(|e| match e.kind {
-            EntityKind::Line { a, b } => Some(at(a).zip(at(b)).map_or(0.0, |(a, b)| (a.0 - b.0).hypot(a.1 - b.1))),
-            EntityKind::Circle { r, .. } => Some(r),
+        .filter_map(|e| match (e.kind.as_line(), e.kind.as_circle()) {
+            (Some(l), _) => Some(at(l.a).zip(at(l.b)).map_or(0.0, |(a, b)| (a.0 - b.0).hypot(a.1 - b.1))),
+            (_, Some(c)) => Some(c.r),
             _ => None,
         })
         .collect()
@@ -646,22 +590,16 @@ pub fn tool_for_action(action: &str) -> Option<u8> {
 
 /// The two ends of line `eid` of sketch `si`.
 fn line_ends_of(project: &Project, si: usize, eid: Id) -> Option<(Id, Id)> {
-    match project.sketches.get(si)?.entities.iter().find(|e| e.id == eid)?.kind {
-        qymcad_core::model::EntityKind::Line { a, b } => Some((a, b)),
-        _ => None,
-    }
+    project.sketches.get(si)?.entity(eid)?.kind.as_line().map(|l| (l.a, l.b))
 }
 
 /// The ends of the line of sketch `si` whose middle stands at `at`, where the snap put its triangle.
 fn line_with_middle_at(project: &Project, si: usize, at: Point2) -> Option<(Id, Id)> {
     let s = project.sketches.get(si)?;
     let pt = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-    s.entities.iter().find_map(|e| match e.kind {
-        qymcad_core::model::EntityKind::Line { a, b } => {
-            let ((ax, ay), (bx, by)) = (pt(a)?, pt(b)?);
-            (((ax + bx) / 2.0 - at.x).abs() < 1e-9 && ((ay + by) / 2.0 - at.y).abs() < 1e-9).then_some((a, b))
-        }
-        _ => None,
+    s.entities.iter().filter_map(|e| e.kind.as_line()).find_map(|l| {
+        let ((ax, ay), (bx, by)) = (pt(l.a)?, pt(l.b)?);
+        (((ax + bx) / 2.0 - at.x).abs() < 1e-9 && ((ay + by) / 2.0 - at.y).abs() < 1e-9).then_some((l.a, l.b))
     })
 }
 

@@ -33,49 +33,13 @@ impl Project {
     /// THE ENTITY KIND OF CURVE `c` in sketch `si`, on the points standing at its ends (new ones where none stands) and
     /// the centre and axes of `how`.
     pub(crate) fn curve_kind(&mut self, si: usize, c: &Curve, how: LayAs) -> EntityKind {
-        match c {
-            Curve::Line { a, b } => EntityKind::Line { a: self.point_exactly_at(si, *a), b: self.point_exactly_at(si, *b) },
-            Curve::Round { centre, r, sweep, .. } => {
-                let centre_id = how.centre.unwrap_or_else(|| self.point_exactly_at(si, *centre));
-                if c.closed() {
-                    EntityKind::Circle { center: centre_id, r: *r }
-                } else {
-                    let [a, b] = c.ends();
-                    let (pa, pb) = (self.point_exactly_at(si, a), self.point_exactly_at(si, b));
-                    // an arc of the sketch runs counter-clockwise from its first end; one cut clockwise is laid the other way
-                    if *sweep >= 0.0 {
-                        EntityKind::Arc { center: centre_id, a: pa, b: pb, ccw: true }
-                    } else {
-                        EntityKind::Arc { center: centre_id, a: pb, b: pa, ccw: true }
-                    }
-                }
-            }
-            Curve::Oval { centre, major, minor, sweep, .. } => {
-                let cid = how.centre.unwrap_or_else(|| self.point_exactly_at(si, *centre));
-                let [ma, mi] = how.axes.unwrap_or_else(|| [self.point_exactly_at(si, *centre + *major), self.point_exactly_at(si, *centre + *minor)]);
-                let span = (!c.closed()).then(|| {
-                    let [a, b] = c.ends();
-                    let (from, to) = (self.point_exactly_at(si, a), self.point_exactly_at(si, b));
-                    let winding = if *sweep >= 0.0 { crate::feature::Winding::Ccw } else { crate::feature::Winding::Cw };
-                    EllipseSpan { from, to, winding }
-                });
-                EntityKind::Ellipse { c: cid, ma, mi, span }
-            }
-            Curve::Spline { nodes, tangents, ends } => {
-                let ids: Vec<Id> = nodes.iter().map(|q| self.point_exactly_at(si, *q)).collect();
-                let handles = tangents.iter().map(|t| Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect();
-                EntityKind::Spline { nodes: ids, handles, ends: *ends }
-            }
-        }
+        EntityKind::laid(c, crate::model::Standing { centre: how.centre, axes: how.axes }, &mut |p| self.point_exactly_at(si, p))
     }
 
     /// How a piece of entity `e` is laid: as construction when it is, on its centre and the ends of its axes.
     pub(crate) fn lay_as_of(e: &SketchEntity) -> LayAs {
-        match &e.kind {
-            EntityKind::Arc { center, .. } | EntityKind::Circle { center, .. } => LayAs { construction: e.construction, centre: Some(*center), axes: None },
-            EntityKind::Ellipse { c, ma, mi, .. } => LayAs { construction: e.construction, centre: Some(*c), axes: Some([*ma, *mi]) },
-            _ => LayAs { construction: e.construction, ..LayAs::default() },
-        }
+        let on = e.kind.standing();
+        LayAs { construction: e.construction, centre: on.centre, axes: on.axes }
     }
 
     /// CUT ENTITY `eid` OF SKETCH `si` AT `places` along it (`Curve` places, 0 to 1) and put its pieces in its stead: an

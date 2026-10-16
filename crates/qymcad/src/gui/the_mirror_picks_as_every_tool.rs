@@ -13,7 +13,7 @@ mod tests {
     use super::super::{App, Sel};
     use qymcad_core::feature::{Purpose, SketchPlane, Winding};
     use qymcad_core::geom::Point2;
-    use qymcad_core::model::EntityKind;
+
     use qymcad_ui_state::EditTool;
 
     /// The middles of the arcs of the sketch, along the way each runs.
@@ -22,8 +22,8 @@ mod tests {
         let at = |q: u64| s.points.iter().find(|x| x.id == q).map(|x| (x.x, x.y)).expect("the point");
         s.entities
             .iter()
-            .filter_map(|e| match e.kind {
-                EntityKind::Arc { center, a, b, ccw } => Some((at(center), at(a), at(b), ccw)),
+            .filter_map(|e| match e.kind.as_arc() {
+                Some(qymcad_core::model::ArcParts { center, a, b, ccw }) => Some((at(center), at(a), at(b), ccw)),
                 _ => None,
             })
             .map(|(c, pa, pb, ccw)| {

@@ -2,7 +2,7 @@
 //! the right button lists both so a person can name the one meant. A line on the same straight with nothing in common,
 //! a line only touching at an end, a circle of another radius - none of them lies over.
 use qymcad_core::feature::Purpose;
-use qymcad_core::model::{EntityKind, Project};
+use qymcad_core::model::Project;
 
 /// The lines of sketch `si` through (x, y), in the order of the sketch.
 fn lines_through(p: &Project, si: usize, x: f64, y: f64) -> Vec<u64> {
@@ -10,8 +10,8 @@ fn lines_through(p: &Project, si: usize, x: f64, y: f64) -> Vec<u64> {
     let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("the point");
     s.entities
         .iter()
-        .filter(|e| match e.kind {
-            EntityKind::Line { a, b } => {
+        .filter(|e| match e.kind.as_line() {
+            Some(qymcad_core::model::LineParts { a, b }) => {
                 let (a, b) = (at(a), at(b));
                 let (dx, dy) = (b.0 - a.0, b.1 - a.1);
                 let l = dx.hypot(dy);
@@ -50,7 +50,7 @@ fn the_sides_drawn_over_each_other_are_listed_and_nothing_else() {
     if p.overlapping_curves(si, top[0]) != top {
         failures.push(format!("the top of the left rectangle, alone there, lists {:?}", p.overlapping_curves(si, top[0])));
     }
-    let circle = p.sketches[si].entities.iter().find(|e| matches!(e.kind, EntityKind::Circle { r, .. } if (r - 10.0).abs() < 1e-9)).map(|e| e.id).expect("the circle");
+    let circle = p.sketches[si].entities.iter().find(|e| e.kind.as_circle().is_some_and(|qymcad_core::model::CircleParts { r, .. }| (r - 10.0).abs() < 1e-9)).map(|e| e.id).expect("the circle");
     if p.overlapping_curves(si, circle) != vec![circle] {
         failures.push(format!("a circle with one of another radius round the same centre lists {:?}", p.overlapping_curves(si, circle)));
     }

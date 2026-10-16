@@ -689,19 +689,15 @@ pub(crate) struct Round {
 
 /// Read a circle or an arc; anything else, or a missing point, gives `None`.
 fn round_entity(s: &crate::model::Sketch, e: &crate::model::SketchEntity) -> Option<Round> {
-    let p = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-    match e.kind {
-        EntityKind::Circle { center, r } => {
-            let (cx, cy) = p(center)?;
-            Some(Round { center_id: center, cx, cy, r, span: None })
-        }
-        EntityKind::Arc { center, a, b, ccw } => {
-            let ((cx, cy), (ax, ay), (bx, by)) = (p(center)?, p(a)?, p(b)?);
-            let r = ((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt();
-            Some(Round { center_id: center, cx, cy, r, span: Some(((ay - cy).atan2(ax - cx), (by - cy).atan2(bx - cx), ccw)) })
-        }
-        _ => None,
-    }
+    let at = |id: Id| s.point(id).map(|q| Point2::new(q.x, q.y));
+    let circle = e.kind.circle_by(&at)?;
+    let c = at(circle.center)?;
+    let angle = |id: Id| at(id).map(|q| (q.y - c.y).atan2(q.x - c.x));
+    let span = match e.kind.as_arc() {
+        Some(arc) => Some((angle(arc.a)?, angle(arc.b)?, arc.ccw)),
+        None => None,
+    };
+    Some(Round { center_id: circle.center, cx: c.x, cy: c.y, r: circle.r, span })
 }
 
 fn at_of(pts: &[SketchPoint], id: Id) -> Option<(f64, f64)> {
@@ -828,9 +824,10 @@ fn hold_offset(ids: &[Id], kinds: &[(EntityKind, OffsetSource)], dist: f64, shap
     }
     let mut held = Vec::new();
     for (kind, src) in kinds {
-        match (kind, src) {
-            (EntityKind::Arc { center, .. }, OffsetSource::Arc { center: sc, .. }) => held.push(Constraint::Concentric { c1: *sc, c2: *center }),
-            (EntityKind::Arc { center, .. }, OffsetSource::Corner(c)) => held.push(Constraint::Coincident { a: *c, b: *center }),
+        let Some(center) = kind.as_arc().map(|arc| arc.center) else { continue };
+        match src {
+            OffsetSource::Arc { center: sc, .. } => held.push(Constraint::Concentric { c1: *sc, c2: center }),
+            OffsetSource::Corner(c) => held.push(Constraint::Coincident { a: *c, b: center }),
             _ => {}
         }
     }
@@ -979,33 +976,9 @@ pub(super) fn measure_driven(c: &mut Constraint, pos: &std::collections::HashMap
 /// THE BOX OF A CURVE `[x0, y0, x1, y1]` where its points stand (`at`), widened past the welds of the loops (1e-3 mm)
 /// and by a millionth of its size: curves whose boxes so widened do not meet share no loop.
 pub(super) fn entity_box(e: &SketchEntity, at: &dyn Fn(Id) -> Option<(f64, f64)>) -> [f64; 4] {
-    let p = |id: Id| at(id).unwrap_or((f64::NAN, f64::NAN));
-    let [x0, y0, x1, y1] = match e.kind {
-        // a spline by the box of its laid out points: the curve leaves the box of its nodes where a handle pulls it out
-        EntityKind::Spline { ref nodes, ref handles, ends } => {
-            let cps: Vec<Point2> = nodes.iter().map(|id| p(*id)).map(|(x, y)| Point2::new(x, y)).collect();
-            let line = tessellate_spline_hermite(&cps, handles, ends).points;
-            line.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, q| [b[0].min(q.x), b[1].min(q.y), b[2].max(q.x), b[3].max(q.y)])
-        }
-        EntityKind::Line { a, b } => {
-            let (pa, pb) = (p(a), p(b));
-            [pa.0.min(pb.0), pa.1.min(pb.1), pa.0.max(pb.0), pa.1.max(pb.1)]
-        }
-        EntityKind::Circle { center, r } => {
-            let c = p(center);
-            [c.0 - r, c.1 - r, c.0 + r, c.1 + r]
-        }
-        EntityKind::Arc { center, a, .. } => {
-            let (c, pa) = (p(center), p(a));
-            let r = (pa.0 - c.0).hypot(pa.1 - c.1);
-            [c.0 - r, c.1 - r, c.0 + r, c.1 + r]
-        }
-        EntityKind::Ellipse { c, ma, mi, .. } => {
-            let (pc, pa, pi) = (p(c), p(ma), p(mi));
-            let r = (pa.0 - pc.0).hypot(pa.1 - pc.1).max((pi.0 - pc.0).hypot(pi.1 - pc.1));
-            [pc.0 - r, pc.1 - r, pc.0 + r, pc.1 + r]
-        }
-    };
+    // a curve by the box of its laid out points: a spline leaves the box of its nodes where a handle pulls it out
+    let line = crate::model::curve::Curve::of_placed(&|id: Id| at(id).map(|(x, y)| Point2::new(x, y)), e).map(|c| c.polyline()).unwrap_or_default();
+    let [x0, y0, x1, y1] = line.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, q| [b[0].min(q.x), b[1].min(q.y), b[2].max(q.x), b[3].max(q.y)]);
     let m = 1e-2 + 1e-6 * (x1 - x0).max(y1 - y0);
     [x0 - m, y0 - m, x1 + m, y1 + m]
 }

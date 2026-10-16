@@ -94,17 +94,18 @@ impl Session {
         if kind == 0 {
             return Some(SketchPick::Point { at: pt(id) });
         }
-        use qymcad_core::model::EntityKind;
-        if let Some(e) = sk.entities.iter().find(|e| e.id == id) {
-            return Some(match e.kind {
-                EntityKind::Line { a, b } => SketchPick::Line { from: pt(a), to: pt(b) },
-                EntityKind::Arc { center, a, b, ccw } => SketchPick::Arc { centre: pt(center), from: pt(a), to: pt(b), ccw },
-                EntityKind::Circle { center, r } => SketchPick::Circle { centre: pt(center), radius: r },
-                EntityKind::Ellipse { c, ma, mi, .. } => SketchPick::Ellipse { centre: pt(c), major: pt(ma), minor: pt(mi) },
-                EntityKind::Spline { ref nodes, .. } => SketchPick::Spline { nodes: nodes.iter().map(|p| pt(*p)).collect() },
-            });
-        }
-        None
+        // the curve as it stands, by the geometry the curve module reads off it
+        use qymcad_core::model::curve::Curve;
+        let xy = |p: qymcad_core::geom::Point2| (p.x, p.y);
+        let c = Curve::of(sk, sk.entity(id)?)?;
+        let [from, to] = c.ends();
+        Some(match c {
+            Curve::Line { a, b } => SketchPick::Line { from: xy(a), to: xy(b) },
+            Curve::Round { centre, r, .. } if c.closed() => SketchPick::Circle { centre: xy(centre), radius: r },
+            Curve::Round { centre, sweep, .. } => SketchPick::Arc { centre: xy(centre), from: xy(from), to: xy(to), ccw: sweep >= 0.0 },
+            Curve::Oval { centre, major, minor, .. } => SketchPick::Ellipse { centre: xy(centre), major: xy(centre + major), minor: xy(centre + minor) },
+            Curve::Spline { nodes, .. } => SketchPick::Spline { nodes: nodes.into_iter().map(xy).collect() },
+        })
     }
 
     /// WHERE THE POINT `p` OF THE 3D VIEW FALLS ON SCREEN AS THE VIEW STANDS NOW - no gesture, nothing brought into view,

@@ -245,9 +245,9 @@ impl Project {
         let Some(Stretch { end, curve: longer }) = self.stretch_at(si, eid, click) else { return false };
         let Some(e) = self.sketches.get(si).and_then(|s| s.entity(eid)) else { return false };
         let reached = if end == End::Start { longer.at(0.0) } else { longer.at(1.0) };
-        let kind = e.kind.clone();
-        match kind {
-            EntityKind::Spline { mut nodes, handles: _, ends } => {
+        let spline = e.kind.as_spline().map(|sp| (sp.nodes.to_vec(), sp.ends));
+        match spline {
+            Some((mut nodes, ends)) => {
                 let Curve::Spline { tangents, .. } = &longer else { return false };
                 let id = self.alloc_id();
                 self.sketches[si].points.push(SketchPoint { id, x: reached.x, y: reached.y });
@@ -258,10 +258,10 @@ impl Project {
                 }
                 let handles = tangents.iter().map(|t| Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect();
                 if let Some(x) = self.sketches[si].entities.iter_mut().find(|x| x.id == eid) {
-                    x.kind = EntityKind::Spline { nodes, handles, ends };
+                    x.kind = EntityKind::spline(nodes, handles, ends);
                 }
             }
-            _ => {
+            None => {
                 // the end point of the curve - its first or its last point along it - moves to where it reaches
                 let Some(end_id) = self.end_point_of(si, eid, end) else { return false };
                 if let Some(q) = self.sketches[si].points.iter_mut().find(|q| q.id == end_id) {

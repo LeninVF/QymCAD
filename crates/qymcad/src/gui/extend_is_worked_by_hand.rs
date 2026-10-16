@@ -35,7 +35,7 @@ mod tests {
     fn ends_x(hand: &Hand, line: u64) -> (f64, f64) {
         let sk = &hand.app.project.sketches[0];
         let e = sk.entities.iter().find(|e| e.id == line).expect("the line");
-        let qymcad_core::model::EntityKind::Line { a, b } = e.kind else { panic!("not a line") };
+        let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() else { panic!("not a line") };
         let x = |id| sk.points.iter().find(|q| q.id == id).map(|q| q.x).expect("the point");
         (x(a), x(b))
     }

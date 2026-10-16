@@ -32,14 +32,7 @@ impl Project {
     fn slot_size_ends(&self, si: usize, curve: Id, which: crate::model::SlotSize) -> Option<[Id; 2]> {
         let s = self.sketches.get(si)?;
         let f = s.figures.iter().find(|f| f.shape == FigureShape::Slot && f.curves.contains(&curve))?;
-        let ends: Vec<[Id; 3]> = f
-            .curves
-            .iter()
-            .filter_map(|c| match s.entity(*c)?.kind {
-                EntityKind::Arc { center, a, b, .. } => Some([center, a, b]),
-                _ => None,
-            })
-            .collect();
+        let ends: Vec<[Id; 3]> = f.curves.iter().filter_map(|c| s.entity(*c)?.kind.as_arc().map(|arc| [arc.center, arc.a, arc.b])).collect();
         let [[c1, a, b], [c2, ..]] = ends[..] else { return None };
         Some(match which {
             crate::model::SlotSize::Length => [c1, c2],
@@ -92,7 +85,7 @@ impl Project {
         let Constraint::AngleLines { a, b, c, d, .. } = *dim else { return };
         let Some(s) = self.sketches.get_mut(si) else { return };
         let side_of = |s: &crate::model::Sketch, r: &crate::model::SketchRect, x: Id, y: Id| {
-            r.sides.iter().any(|e| matches!(s.entities.iter().find(|q| q.id == *e).map(|q| &q.kind), Some(EntityKind::Line { a, b }) if (*a == x && *b == y) || (*a == y && *b == x)))
+            r.sides.iter().any(|e| s.entity(*e).and_then(|q| q.kind.as_line()).is_some_and(|l| (l.a == x && l.b == y) || (l.a == y && l.b == x)))
         };
         let turned: Vec<crate::model::SketchRect> = s.rects.iter().filter(|r| side_of(s, r, a, b) || side_of(s, r, c, d)).cloned().collect();
         for r in turned {
@@ -205,13 +198,7 @@ impl Project {
     /// and for what a cut projection leaves. Answers how many constraints were laid.
     pub fn relate_lines(&mut self, si: usize, eids: &[Id]) -> usize {
         let Some(s) = self.sketches.get(si) else { return 0 };
-        let lines: Vec<(Id, Id)> = eids
-            .iter()
-            .filter_map(|side| match s.entities.iter().find(|e| e.id == *side)?.kind {
-                EntityKind::Line { a, b } => Some((a, b)),
-                _ => None,
-            })
-            .collect();
+        let lines: Vec<(Id, Id)> = eids.iter().filter_map(|side| s.entity(*side)?.kind.as_line().map(|l| (l.a, l.b))).collect();
         let at = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
         let dirs: Vec<Option<(f64, f64, f64)>> = lines
             .iter()
@@ -432,8 +419,8 @@ impl Project {
             }
             for e in s.entities.iter_mut() {
                 if eids.contains(&e.id) {
-                    if let EntityKind::Circle { r, .. } = &mut e.kind {
-                        *r *= f.abs();
+                    if let Some(c) = e.kind.as_circle() {
+                        e.kind.set_radius(c.r * f.abs());
                     }
                 }
             }
@@ -501,19 +488,9 @@ impl Project {
         let mut new_ids = Vec::new();
         // the tangents of a spline go through the map without its shift: along X to where X went, along Y to where Y went
         let along = |[x, y]: [f64; 2]| [x * (ex - ox) + y * (fx - ox), x * (ey - oy) + y * (fy - oy)];
-        let turn = |v: Option<[f64; 2]>| v.map(along);
+        let kind_map = KindMap { point: &m, turn: &along, facing: if flips { Facing::Flipped } else { Facing::Kept } };
         for e in ents {
-            let nk = match e.kind {
-                EntityKind::Line { a, b } => EntityKind::Line { a: m(a), b: m(b) },
-                EntityKind::Arc { center, a, b, ccw } => EntityKind::Arc { center: m(center), a: m(a), b: m(b), ccw: ccw != flips },
-                EntityKind::Circle { center, r } => EntityKind::Circle { center: m(center), r },
-                // an arc of an ellipse runs by the eccentric angle in the frame of its own axes: a mirror turns the frame over,
-                // and the arc with it, so its winding stays
-                EntityKind::Ellipse { c, ma, mi, span } => EntityKind::Ellipse { c: m(c), ma: m(ma), mi: m(mi), span: span.map(|s| EllipseSpan { from: m(s.from), to: m(s.to), winding: s.winding }) },
-                EntityKind::Spline { nodes, handles, ends } => {
-                    EntityKind::Spline { nodes: nodes.iter().map(|id| m(*id)).collect(), handles: handles.iter().map(|h| Handle { arrive: turn(h.arrive), leave: turn(h.leave) }).collect(), ends }
-                }
-            };
+            let nk = e.kind.copied(&kind_map);
             let id = self.alloc_id();
             self.sketches[si].entities.push(SketchEntity { id, kind: nk, construction: e.construction });
             curves.insert(e.id, id);
@@ -569,16 +546,10 @@ impl Project {
         }
         let m = |id: Id| map.get(&id).copied().unwrap_or(id);
         let mut new_ids = Vec::new();
+        // the clipboard is only shifted: the tangents of a spline stay as they are
+        let kind_map = KindMap { point: &m, turn: &|v| v, facing: Facing::Kept };
         for e in &clip.entities {
-            let nk = match &e.kind {
-                EntityKind::Line { a, b } => EntityKind::Line { a: m(*a), b: m(*b) },
-                EntityKind::Arc { center, a, b, ccw } => EntityKind::Arc { center: m(*center), a: m(*a), b: m(*b), ccw: *ccw },
-                EntityKind::Circle { center, r } => EntityKind::Circle { center: m(*center), r: *r },
-                EntityKind::Ellipse { c, ma, mi, span } => {
-                    EntityKind::Ellipse { c: m(*c), ma: m(*ma), mi: m(*mi), span: span.map(|s| EllipseSpan { from: m(s.from), to: m(s.to), winding: s.winding }) }
-                }
-                EntityKind::Spline { nodes, handles, ends } => EntityKind::Spline { nodes: nodes.iter().map(|id| m(*id)).collect(), handles: handles.clone(), ends: *ends },
-            };
+            let nk = e.kind.copied(&kind_map);
             let id = self.alloc_id();
             self.sketches[si].entities.push(SketchEntity { id, kind: nk, construction: e.construction });
             new_ids.push(id);
@@ -636,8 +607,8 @@ impl Project {
     pub fn pattern_of_entity(&self, si: usize, eid: Id) -> Option<usize> {
         self.sketches.get(si)?.patterns.iter().position(|p| p.instances.contains(&eid))
     }
-    /// Attach cut point `pid` to the entity it actually lies on — excluding the ones already holding it as an
-    /// endpoint or a centre: a line gives `PointOnLine`, a circle or arc gives `PointOnCircle`.
+    /// Attach cut point `pid` to the curve it actually lies on, of whatever kind (`point_on`) - excluding the ones already
+    /// holding it as an endpoint or a centre.
     ///
     /// Without it the cut point is free (along the angle on an arc, along the crossing entity on a line) and
     /// drifts off the intersection on the next solve, so the trimmed geometry wanders and twists and the
@@ -647,59 +618,25 @@ impl Project {
         const TOL: f64 = 5e-3;
         let Some((px, py)) = self.point_xy(si, pid) else { return };
         let Some(s) = self.sketches.get(si) else { return };
-        let owns = |e: &SketchEntity| entity_points(e).contains(&pid);
-        let pt = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-        let mut anchor: Option<Constraint> = None;
-        for e in &s.entities {
-            if owns(e) {
-                continue; // The point already belongs to this entity as an endpoint or a centre, so it is not
-                          // anchored to it again.
-            }
-            match e.kind {
-                EntityKind::Line { a, b } => {
-                    if let (Some((ax, ay)), Some((bx, by))) = (pt(a), pt(b)) {
-                        let (dx, dy) = (bx - ax, by - ay);
-                        let len2 = dx * dx + dy * dy;
-                        if len2 < 1e-12 {
-                            continue;
-                        }
-                        let t = ((px - ax) * dx + (py - ay) * dy) / len2; // Parameter along the segment.
-                        let perp = (dx * (py - ay) - dy * (px - ax)).abs() / len2.sqrt();
-                        if perp < TOL && (-1e-6..=1.0 + 1e-6).contains(&t) {
-                            anchor = Some(Constraint::PointOnLine { p: pid, a, b });
-                            break;
-                        }
-                    }
-                }
-                EntityKind::Circle { center, r } => {
-                    if let Some((cx, cy)) = pt(center) {
-                        if (((px - cx).powi(2) + (py - cy).powi(2)).sqrt() - r).abs() < TOL {
-                            anchor = Some(Constraint::PointOnCircle { p: pid, c: center });
-                            break;
-                        }
-                    }
-                }
-                EntityKind::Arc { center, a, b, ccw } => {
-                    if let (Some((cx, cy)), Some((ax, ay)), Some((bx, by))) = (pt(center), pt(a), pt(b)) {
-                        let r = ((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt();
-                        let (a0, a1) = ((ay - cy).atan2(ax - cx), (by - cy).atan2(bx - cx));
-                        let ang = (py - cy).atan2(px - cx);
-                        if (((px - cx).powi(2) + (py - cy).powi(2)).sqrt() - r).abs() < TOL && angle_in_arc(ang, a0, a1, ccw) {
-                            anchor = Some(Constraint::PointOnCircle { p: pid, c: center });
-                            break;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+        let at = Point2::new(px, py);
+        // the first curve it lies on - within the curve as drawn, not on its line or circle past its ends - other than
+        // those it is a point of
+        let anchor = s
+            .entities
+            .iter()
+            .filter(|e| !entity_points(e).contains(&pid))
+            .find(|e| crate::model::curve::Curve::of(s, e).is_some_and(|c| c.nearest(at).off < TOL))
+            .map(|e| crate::model::point_on(e, pid));
         if let Some(c) = anchor {
-            let dup = self.sketches[si].constraints.iter().any(|x| match (x, &c) {
-                (Constraint::PointOnLine { p: p1, a: a1, b: b1 }, Constraint::PointOnLine { p: p2, a: a2, b: b2 }) => p1 == p2 && ((a1 == a2 && b1 == b2) || (a1 == b2 && b1 == a2)),
-                (Constraint::PointOnCircle { p: p1, c: c1 }, Constraint::PointOnCircle { p: p2, c: c2 }) => p1 == p2 && c1 == c2,
-                _ => false,
-            });
-            if !dup {
+            let same = |x: &Constraint| {
+                std::mem::discriminant(x) == std::mem::discriminant(&c) && {
+                    let (mut u, mut v) = (constraint_point_ids(x), constraint_point_ids(&c));
+                    u.sort_unstable();
+                    v.sort_unstable();
+                    u == v
+                }
+            };
+            if !self.sketches[si].constraints.iter().any(same) {
                 self.sketches[si].constraints.push(c);
             }
         }

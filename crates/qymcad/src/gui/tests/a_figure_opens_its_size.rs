@@ -8,7 +8,6 @@ use crate::gui::hand::Hand;
 use crate::gui::App;
 use qymcad_core::feature::SketchPlane;
 use qymcad_core::geom::Point2;
-use qymcad_core::model::EntityKind;
 
 fn sketch() -> App {
     let mut app = App::default();
@@ -21,7 +20,7 @@ fn sketch() -> App {
 fn slot_length(app: &App) -> f64 {
     let s = &app.project.sketches[0];
     let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y));
-    let centres: Vec<Point2> = s.entities.iter().filter_map(|e| if let EntityKind::Arc { center, .. } = e.kind { at(center) } else { None }).collect();
+    let centres: Vec<Point2> = s.entities.iter().filter_map(|e| if let Some(qymcad_core::model::ArcParts { center, .. }) = e.kind.as_arc() { at(center) } else { None }).collect();
     match centres[..] {
         [a, b] => a.dist(b),
         _ => f64::NAN,
@@ -74,7 +73,7 @@ fn a_double_click_on_the_middle_of_a_side_of_a_polygon_opens_its_radius() {
     hand.double_click2d(40.0, 17.32);
     hand.type_text("40").key(egui::Key::Enter);
     let s = &hand.app.project.sketches[0];
-    let radii: Vec<f64> = s.entities.iter().filter_map(|e| if let EntityKind::Circle { r, .. } = e.kind { Some(r) } else { None }).collect();
+    let radii: Vec<f64> = s.entities.iter().filter_map(|e| if let Some(qymcad_core::model::CircleParts { r, .. }) = e.kind.as_circle() { Some(r) } else { None }).collect();
     let status = hand.app.status.clone();
     assert!(radii.len() == 1 && (radii[0] - 40.0).abs() < 1e-6, "the circle of the polygon is of radius {radii:?}, not 40; the status line says {status:?}");
 }

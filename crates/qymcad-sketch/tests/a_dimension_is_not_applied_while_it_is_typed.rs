@@ -128,8 +128,8 @@ fn erasing_the_diameter_does_not_resize_the_circle_until_it_is_finished() {
     b.dim.focus = true;
     b.view = qymcad_ui_state::View2d { center: egui::Vec2::ZERO, scale: 4.0, initialized: true, fit: 4.0 };
 
-    let radius = |b: &qymcad_ui_state::Bench| match b.project.sketches[si].entities[0].kind {
-        qymcad_core::model::EntityKind::Circle { r, .. } => r,
+    let radius = |b: &qymcad_ui_state::Bench| match b.project.sketches[si].entities[0].kind.as_circle() {
+        Some(qymcad_core::model::CircleParts { r, .. }) => r,
         _ => f64::NAN,
     };
     let ctx = egui::Context::default();

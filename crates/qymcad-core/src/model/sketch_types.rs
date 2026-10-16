@@ -214,7 +214,7 @@ impl Sketch {
             return Default::default();
         }
         let drawn: std::collections::HashSet<Id> = self.entities.iter().flat_map(entity_points).collect();
-        let cut = |x: Id, y: Id| self.entities.iter().any(|e| matches!(e.kind, EntityKind::Line { a, b } if (a == x && b == y) || (a == y && b == x)));
+        let cut = |x: Id, y: Id| self.entities.iter().any(|e| e.kind.as_line().is_some_and(|crate::model::LineParts { a, b }| (a == x && b == y) || (a == y && b == x)));
         let at = |id: Id| self.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
         // whether `p` lies on the line through `a` and `b` beyond its ends, by more than a millionth of its length
         let past_the_ends = |p: Id, a: Id, b: Id| match (at(p), at(a), at(b)) {
@@ -234,7 +234,7 @@ impl Sketch {
                 Constraint::PointOnLine { p, a, b } => !drawn.contains(&p) && !self.system_ids().contains(&p) && cut(a, b) && past_the_ends(p, a, b),
                 Constraint::Equal { a, b, c, d } => a == c && !drawn.contains(&a) && cut(b, d),
                 Constraint::Tangent { a, b, c, .. } => {
-                    self.entities.iter().any(|e| matches!(e.kind, EntityKind::Arc { center, a: x, b: y, .. } if center == c && [x, y].iter().any(|q| *q == a || *q == b)))
+                    self.entities.iter().any(|e| e.kind.as_arc().is_some_and(|crate::model::ArcParts { center, a: x, b: y, .. }| center == c && [x, y].iter().any(|q| *q == a || *q == b)))
                 }
                 _ => false,
             })
@@ -246,7 +246,8 @@ impl Sketch {
     /// or the chord between its two ends. Where it does, no passive radius is labelled beside it: a fillet sized by its
     /// chord or its arc length showed an R it does not hold by as well.
     pub fn rim_sized(&self, centre: Id) -> bool {
-        let chord = |x: Id, y: Id| self.entities.iter().any(|e| matches!(e.kind, EntityKind::Arc { center, a, b, .. } if center == centre && ((a == x && b == y) || (a == y && b == x))));
+        let chord =
+            |x: Id, y: Id| self.entities.iter().any(|e| e.kind.as_arc().is_some_and(|crate::model::ArcParts { center, a, b, .. }| center == centre && ((a == x && b == y) || (a == y && b == x))));
         self.constraints.iter().any(|c| match *c {
             Constraint::Diameter { c, .. } | Constraint::ArcLength { c, .. } => c == centre,
             Constraint::Distance { a, b, .. } => chord(a, b),
@@ -356,13 +357,13 @@ impl Sketch {
         if !rect.is_empty() {
             return rect;
         }
-        if let Some((ma, mi)) = self.entities.iter().find_map(|e| match e.kind {
-            EntityKind::Ellipse { c, ma, mi, .. } if c == centre => Some((ma, mi)),
+        if let Some((ma, mi)) = self.entities.iter().find_map(|e| match e.kind.as_ellipse() {
+            Some(crate::model::EllipseParts { c, ma, mi, .. }) if c == centre => Some((ma, mi)),
             _ => None,
         }) {
             return vec![ma, mi];
         }
-        let Some(arc) = self.entities.iter().find(|e| matches!(e.kind, EntityKind::Arc { center, .. } if center == centre)) else { return Vec::new() };
+        let Some(arc) = self.entities.iter().find(|e| e.kind.as_arc().is_some_and(|crate::model::ArcParts { center, .. }| center == centre)) else { return Vec::new() };
         let touches = self.constraints.iter().any(|c| matches!(*c, Constraint::Tangent { c, .. } if c == centre));
         let partner = self.constraints.iter().find_map(|c| match *c {
             Constraint::EqualRadius { c1, c2 } if c1 == centre => Some(c2),
@@ -391,8 +392,8 @@ impl Sketch {
             // a fillet: held by the lines it touches
             (true, None) => Vec::new(),
             // an arc of its own: its two ends
-            (false, None) => match arc.kind {
-                EntityKind::Arc { a, b, .. } => vec![a, b],
+            (false, None) => match arc.kind.as_arc() {
+                Some(crate::model::ArcParts { a, b, .. }) => vec![a, b],
                 _ => Vec::new(),
             },
         }
@@ -663,78 +664,6 @@ pub(crate) struct SplineNow {
 pub struct SplineHandle {
     pub node: Point2,
     pub end: Point2,
-}
-
-/// A CURVE AS A CONSTRAINT SEES IT: by the points it stands on, so the solver moves the curve by moving them - a line by
-/// its ends, a circle or an arc by its centre (its radius is the variable of that centre), an ellipse by its centre and
-/// the ends of its axes, a spline by its nodes with the handles it has.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum CurveRef {
-    /// a point, where a dimension is measured from a point to a curve
-    Point {
-        p: Id,
-    },
-    Line {
-        a: Id,
-        b: Id,
-    },
-    Round {
-        c: Id,
-    },
-    /// an arc as it is drawn, between its ends, where a dimension measures to the arc itself and not its circle
-    Arc {
-        c: Id,
-        a: Id,
-        b: Id,
-        winding: crate::feature::Winding,
-    },
-    Oval {
-        c: Id,
-        ma: Id,
-        mi: Id,
-    },
-    Spline {
-        nodes: Vec<Id>,
-        handles: Vec<Handle>,
-        ends: crate::feature::Ends,
-    },
-}
-
-impl CurveRef {
-    /// The points the curve stands on.
-    pub fn points(&self) -> Vec<Id> {
-        match self {
-            CurveRef::Point { p } => vec![*p],
-            CurveRef::Line { a, b } => vec![*a, *b],
-            CurveRef::Round { c } => vec![*c],
-            CurveRef::Arc { c, a, b, .. } => vec![*c, *a, *b],
-            CurveRef::Oval { c, ma, mi } => vec![*c, *ma, *mi],
-            CurveRef::Spline { nodes, .. } => nodes.clone(),
-        }
-    }
-
-    /// Every point the curve stands on, handed to `f` to read or change.
-    pub fn each_point_mut(&mut self, mut f: impl FnMut(&mut Id)) {
-        match self {
-            CurveRef::Point { p } => f(p),
-            CurveRef::Line { a, b } => {
-                f(a);
-                f(b);
-            }
-            CurveRef::Round { c } => f(c),
-            CurveRef::Arc { c, a, b, .. } => {
-                f(c);
-                f(a);
-                f(b);
-            }
-            CurveRef::Oval { c, ma, mi } => {
-                f(c);
-                f(ma);
-                f(mi);
-            }
-            CurveRef::Spline { nodes, .. } => nodes.iter_mut().for_each(f),
-        }
-    }
 }
 
 /// A sketch constraint or dimension, expressed through point ids. Solved by the sketch solver.

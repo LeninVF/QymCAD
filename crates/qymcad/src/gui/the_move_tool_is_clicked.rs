@@ -9,7 +9,6 @@ mod tests {
     use super::super::hand::Hand;
     use super::super::{App, Sel};
     use qymcad_core::feature::{Purpose, SketchPlane};
-    use qymcad_core::model::EntityKind;
 
     /// A running window with a sketch open for editing and one free line in it, from (10,0) to (30,0).
     ///
@@ -35,8 +34,8 @@ mod tests {
         let mut out: Vec<[(f64, f64); 2]> = sk
             .entities
             .iter()
-            .filter_map(|e| match e.kind {
-                EntityKind::Line { a, b } => Some([at(a)?, at(b)?]),
+            .filter_map(|e| match e.kind.as_line() {
+                Some(qymcad_core::model::LineParts { a, b }) => Some([at(a)?, at(b)?]),
                 _ => None,
             })
             .map(|mut l| {
