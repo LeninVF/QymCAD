@@ -181,7 +181,7 @@ pub(crate) const CIRCLE_BY_TWO: Outcome = Outcome::Sketch {
     under: &[(10.0, 0.0, Under::Circle), (5.0, 3.0, Under::Nothing)],
 };
 
-/// A CIRCLE: a centre and a point on it, two ends of a diameter, or tangent to what is drawn.
+/// A CIRCLE: a centre and a point on it, two ends of a diameter, touching two curves drawn, or three points on it.
 pub static CIRCLE: Tool = Tool {
     id: "sketch.circle",
     flow: Flow::Drawing(&[(0.0, 0.0), (10.0, 0.0)], Finish::LastClick),
@@ -197,8 +197,9 @@ pub static CIRCLE: Tool = Tool {
     modes: &[&[
         Mode { word: "opt-circle-centre-radius", clicks: None, outcome: Some(CIRCLE_BY_RADIUS) },
         Mode { word: "opt-circle-2pt", clicks: None, outcome: Some(CIRCLE_BY_TWO) },
-        // there is nothing drawn to be tangent to, so the tool must say so rather than draw anything
-        Mode { word: "opt-tangent", clicks: None, outcome: None },
+        Mode { word: "opt-rect-3pt", clicks: Some(&[(10.0, 0.0), (0.0, 10.0), (-10.0, 0.0)]), outcome: Some(CIRCLE_BY_THREE) },
+        // there is nothing drawn to touch, so the tool must say so rather than draw anything
+        Mode { word: "opt-tangent-m", clicks: None, outcome: None },
     ]],
     result: CIRCLE_BY_RADIUS,
     node: "Sketch",
@@ -353,55 +354,20 @@ pub static ARC: Tool = Tool {
 };
 
 /// A CIRCLE THROUGH THREE POINTS: the circle of radius 10 about the origin, through (10, 0), (0, 10), (-10, 0).
-pub static CIRCLE3: Tool = Tool {
-    id: "sketch.circle3",
-    flow: Flow::Drawing(&[(10.0, 0.0), (0.0, 10.0), (-10.0, 0.0)], Finish::LastClick),
-    title: "tool-circle-3pt",
-    entries: &[Entry::Button("tb-circle-3pt"), Entry::Search("cmdname-circle-3pt")],
-    other: (Entry::Button("tb-line-hint"), "tool-line"),
-    fixture: Fixture::SketchOnXy,
-    picks: &[],
-    pick_trial: &[],
-    wrong_picks: &[],
-    words: &[],
-    fields: &[],
-    modes: &[],
-    result: Outcome::Sketch {
-        points: 1,
-        lines: 0,
-        arcs: 0,
-        circles: 1,
-        ellipses: 0,
-        splines: 0,
-        texts: 0,
-        notes: 0,
-        constraints: None,
-        dof: None,
-        box_of: None,
-        size_of: None,
-        under: &[(0.0, -10.0, Under::Circle), (0.0, 0.0, Under::Point), (5.0, 5.0, Under::Nothing)],
-    },
-    node: "Sketch",
-    undo: "sk-circle",
-    undo_steps: 1,
-    stays: true,
-    upstream: None,
-    dependency: None,
-    contexts: &[Context::SecondPart],
-    refusal: None,
-    budget: (10, 2000),
-    help: "sketch/03-circle",
-    not_applicable: &[
-        (2, "the circle through three points has no mode: three clicks are the whole of it"),
-        DRAWS_WITHOUT_FIELDS[0],
-        DRAWS_WITHOUT_FIELDS[1],
-        DRAWS_WITHOUT_FIELDS[2],
-        DRAWS_WITHOUT_FIELDS[3],
-        DRAWS_WITHOUT_FIELDS[4],
-        DRAWS_WITHOUT_FIELDS[5],
-        DRAWS_WITHOUT_FIELDS[6],
-        DRAWS_WITHOUT_FIELDS[7],
-    ],
+pub(crate) const CIRCLE_BY_THREE: Outcome = Outcome::Sketch {
+    points: 1,
+    lines: 0,
+    arcs: 0,
+    circles: 1,
+    ellipses: 0,
+    splines: 0,
+    texts: 0,
+    notes: 0,
+    constraints: None,
+    dof: None,
+    box_of: None,
+    size_of: None,
+    under: &[(0.0, -10.0, Under::Circle), (0.0, 0.0, Under::Point), (5.0, 5.0, Under::Nothing)],
 };
 
 /// A polygon of `n` sides about the origin: its corners, the circle they sit on, and the corner clicked at (15, 0).

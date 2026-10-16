@@ -103,7 +103,6 @@ pub fn tool_options_bar(bc: &mut qymcad_ui_state::BarCtx, ui: &mut egui::Ui) {
                 7 => qymcad_i18n::tr("tool-slot"),
                 8 => qymcad_i18n::tr("sk-ellipse"),
                 9 => qymcad_i18n::tr("sk-spline"),
-                10 => qymcad_i18n::tr("tool-circle-3pt"),
                 _ => "—".to_string(),
             }
         } else {
@@ -179,20 +178,28 @@ pub fn tool_options_bar(bc: &mut qymcad_ui_state::BarCtx, ui: &mut egui::Ui) {
             if bc.armed.draw_kind() == 3 {
                 ui.separator();
                 ui.label(qymcad_i18n::tr("opt-circle-mode"));
-                if ui.selectable_label(bc.tool_prefs.circ_mode == 0, qymcad_i18n::tr("opt-circle-centre-radius")).clicked() {
-                    bc.tool_prefs.circ_mode = 0;
-                    bc.tool.pts.clear();
-                    bc.tool.circ_tan = None;
+                // centre and radius, two points, touching two curves, three points: the modes of one tool, as the arc's
+                for &ModeWord { mode, word, hint } in CIRCLE_MODES {
+                    let label = ui.selectable_label(bc.tool_prefs.circ_mode == mode, qymcad_i18n::tr(word));
+                    let label = match hint {
+                        Some(h) => label.on_hover_text(qymcad_i18n::tr(h)),
+                        None => label,
+                    };
+                    if label.clicked() {
+                        bc.tool_prefs.circ_mode = mode;
+                        bc.tool.pts.clear();
+                        bc.tool.circ_tan.clear();
+                    }
                 }
-                if ui.selectable_label(bc.tool_prefs.circ_mode == 1, qymcad_i18n::tr("opt-circle-2pt")).on_hover_text(qymcad_i18n::tr("opt-circle-diameter-ends")).clicked() {
-                    bc.tool_prefs.circ_mode = 1;
-                    bc.tool.pts.clear();
-                    bc.tool.circ_tan = None;
-                }
-                if ui.selectable_label(bc.tool_prefs.circ_mode == 2, qymcad_i18n::tr("opt-tangent-m")).on_hover_text(qymcad_i18n::tr("opt-tangent-hint")).clicked() {
-                    bc.tool_prefs.circ_mode = 2;
-                    bc.tool.pts.clear();
-                    bc.tool.circ_tan = None;
+                if bc.tool_prefs.circ_mode == 2 {
+                    ui.label(qymcad_i18n::tr("opt-radius"));
+                    bc.tool_prefs.circ_r = qymcad_ui_state::num_or_expr(
+                        &mut qymcad_ui_state::ExprBarCtx { bar_exprs: &mut *bc.bar_exprs, project: &*bc.project, scheme: &*bc.scheme },
+                        ui,
+                        "sk_circle_touching_r",
+                        bc.tool_prefs.circ_r,
+                        qymcad_ui_state::NumFormat { lo: 0.01, hi: 10000.0, integer: false, suffix: &qymcad_i18n::tr("unit-mm-suffix"), nonzero: true },
+                    );
                 }
             }
             if bc.armed.draw_kind() == 4 {
@@ -439,3 +446,18 @@ pub fn tool_options_bar(bc: &mut qymcad_ui_state::BarCtx, ui: &mut egui::Ui) {
         });
     });
 }
+
+/// A MODE OF A DRAWING TOOL ON ITS BAR: its number, its word, and the hint over it.
+struct ModeWord {
+    mode: u8,
+    word: &'static str,
+    hint: Option<&'static str>,
+}
+
+/// THE MODES OF THE CIRCLE: a centre and a radius, the two ends of a diameter, touching two curves, three points.
+const CIRCLE_MODES: &[ModeWord] = &[
+    ModeWord { mode: 0, word: "opt-circle-centre-radius", hint: None },
+    ModeWord { mode: 1, word: "opt-circle-2pt", hint: Some("opt-circle-diameter-ends") },
+    ModeWord { mode: 2, word: "opt-tangent-m", hint: Some("opt-tangent-hint") },
+    ModeWord { mode: 3, word: "opt-rect-3pt", hint: Some("opt-circle-3pt-hint") },
+];

@@ -31,7 +31,6 @@ contract!(rect, qymcad_acceptance::tools::sketch::RECT);
 contract!(circle, qymcad_acceptance::tools::sketch::CIRCLE);
 contract!(point, qymcad_acceptance::tools::sketch::POINT);
 contract!(arc, qymcad_acceptance::tools::sketch::ARC);
-contract!(circle3, qymcad_acceptance::tools::sketch::CIRCLE3);
 contract!(polygon, qymcad_acceptance::tools::sketch::POLYGON);
 contract!(slot, qymcad_acceptance::tools::sketch::SLOT);
 contract!(ellipse, qymcad_acceptance::tools::sketch::ELLIPSE);

@@ -64,7 +64,6 @@ pub const SKETCH: &[(&str, u8, &str)] = &[
     ("sk", 2, "sketch/02-rect"),
     ("sk", 3, "sketch/03-circle"),
     // a circle by three points is the same tool set a different way: one article for both
-    ("sk", 10, "sketch/03-circle"),
     ("sk", 4, "sketch/04-arc"),
     ("sk", 5, "sketch/05-point"),
     ("sk", 6, "sketch/06-polygon"),

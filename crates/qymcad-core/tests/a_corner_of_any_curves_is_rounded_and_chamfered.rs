@@ -198,3 +198,72 @@ fn every_pair_of_kinds_at_a_vertex_is_rounded_and_chamfered() {
     }
     assert!(failures.is_empty(), "{} of 48:\n{}", failures.len(), failures.join("\n"));
 }
+
+/// HOW FAR THE FILLET OF THE SKETCH STRAYS FROM TOUCHING ITS SIDES: the arc laid last, each of its ends on a side and
+/// that side running square to its radius there; and how far apart its ends stand.
+struct Held {
+    off: f64,
+    lean: f64,
+    apart: f64,
+}
+
+fn held(p: &Project, si: usize) -> Option<Held> {
+    let s = &p.sketches[si];
+    // the fillet: the arc laid last
+    let arc = s.entities.iter().filter(|e| e.kind.as_arc().is_some()).max_by_key(|e| e.id)?;
+    let curve = Curve::of(s, arc)?;
+    let Curve::Round { centre, .. } = curve else { return None };
+    let [a, b] = entity_ends(arc)?;
+    let mut out = Held { off: 0.0, lean: 0.0, apart: curve.at(0.0).dist(curve.at(1.0)) };
+    for (q, id) in curve.ends().into_iter().zip([a, b]) {
+        let side = s.entities.iter().find(|e| e.id != arc.id && entity_ends(e).is_some_and(|x| x.contains(&id)))?;
+        let c = Curve::of(s, side)?;
+        let t = if c.at(0.0).dist(q) < c.at(1.0).dist(q) { 0.0 } else { 1.0 };
+        let (u, radial) = (c.tangent(t), q - centre);
+        out.off = out.off.max(c.at(t).dist(q));
+        out.lean = out.lean.max((u.x * radial.x + u.y * radial.y).abs() / radial.x.hypot(radial.y));
+    }
+    Some(out)
+}
+
+/// A FILLET OF ANY TWO CURVES HOLDS ITS CORNER WHEN A SIDE IS DRAGGED: every pair rounded R2, the far end of the first
+/// side led 1 right and 1.5 down in six frames as the window drags it and let go - the arc still touches both sides
+/// where it ends on them, and its ends stay apart.
+///
+/// Reported behaviour: a spline and a line rounded, the end of the line dragged - the arc shrank to nothing and was
+/// drawn as a circle, its ends one point: the sharp of the corner was held on the spline itself, not on its way past its
+/// end, and the arc was not held touching the spline.
+#[test]
+fn every_fillet_holds_its_corner_when_a_side_is_dragged() {
+    let kinds = ["line", "arc", "open spline", "arc of an ellipse"];
+    let mut failures = Vec::new();
+    for first in kinds {
+        for second in kinds {
+            let mut corner = laid([first, second]);
+            let (si, pid) = (corner.si, corner.vertex);
+            if !corner.p.fillet_at_vertex(si, pid, 2.0) {
+                failures.push(format!("{first} to {second}: refused"));
+                continue;
+            }
+            // the far end of the first side: the end of the entity laid first that the arc does not end at
+            let s = &corner.p.sketches[si];
+            let arc_ends: Vec<Id> = s.entities.iter().filter(|e| e.kind.as_arc().is_some()).max_by_key(|e| e.id).and_then(entity_ends).map(|e| e.to_vec()).unwrap_or_default();
+            let far = s.entities.first().and_then(entity_ends).and_then(|ends| ends.into_iter().find(|id| !arc_ends.contains(id)));
+            let Some((far, at)) = far.and_then(|id| s.point(id).map(|q| (id, p2([q.x, q.y])))) else {
+                failures.push(format!("{first} to {second}: no far end"));
+                continue;
+            };
+            for k in 1..=6 {
+                let f = k as f64 / 6.0;
+                corner.p.solve_sketch_drag_fast(si, Some((far, at.x + f, at.y - 1.5 * f)));
+            }
+            corner.p.solve_sketch(si);
+            match held(&corner.p, si) {
+                Some(Held { off, lean, apart }) if off < 1e-4 && lean < 1e-3 && apart > 0.5 => {}
+                Some(Held { off, lean, apart }) => failures.push(format!("{first} to {second}: the arc ends {off:.2e} off its sides, leans {lean:.2e} off touching, its ends {apart:.3} apart")),
+                None => failures.push(format!("{first} to {second}: no fillet left")),
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} of 16:\n{}", failures.len(), failures.join("\n"));
+}

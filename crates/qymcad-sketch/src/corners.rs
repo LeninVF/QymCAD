@@ -57,11 +57,7 @@ pub fn corner_colour(scheme: &qymcad_ui_state::SchemeUi, fixed: bool) -> egui::C
 /// already taken the buffer out of the tool by the time the preview was drawn - so the read found an empty string,
 /// the value could not be read, and nothing was drawn at all. The preview showed nothing whatever the radius was,
 /// amber or violet.
-pub(crate) fn draw_corner_preview(cc: &qymcad_ui_state::CornerCtx, ctx: &egui::Context, rect: Rect, si: usize, corners: &[Shown], chamfer: bool, value: f64) {
-    let v = value;
-    if v <= 1e-6 {
-        return;
-    }
+pub(crate) fn draw_corner_preview(cc: &qymcad_ui_state::CornerCtx, ctx: &egui::Context, rect: Rect, si: usize, corners: &[Drawn]) {
     let sh = qymcad_ui_state::Sheet { view: *cc.view, rect };
     let at = |p: [f64; 2]| sh.at(qymcad_core::geom::Point2::new(p[0], p[1]));
     let (col_fixed, col_new) = (corner_colour(cc.scheme, true), corner_colour(cc.scheme, false));
@@ -69,9 +65,7 @@ pub(crate) fn draw_corner_preview(cc: &qymcad_ui_state::CornerCtx, ctx: &egui::C
     // WHOLE SET, so that a set of corners is drawn as the one thing being done rather than as several.
     // UNDER THE BOXES: the box of the value is a window over the sheet, and a preview drawn over it ran across its field
     let layer = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new(("cornerpreview", si)))).with_clip_rect(rect);
-    for &Shown { point: pid, pair, in_set } in corners {
-        let Some(pair) = pair else { continue };
-        let Some(b) = cc.project.corner_blend(si, pid, pair, corner_cut(cc, chamfer, v)) else { continue };
+    for &Drawn { blend: b, in_set } in corners {
         // THE COLOUR IS A CONSEQUENCE OF WHETHER THE CORNER IS IN THE SET, not a thing of its own: a corner that is
         // in it keeps the two lines it was made by and is drawn as such, and the one the cursor is pointing at -
         // the only corner a click can still make - is drawn apart from them.
@@ -91,6 +85,36 @@ pub(crate) fn draw_corner_preview(cc: &qymcad_ui_state::CornerCtx, ctx: &egui::C
             layer.circle_stroke(at(e), 3.0, egui::Stroke::new(1.4, col));
         }
     }
+}
+
+/// A CORNER TO DRAW: what the cut would leave, and whether it is in the set.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Drawn {
+    blend: qymcad_core::model::CornerBlend,
+    in_set: bool,
+}
+
+/// THE CORNERS SHOWN AS THE CUT OF `value` WOULD LEAVE THEM; a value too big for a corner leaves it out.
+fn drawn(cc: &qymcad_ui_state::CornerCtx, si: usize, corners: &[Shown], cut: qymcad_core::model::CornerCut) -> Vec<Drawn> {
+    corners.iter().filter_map(|&Shown { point, pair, in_set }| Some(Drawn { blend: cc.project.corner_blend(si, point, pair?, cut)?, in_set })).collect()
+}
+
+/// THE CORNER OF A CROSSING THE POINTER STANDS IN, before the crossing is cut: the crossing of two curves within the zone
+/// of a point, or - of two chosen curves that cross, the pointer over no curve - their crossing nearest the pointer, and
+/// the corner of the quarter the pointer is in. What a click there cuts and names.
+fn crossing_hover(cc: &qymcad_ui_state::CornerCtx, ctx: &egui::Context, rect: Rect, si: usize, cut: qymcad_core::model::CornerCut) -> Option<qymcad_core::model::CornerBlend> {
+    let p = ctx.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p))?;
+    let w = qymcad_ui_state::to_world(cc.view, rect, p);
+    let reach = f64::from(qymcad_ui_state::corner_zone_px(cc.set)) / f64::from(cc.view.scale);
+    let chosen: Vec<Id> = cc.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
+    let of_chosen = || {
+        if qymcad_pick::edit_target(&cc.pick(), rect, p, si).is_some() {
+            return None;
+        }
+        chosen.iter().enumerate().find_map(|(i, &one)| chosen[i + 1..].iter().find_map(|&other| cc.project.crossing_of(si, [one, other], w)))
+    };
+    let crossing = cc.project.crossing_near(si, w, reach).or_else(of_chosen)?;
+    cc.project.crossing_blend(si, crossing, w, cut)
 }
 
 /// THE CUT THE TOOL IN HAND MAKES OF `value`: a fillet of that size in the way of the bar - a radius, a chord or an
@@ -142,7 +166,7 @@ pub(crate) fn corner_point_name(sk: &qymcad_ui_state::SketchCtx, si: usize, pid:
 pub(crate) fn corner_hover_under(cc: &qymcad_ui_state::CornerCtx, ctx: &egui::Context, rect: Rect, si: usize) -> Option<(Id, (Id, Id))> {
     let p = ctx.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p))?;
     let zone = qymcad_ui_state::corner_zone_px(cc.set);
-    let is_corner = |id: Id| cc.project.vertex_pairs(si, id).into_iter().any(|(a, b)| cc.project.corner_of_pair(si, a, b).is_some());
+    let is_corner = |id: Id| cc.project.is_corner_point(si, id);
     let id = qymcad_pick::nearest_point_within_where(&cc.pick(), rect, p, si, zone, is_corner)?;
     let w = qymcad_ui_state::to_world(cc.view, rect, p);
     let pair = cc.corner.set.read_at_point(cc.project, si, id, Some((w.x, w.y)))?;
@@ -156,6 +180,9 @@ pub(crate) fn corner_hover_under(cc: &qymcad_ui_state::CornerCtx, ctx: &egui::Co
 /// The first corner of the tool was therefore the one corner a person could not see before naming, and the whole
 /// point of the amber is to see it first.
 pub(crate) fn draw_the_corner_preview(cc: &qymcad_ui_state::CornerCtx, ctx: &egui::Context, rect: Rect) {
+    if value_for_preview(cc) <= 1e-6 {
+        return;
+    }
     let Some((si, _, chamfer)) = cc.corner.at else {
         // **NOTHING OF A CORNER IS DRAWN WITH ANOTHER TOOL IN HAND.** Without the field there is nothing but the
         // amber preview, and it belongs to the fillet and to the chamfer alone: the corner of a drawing lies under
@@ -164,8 +191,9 @@ pub(crate) fn draw_the_corner_preview(cc: &qymcad_ui_state::CornerCtx, ctx: &egu
             return;
         }
         let qymcad_ui_state::Sel::Sketch(si) = *cc.sel else { return };
-        let Some((pid, pair)) = corner_hover_under(cc, ctx, rect, si) else { return };
-        draw_corner_preview(cc, ctx, rect, si, &[Shown { point: pid, pair: Some(pair), in_set: false }], cc.armed.click_op() == 5, value_for_preview(cc));
+        let cut = corner_cut(cc, cc.armed.click_op() == 5, value_for_preview(cc));
+        let hovered = corner_hover_under(cc, ctx, rect, si).and_then(|(pid, pair)| cc.project.corner_blend(si, pid, pair, cut)).or_else(|| crossing_hover(cc, ctx, rect, si, cut));
+        draw_corner_preview(cc, ctx, rect, si, &hovered.map(|blend| Drawn { blend, in_set: false }).into_iter().collect::<Vec<_>>());
         return;
     };
     // WHAT IS DRAWN IS THE SET PLUS THE ONE THE CURSOR IS POINTING AT, and the colour is a consequence of which of
@@ -175,12 +203,19 @@ pub(crate) fn draw_the_corner_preview(cc: &qymcad_ui_state::CornerCtx, ctx: &egu
     // a corner following the pointer is not named yet, and is drawn so
     let in_set = cc.corner.aim == qymcad_ui_state::Aim::Fixed;
     let mut shown: Vec<Shown> = cc.corner.set.standing().iter().map(|&(point, pair)| Shown { point, pair: Some(pair), in_set }).collect();
-    if let Some((point, pair)) = corner_hover_under(cc, ctx, rect, si) {
+    let hovered = corner_hover_under(cc, ctx, rect, si);
+    if let Some((point, pair)) = hovered {
         if !shown.iter().any(|c| c.point == point) {
             shown.push(Shown { point, pair: Some(pair), in_set: false });
         }
     }
-    draw_corner_preview(cc, ctx, rect, si, &shown, chamfer, value_for_preview(cc));
+    let cut = corner_cut(cc, chamfer, value_for_preview(cc));
+    let mut all = drawn(cc, si, &shown, cut);
+    // a crossing not cut yet, where the pointer is over no point of a corner and no corner follows it
+    if hovered.is_none() && cc.corner.aim == qymcad_ui_state::Aim::Fixed {
+        all.extend(crossing_hover(cc, ctx, rect, si, cut).map(|blend| Drawn { blend, in_set: false }));
+    }
+    draw_corner_preview(cc, ctx, rect, si, &all);
 }
 
 /// THE VALUE THE PREVIEW IS DRAWN WITH: what is in the field, or the radius of the bar where there is no field yet.

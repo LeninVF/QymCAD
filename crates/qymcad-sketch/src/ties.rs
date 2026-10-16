@@ -47,8 +47,9 @@ pub(crate) fn tie_the_clicked_points(project: &mut Project, view: qymcad_ui_stat
 
 /// THE POINTS A DRAWING TOOL PUT DOWN, TIED TO WHAT THEY LANDED ON, whatever the tool. Of the points a click made
 /// (`made`), the one standing at each place clicked for the shape is tied as the snap there showed it: on a point of the
-/// sketch or on the origin - coincident; on a line - on it, or at its middle; on a circle or an arc - on it; on the X or
-/// Y axis - on the axis; where two of those cross - on both. A snap puts the point exactly on its target, so a point
+/// sketch or on the origin - coincident; on a line - on it, or at its middle; on a circle or an arc - on it; on a centre
+/// line of a circle - level or upright of its centre; on the X or Y axis - on the axis; where two of those cross - on
+/// both. A snap puts the point exactly on its target, so a point
 /// within half a pixel of a curve stands on it. Reported behaviour: the snap was shown and the point was put down where
 /// the pointer was, held by nothing - an end on a circle, a centre, the axes and the origin, for every tool but the line.
 pub(crate) fn tie_what_landed(project: &mut Project, view: qymcad_ui_state::View2d, si: usize, clicks: &[Point2], made: &std::collections::HashSet<Id>) {
@@ -105,6 +106,19 @@ pub(crate) fn tie_what_landed(project: &mut Project, view: qymcad_ui_state::View
                 Some((l, ..)) => Constraint::Midpoint { p: point, a: l.a, b: l.b },
                 None => qymcad_core::model::point_on(e, point),
             });
+        }
+        // A POINT ON A CENTRE LINE OF A CIRCLE is held on it as on a line: level with the centre on the level one, upright
+        // of it on the upright one, where the centre line runs (`circle_centre_lines`, a quarter of the radius past the
+        // rim). Snapped there and held by nothing, the start of a line on a quadrant, held to the rim alone, slid along it
+        for k in s.entities.iter().filter(|e| !qymcad_core::model::entity_points(e).iter().any(|id| made.contains(id))).filter_map(|e| e.kind.as_circle()) {
+            let Some(c) = pt(k.center) else { continue };
+            let runs = k.r * 1.25;
+            if (at.y - c.y).abs() <= reach && (at.x - c.x).abs() <= runs && !near(c) {
+                ties.push(Constraint::Horizontal { a: k.center, b: point });
+            }
+            if (at.x - c.x).abs() <= reach && (at.y - c.y).abs() <= runs && !near(c) {
+                ties.push(Constraint::Vertical { a: k.center, b: point });
+            }
         }
         for (axis, off) in [(0, at.y), (1, at.x)] {
             if off.abs() <= reach {

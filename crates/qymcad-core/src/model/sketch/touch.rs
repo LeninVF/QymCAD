@@ -3,7 +3,39 @@
 //! straight one of them goes on along.
 use super::*;
 
+/// A CIRCLE OF A RADIUS TOUCHING TWO CURVES, asked for near a point: the curves, the radius, and the point the centre is
+/// sought nearest to.
+#[derive(Clone, Copy, Debug)]
+pub struct Touching {
+    pub curves: [Id; 2],
+    pub r: f64,
+    pub near: Point2,
+}
+
 impl Project {
+    /// WHERE THE CENTRE OF THE CIRCLE OF `ask` STANDS: of the circles of its radius touching both its curves, the one
+    /// whose centre is nearest its point. `None` where no circle of the radius touches both.
+    pub fn circle_touching(&self, si: usize, ask: Touching) -> Option<Point2> {
+        let s = self.sketches.get(si)?;
+        let curve = |id: Id| s.entity(id).and_then(|e| crate::model::curve::Curve::of(s, e));
+        let [a, b] = ask.curves;
+        let (ca, cb) = (curve(a)?, curve(b)?);
+        crate::model::curve::centres_touching([&ca, &cb], ask.r).into_iter().min_by(|x, y| x.dist(ask.near).total_cmp(&y.dist(ask.near)))
+    }
+
+    /// THE CIRCLE OF `ask` LAID and held touching both its curves (`tangency`); answers its id, `None` where no circle of
+    /// the radius touches both.
+    pub fn add_circle_touching(&mut self, si: usize, ask: Touching, purpose: crate::feature::Purpose) -> Option<Id> {
+        let c = self.circle_touching(si, ask)?;
+        let eid = self.add_circle_entity(si, c.x, c.y, ask.r, purpose);
+        for other in ask.curves {
+            let touch = self.tangency(si, [eid, other]);
+            self.sketches[si].constraints.extend(touch);
+        }
+        self.solve_sketch(si);
+        Some(eid)
+    }
+
     /// THE CONSTRAINTS THAT MAKE CURVES `one` AND `other` OF SKETCH `si` TOUCH: the touching itself, with the place it
     /// stands at now, and an end of either put on the other where the place is past that end. Empty where either is no
     /// curve of the sketch.

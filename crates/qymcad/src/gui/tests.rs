@@ -92,6 +92,18 @@ mod a_spline_survives_a_circle_deleted_by_hand;
 mod a_reference_size_reads_the_curve_as_it_stands;
 
 #[cfg(test)]
+mod a_corner_at_a_crossing_keeps_its_two_sides;
+
+#[cfg(test)]
+mod a_fillet_of_a_spline_holds_when_dragged;
+
+#[cfg(test)]
+mod the_offset_of_a_closed_spline_is_light;
+
+#[cfg(test)]
+mod a_point_snapped_to_a_centre_line_is_held_on_it;
+
+#[cfg(test)]
 mod a_circle_shows_its_centre_lines;
 
 #[cfg(test)]
@@ -105,3 +117,9 @@ mod a_point_drawn_on_a_curve_is_held_on_it;
 
 #[cfg(test)]
 mod a_picked_curve_of_any_kind_is_lit;
+
+#[cfg(test)]
+mod a_corner_of_two_crossing_curves_is_taken_like_one_of_lines;
+
+#[cfg(test)]
+mod a_circle_is_drawn_in_each_of_its_modes;

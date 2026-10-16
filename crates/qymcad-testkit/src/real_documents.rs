@@ -407,7 +407,7 @@ pub fn edits(p: &Project) -> Vec<Edit> {
         })
         .collect();
     for s in p.sketches.iter().filter(|s| built_from.contains(&s.id)) {
-        let line = s.entities.iter().find(|e| !e.construction && matches!(e.kind, qymcad_core::model::EntityKind::Line { .. }));
+        let line = s.entities.iter().find(|e| !e.construction && e.kind.as_line().is_some());
         if let Some(e) = line {
             out.push(Edit::Break { sketch: s.id, line: e.id });
         }
@@ -437,12 +437,12 @@ fn apply(p: &mut Project, e: &Edit, value: f64) -> Took {
         }
         Edit::Break { sketch, line } => {
             let index = p.sketch_index(*sketch).expect("the sketch of the line");
-            let ends = match p.sketches[index].entities.iter().find(|e| e.id == *line).map(|e| e.kind) {
-                Some(qymcad_core::model::EntityKind::Line { a, b }) => [a, b].map(|k| p.point_xy(index, k)),
-                _ => [None, None],
+            let ends = match p.sketches[index].entities.iter().find(|e| e.id == *line).and_then(|e| e.kind.as_line()) {
+                Some(qymcad_core::model::LineParts { a, b }) => [a, b].map(|k| p.point_xy(index, k)),
+                None => [None, None],
             };
             let [Some(a), Some(b)] = ends else { return Took::Yes };
-            p.break_line(index, *line, (a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+            p.break_curve(index, *line, (a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
             p.mark_sketch_dirty(*sketch);
         }
         Edit::Sketch { sketch, refs, .. } => {

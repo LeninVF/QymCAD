@@ -711,7 +711,7 @@ impl Default for App {
             opts: FeatOptions { mirror_keep: true, ..Default::default() },
             deferred: DeferredUi::default(),
             sk_pat: SketchPattern { dx: 20.0, dy: 0.0, count: 3, dx2: 0.0, dy2: 20.0, count2: 1, angle: 360.0 },
-            tool_prefs: SketchToolPrefs { poly_n: 6, fillet: 3.0, offset: 3.0, text_h: 10.0, ..Default::default() },
+            tool_prefs: SketchToolPrefs::default(),
             font_cache: qymcad_ui_state::FontCache::default(),
             gpu_ok: false,
             joint_anim: None,
@@ -892,7 +892,6 @@ impl App {
             7 => Notice::info(crate::i18n::tr("g-slot-hint")),
             8 => Notice::info(crate::i18n::tr("g-ellipse-hint")),
             9 => Notice::info(crate::i18n::tr("g-spline-hint")),
-            10 => Notice::info(crate::i18n::tr("g-circle-3pt")),
             11 => Notice::info(crate::i18n::tr("g-text-hint")),
             _ => Notice::info(crate::i18n::tr("g-select")),
         };

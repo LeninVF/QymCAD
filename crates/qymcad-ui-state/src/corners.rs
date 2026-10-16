@@ -2,6 +2,7 @@
 
 use crate::Notice;
 use super::*;
+use qymcad_core::model::CornerAt;
 
 /// Apply an edit operation to the selection. Returns true when it was applied.
 pub fn try_modify(mut ed: Editing, sel_sk: &mut SketchSelection, sk_pat: SketchPattern, tool_prefs: &SketchToolPrefs, op: EditTool) -> bool {
@@ -418,7 +419,7 @@ pub fn corner_where(cc: &CornerCtx, rect: Rect) -> Option<(f64, f64)> {
 pub fn corner_pair_now(project: &Project, si: usize, pid: Id, named: Option<(Id, Id)>, through: Option<Id>, pinned: bool, cursor: Option<(f64, f64)>) -> Option<(Id, Id)> {
     // THE PAIR IN FORCE STANDS WHILE THE CURSOR IS AWAY: it is the corner the field was opened for, and the value in
     // the field belongs to it. `through` has to be in the pair, or the corner would change its own subject.
-    let stands = |pair: Option<(Id, Id)>| pair.filter(|p| project.corner_of_pair(si, p.0, p.1) == Some(pid) && through.is_none_or(|line| p.0 == line || p.1 == line));
+    let stands = |pair: Option<(Id, Id)>| pair.filter(|&p| project.corner_at(si, CornerAt { point: pid, pair: p }) && through.is_none_or(|line| p.0 == line || p.1 == line));
     if let Some(line) = through {
         // THE CORNER IS ONE OF THIS LINE'S, so the pair is read off the side the cursor stands on
         return cursor.and_then(|c| project.vertex_pair_through(si, pid, line, Some(c))).or_else(|| stands(named)).or_else(|| project.vertex_pair_through(si, pid, line, None));
@@ -495,10 +496,10 @@ pub enum PointAct {
 pub struct CornerSet {
     /// THE CORNERS THAT STAND, each with its two lines and the point between them.
     pub made: Vec<LineCorner>,
-    /// THE CORNERS PUT AWAY BY A CLICK AT THEIR POINT, remembered as the pair of lines and NOT deleted: the same
+    /// THE CORNERS PUT AWAY BY A CLICK AT THEIR POINT, remembered as the point and the pair and NOT deleted: the same
     /// click at the same point brings that very corner back. A corner that is put away is not shown and not cut,
     /// and it stays that way as long as both its lines stand in the selection.
-    pub hidden: Vec<(Id, Id)>,
+    pub hidden: Vec<LineCorner>,
     /// THE CORNERS NAMED AT A POINT, one at a point at most.
     pub points: Vec<PointCorner>,
 }
@@ -533,7 +534,7 @@ impl CornerSet {
         if !self.made.is_empty() {
             return Choice::One;
         }
-        let corners = project.vertex_pairs(si, one.point).into_iter().filter(|&(a, b)| project.corner_of_pair(si, a, b).is_some()).count();
+        let corners = project.vertex_pairs(si, one.point).into_iter().filter(|&pair| project.corner_at(si, CornerAt { point: one.point, pair })).count();
         if corners < 2 {
             Choice::One
         } else {
@@ -561,8 +562,8 @@ impl CornerSet {
 
     /// WHETHER ANY CORNER STANDS AT A POINT, put away or not. A point that has a corner shows no yellow preview
     /// and takes no second one: it is one place, and a second corner there is a second reading of it.
-    pub fn occupied(&self, project: &Project, si: usize, pid: Id) -> bool {
-        self.made.iter().any(|c| c.point == pid) || self.points.iter().any(|c| c.point == pid) || self.hidden.iter().any(|&(a, b)| project.corner_of_pair(si, a, b) == Some(pid))
+    pub fn occupied(&self, pid: Id) -> bool {
+        self.made.iter().any(|c| c.point == pid) || self.points.iter().any(|c| c.point == pid) || self.hidden.iter().any(|c| c.point == pid)
     }
 
     /// THE CORNERS OF THE SELECTION, brought up to date.
@@ -591,12 +592,13 @@ impl CornerSet {
     /// line of it was let go: a line that has left the selection is one a person has said they do not want.
     pub fn follow_from(&mut self, project: &Project, si: usize, before: &[Id], selected: &[Id]) {
         let lost: Vec<Id> = before.iter().copied().filter(|l| !selected.contains(l)).collect();
-        self.made.retain(|c| selected.contains(&c.pair.0) && selected.contains(&c.pair.1) && project.corner_of_pair(si, c.pair.0, c.pair.1) == Some(c.point));
-        // A CORNER PUT AWAY LIVES WHILE BOTH ITS LINES ARE CHOSEN, and it goes with them. It is remembered as a pair
-        // of lines and not as a mark on the drawing, so a line that is let go takes the corner at its end with it -
+        let stands = |c: &LineCorner| selected.contains(&c.pair.0) && selected.contains(&c.pair.1) && project.corner_at(si, CornerAt { point: c.point, pair: c.pair });
+        self.made.retain(stands);
+        // A CORNER PUT AWAY LIVES WHILE BOTH ITS LINES ARE CHOSEN, and it goes with them. It is remembered as its point
+        // and its pair of lines and not as a mark on the drawing, so a line that is let go takes the corner at its end with it -
         // put away or not: what is put away is a corner of chosen lines, and a line a person has let go of is one
         // they do not want. Choosing the line again makes the corner again, and it stands.
-        self.hidden.retain(|&(a, b)| selected.contains(&a) && selected.contains(&b) && project.corner_of_pair(si, a, b).is_some());
+        self.hidden.retain(stands);
         // EVERY POINT WHERE CHOSEN LINES STAND, and the lines standing there in the order they were chosen.
         let mut at: Vec<(Id, Vec<Id>)> = Vec::new();
         // a construction line chosen before the tool was taken makes no corner either
@@ -612,29 +614,26 @@ impl CornerSet {
         for (p, lines) in at {
             // THE LINES ALREADY IN A CORNER AT THIS POINT, standing or put away: a corner that is put away is
             // still a corner, and its lines are still spoken for.
-            let spoken: Vec<Id> = self
-                .made
-                .iter()
-                .filter(|c| c.point == p)
-                .flat_map(|c| [c.pair.0, c.pair.1])
-                .chain(self.hidden.iter().copied().filter(|(a, b)| project.corner_of_pair(si, *a, *b) == Some(p)).flat_map(|(a, b)| [a, b]))
-                .collect();
+            let spoken: Vec<Id> =
+                self.made.iter().filter(|c| c.point == p).flat_map(|c| [c.pair.0, c.pair.1]).chain(self.hidden.iter().filter(|c| c.point == p).flat_map(|c| [c.pair.0, c.pair.1])).collect();
             let waiting: Vec<Id> = lines.into_iter().filter(|l| !spoken.contains(l)).collect();
             for two in waiting.chunks(2) {
                 let [a, b] = two else { continue };
                 let pair = (*a, *b);
+                let corner = LineCorner { point: p, pair };
                 // TWO LINES ALONG ONE STRAIGHT LINE THROUGH A POINT MAKE NO ANGLE: there is nothing to cut
-                // there, and naming it as a corner would offer a cut where there is none.
-                if project.corner_of_pair(si, *a, *b) != Some(p) || self.hidden.contains(&pair) || self.made.iter().any(|c| c.pair == pair) {
+                // there, and naming it as a corner would offer a cut where there is none. TWO CURVES SHARING BOTH
+                // THEIR ENDS make a corner at each.
+                if !project.corner_at(si, CornerAt { point: p, pair: corner.pair }) || self.hidden.contains(&corner) || self.made.contains(&corner) {
                     continue;
                 }
-                self.made.push(LineCorner { point: p, pair });
+                self.made.push(corner);
             }
         }
         // A CORNER NAMED AT A POINT LIVES WHILE BOTH ITS LINES ARE CHOSEN, and only while no corner of the lines
         // stands in its place: two corners at one point is one place read twice.
         let taken: Vec<Id> = self.made.iter().map(|c| c.point).collect();
-        self.points.retain(|c| project.corner_of_pair(si, c.pair.0, c.pair.1) == Some(c.point) && !taken.contains(&c.point) && !lost.iter().any(|l| project.edge_stands_at(si, *l, c.point)));
+        self.points.retain(|c| project.corner_at(si, CornerAt { point: c.point, pair: c.pair }) && !taken.contains(&c.point) && !lost.iter().any(|l| project.edge_stands_at(si, *l, c.point)));
     }
 
     /// THE MOST ONE ANSWER TAKES OFF EVERY CORNER OF THE SET AT ONCE, and what the lines between them can spare.
@@ -673,24 +672,22 @@ impl CornerSet {
             self.points.remove(k);
             return PointAct::PointRemoved;
         }
-        let made_here: Vec<(Id, Id)> = self.made.iter().filter(|c| c.point == pid).map(|c| c.pair).collect();
-        let hidden_here: Vec<(Id, Id)> = self.hidden.iter().copied().filter(|(a, b)| project.corner_of_pair(si, *a, *b) == Some(pid)).collect();
-        if !made_here.is_empty() {
+        if self.made.iter().any(|c| c.point == pid) {
             // A CORNER OF THE LINES IS PUT AWAY, NOT DELETED: the lines keep the ends they have, and the same
             // click at the same point brings that very corner back.
-            self.hidden.extend(made_here.iter().copied());
+            self.hidden.extend(self.made.iter().filter(|c| c.point == pid));
             self.made.retain(|c| c.point != pid);
             return PointAct::LineHidden;
         }
-        if !hidden_here.is_empty() {
+        if self.hidden.iter().any(|c| c.point == pid) {
             // EVERY CORNER THAT WAS PUT AWAY AT THIS POINT STANDS AGAIN, all of them at once: one click hides them
             // all, and the same click brings them all back.
-            self.hidden.retain(|&(a, b)| !hidden_here.contains(&(a, b)));
-            self.made.extend(hidden_here.into_iter().map(|pair| LineCorner { point: pid, pair }));
+            self.made.extend(self.hidden.iter().filter(|c| c.point == pid));
+            self.hidden.retain(|c| c.point != pid);
             return PointAct::LineShown;
         }
         match read {
-            Some(pair) if project.corner_of_pair(si, pair.0, pair.1) == Some(pid) => {
+            Some(pair) if project.corner_at(si, CornerAt { point: pid, pair }) => {
                 self.points.push(PointCorner { point: pid, pair });
                 PointAct::PointAdded
             }
@@ -707,7 +704,7 @@ impl CornerSet {
     /// stands in is the corner being pointed at. `vertex_pair` answers exactly that, and answers it for a point of
     /// two lines as well - there is only one pair there and no word is needed.
     pub fn read_at_point(&self, project: &Project, si: usize, pid: Id, cursor: Option<(f64, f64)>) -> Option<(Id, Id)> {
-        if self.occupied(project, si, pid) {
+        if self.occupied(pid) {
             return None;
         }
         project.vertex_pair(si, pid, cursor)
@@ -724,6 +721,19 @@ impl CornerSet {
 /// while a zone too narrow costs the corner the person was sure they had named.
 pub fn corner_zone_px(set: &Settings) -> f32 {
     grab::grab(set, grab::Grab::Point) * 3.0
+}
+
+/// A CLICK ON THE SHEET in the drawing's own coordinates, and how far off a point it still lands on it.
+#[derive(Clone, Copy, Debug)]
+pub struct PointClick {
+    pub at: Point2,
+    pub reach: f32,
+}
+
+/// WHETHER THE CLICK LANDED ON THE POINT OF THE ONE CORNER NAMED AT A POINT - too near it to say a side of it.
+pub fn click_on_the_point(project: &Project, si: usize, set: &CornerSet, click: PointClick) -> bool {
+    let [one] = set.points.as_slice() else { return false };
+    project.point_xy(si, one.point).is_some_and(|(x, y)| click.at.dist(Point2::new(x, y)) <= f64::from(click.reach))
 }
 
 /// WHAT THE CURSOR IS OVER, said by the sheet and not by the drawing.
@@ -769,6 +779,9 @@ pub enum CornerClick {
 /// person who chose a contour and then took the fillet meant that contour, and the first click adds to it rather
 /// than throwing it away. Every click after that is an ordinary one.
 ///
+/// **THE SECOND CURVE OF A PAIR IS TAKEN WITHOUT SHIFT**: a curve chosen alone makes no corner, and a click on a curve
+/// it meets or crosses makes the pair (`second_of_a_pair`). Past that:
+///
 /// **EVERY LEFT CLICK WITHOUT SHIFT LEAVES THE MULTI-SELECTION, WHATEVER IT LANDED ON - a line, a point, or
 /// nothing at all.** Shift is the only way more than one line is chosen, so the set is begun and left with Shift
 /// held: a multi-selection that outlives the key is a mode a person cannot see and cannot get out of, and the
@@ -811,7 +824,7 @@ pub fn corner_click(project: &Project, si: usize, corner: &mut CornerInput, sel_
         CornerOver::Point { id, at } => {
             corner.shifted = grow;
             if !grow {
-                let was_there = corner.set.occupied(project, si, id);
+                let was_there = corner.set.occupied(id);
                 // THE WHOLE OF THE SET GOES: the lines chosen, the corners they made, the corners named at the
                 // other points. What is put back is this point and this point alone.
                 sel_sk.items.retain(|&(k, _)| k != 1);
@@ -837,7 +850,7 @@ pub fn corner_click(project: &Project, si: usize, corner: &mut CornerInput, sel_
                 // line that stays does not pair again with a neighbour of the one that left.
                 sel_sk.items.retain(|&(k, id)| !(k == 1 && id == eid));
                 CornerClick::LineLetGo(eid)
-            } else if grow {
+            } else if grow || second_of_a_pair(project, si, &before, eid, &corner.set) {
                 // A THIRD LINE AT A STRAIGHT JOINT IS NOT TAKEN, and the point it would have stood at is named:
                 // the corners at a point are taken two at a time, and this one would have to be cut against a
                 // straight joint, where there is no corner to cut.
@@ -867,6 +880,14 @@ pub fn corner_click(project: &Project, si: usize, corner: &mut CornerInput, sel_
     act
 }
 
+/// WHETHER A CLICK ON CURVE `eid` WITHOUT SHIFT TAKES THE SECOND CURVE OF A PAIR: one curve is chosen, it makes no corner
+/// yet, and `eid` meets it at an end or crosses it. A click on each of two curves then names their corner, as the same two
+/// clicks with Shift do - for lines, arcs, circles and splines alike.
+fn second_of_a_pair(project: &Project, si: usize, before: &[Id], eid: Id, set: &CornerSet) -> bool {
+    let [one] = before else { return false };
+    set.standing().is_empty() && (project.shared_vertex(si, *one, eid).is_some() || project.crossing_of(si, [*one, eid], Point2::new(0.0, 0.0)).is_some())
+}
+
 /// WHETHER `eid` IS A CONSTRUCTION LINE of the sketch: no side of a corner the fillet or the chamfer cuts.
 pub(crate) fn line_is_construction(project: &Project, si: usize, eid: Id) -> bool {
     project.sketches.get(si).is_some_and(|s| s.entities.iter().any(|e| e.id == eid && e.construction))
@@ -889,7 +910,7 @@ pub fn straight_joint_in_the_way(project: &Project, si: usize, line: Id, selecte
     let (x, y) = project.edge_ends(si, line)?;
     [x, y].into_iter().find(|&p| {
         let there: Vec<Id> = selected.iter().copied().filter(|&l| l != line && !spoken.contains(&l) && project.edge_stands_at(si, l, p)).collect();
-        there.iter().enumerate().any(|(i, &a)| there[i + 1..].iter().any(|&b| project.shared_vertex(si, a, b) == Some(p) && project.corner_of_pair(si, a, b).is_none()))
+        there.iter().enumerate().any(|(i, &a)| there[i + 1..].iter().any(|&b| !project.corner_at(si, CornerAt::of(p, [a, b]))))
     })
 }
 

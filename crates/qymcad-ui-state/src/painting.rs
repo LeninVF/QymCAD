@@ -186,7 +186,7 @@ pub fn exit_draw_tools(t: &mut Tools) {
     }
     **armed = Armed::None; // ONE FIELD: letting go is saying that nothing is in hand
     tool.pts.clear();
-    tool.circ_tan = None;
+    tool.circ_tan.clear();
     sel_sk.constraint = None;
     sel_sk.modify = None;
     sel_sk.offset = OffsetAim::default();

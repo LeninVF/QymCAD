@@ -335,23 +335,6 @@ pub fn resolve_dim_ref(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
     None
 }
 
-/// The base edge under a screen point (a line, a circle or an arc) — for a tangent circle.
-pub fn ref_edge_at(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos2, si: usize) -> Option<qymcad_ui_state::EdgeRef> {
-    let (k, eid) = sketch_hit(&sk.pick(), rect, pos, si)?;
-    if k != 1 {
-        return None;
-    }
-    let s = sk.project.sketches.get(si)?;
-    let e = s.entity(eid)?;
-    // a line by its ends, a circle or an arc by the circle it lies on; an ellipse and a spline are no edge a tangent arc
-    // is built off
-    match (e.kind.as_line(), qymcad_core::model::circle_of(s, e)) {
-        (Some(l), _) => Some(qymcad_ui_state::EdgeRef::Line { a: l.a, b: l.b }),
-        (_, Some(c)) => Some(qymcad_ui_state::EdgeRef::Circle { center: c.center, r: c.r }),
-        _ => None,
-    }
-}
-
 pub fn power_trim_path_test(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, a: Pos2, b: Pos2) -> usize {
     sk.trim.path.clear();
     sk.trim.done.clear();

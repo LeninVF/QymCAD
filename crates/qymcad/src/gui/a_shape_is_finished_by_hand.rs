@@ -490,7 +490,7 @@ mod tests {
     /// Failures are gathered and given out together.
     #[test]
     fn every_drawing_tool_names_its_step_of_undo() {
-        let tools: [Drawing; 11] = [
+        let tools: [Drawing; 10] = [
             drawing(1, "sk-line", &[(0.0, 0.0), (20.0, 0.0)]),
             drawing(2, "sk-rect", &[(0.0, 0.0), (20.0, 15.0)]),
             drawing(3, "sk-circle", &[(0.0, 0.0), (8.0, 0.0)]),
@@ -500,7 +500,6 @@ mod tests {
             drawing(7, "sk-slot", &[(0.0, 0.0), (15.0, 0.0), (15.0, 5.0)]),
             drawing(8, "sk-ellipse", &[(0.0, 0.0), (12.0, 0.0), (6.0, 7.0)]),
             drawing(9, "sk-spline", &[(0.0, 0.0), (7.0, 7.0), (15.0, 0.0)]),
-            drawing(10, "sk-circle", &[(0.0, 0.0), (8.0, 5.0), (12.0, -3.0)]),
             drawing(11, "sk-text", &[(0.0, 0.0)]),
         ];
         let mut problems = Vec::new();

@@ -87,6 +87,14 @@ pub struct CornerAt {
     pub pair: (Id, Id),
 }
 
+impl CornerAt {
+    /// The corner the two edges `sides` make at `point`.
+    pub fn of(point: Id, [one, other]: [Id; 2]) -> Self {
+        let pair = (one, other);
+        Self { point, pair }
+    }
+}
+
 /// HOW A SKETCH FILLET IS GIVEN: by its radius, by its chord - the straight distance between the two points where it
 /// meets the lines - or by the length of its arc.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -992,5 +1000,7 @@ mod blends;
 mod touch;
 mod copies;
 pub(crate) use copies::{copied_constraint, CopyMaps, Whole};
+pub(crate) use blends::{blend_of_arms, EdgeAt};
 pub use crossings::Crossing;
+pub use touch::Touching;
 pub use pieces::LayAs;

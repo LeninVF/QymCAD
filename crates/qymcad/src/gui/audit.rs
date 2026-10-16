@@ -356,7 +356,7 @@ mod live_session {
             app.tools.armed = qymcad_ui_state::Armed::Draw(1);
             app.tools.armed = qymcad_ui_state::Armed::Modify(qymcad_ui_state::EditTool::Chamfer);
             app.tools.tool.pts.push(qymcad_core::geom::Point2 { x: 1.0, y: 2.0 });
-            app.tools.tool.circ_tan = Some(super::super::EdgeRef::Circle { center: 1, r: 5.0 });
+            app.tools.tool.circ_tan = vec![1];
             app.tools.armed = qymcad_ui_state::Armed::ClickOp(3);
             app.tools.armed = qymcad_ui_state::Armed::Move(4);
             app.tools.tool.move_base = Some(qymcad_core::geom::Point2 { x: 0.0, y: 0.0 });
@@ -384,7 +384,7 @@ mod live_session {
             if !app.tools.tool.pts.is_empty() {
                 t.push("the points clicked")
             }
-            if app.tools.tool.circ_tan.is_some() {
+            if !app.tools.tool.circ_tan.is_empty() {
                 t.push("the tangency of a circle")
             }
             if app.tools.armed.click_op() != 0 {

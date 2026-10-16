@@ -20,7 +20,7 @@ mod meet;
 pub mod refs;
 mod shift;
 mod stretch;
-pub use blend::{chamfer, rounding, Arm, Rounding};
+pub use blend::{centres_touching, chamfer, radius_in, rounding, Arm, Half, Rounding};
 pub use meet::Meet;
 pub use shift::{Map, OFFSET_TOLERANCE};
 pub use stretch::End;

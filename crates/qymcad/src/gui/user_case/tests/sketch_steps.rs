@@ -63,8 +63,9 @@ fn a_rectangle_with_its_centre_fixed(app: &mut App, si: usize, problems: &mut Ve
 /// EVERY KIND OF CURVE CUT, EXTENDED AND COPIED, by hand in a part of its own: an ellipse 12 by 6 between two uprights at
 /// x = -6 and x = 6, its top trimmed away between them - an arc of the ellipse is left; an open spline left of the left
 /// upright, its end extended to it - the spline ends on the upright; a hexagon taken by a window, copied to the clipboard and
-/// pasted - two hexagons, each a figure of its own. Each kind took its own path through these tools once, and a chain of them is where
-/// such paths part.
+/// pasted - two hexagons, each a figure of its own; two circles crossing, the corner above them rounded by a click on each
+/// and one in its quarter; a circle touching two lines, and a circle by three points, modes of the circle. Each kind took
+/// its own path through these tools once, and a chain of them is where such paths part.
 pub(super) fn every_kind_of_curve_cut_extended_and_copied(app: &mut App, problems: &mut Vec<String>) {
     app.exit_context();
     let part = app.project.add_part("Curves");
@@ -116,5 +117,55 @@ pub(super) fn every_kind_of_curve_cut_extended_and_copied(app: &mut App, problem
         problems.push(format!("curves: a hexagon copied and pasted - {figures} figures, not two"));
     }
     check_all(app, "curves: a hexagon copied and pasted", problems);
+    // two circles crossing at (76, 8) and (76, -8), the fillet taken, a click on each circle and one above the upper
+    // crossing: the corner is rounded with the radius of the bar
+    let mut hand = Hand::new(app);
+    hand.sk_tool(3).click2d(70.0, 0.0).click2d(80.0, 0.0).key(egui::Key::Escape).key(egui::Key::Escape);
+    hand.sk_tool(3).click2d(82.0, 0.0).click2d(92.0, 0.0).key(egui::Key::Escape).key(egui::Key::Escape);
+    hand.sk_tool(0);
+    assert!(hand.press_hint(&qymcad_i18n::tr("tb-fillet-sketch-hint")), "no Fillet button");
+    hand.close_window();
+    let r = hand.app.tool_prefs.fillet;
+    hand.click2d(60.0, 0.0).click2d(92.0, 0.0);
+    hand.hover2d(76.0, 11.0).click2d(76.0, 11.0);
+    hand.frame(Vec::new());
+    hand.chord(egui::Modifiers::COMMAND, egui::Key::A).type_text(&r.to_string()).key(egui::Key::Enter);
+    hand.key(egui::Key::Escape).key(egui::Key::Escape);
+    let rounded = curves(app).iter().any(|c| matches!(c, qymcad_core::model::curve::Curve::Round { centre, r: k, .. } if (k - r).abs() < 1e-6 && centre.y > 8.0));
+    if !rounded {
+        problems.push(format!("curves: the corner above the crossing of two circles is not rounded with R{r}"));
+    }
+    check_all(app, "curves: a corner at the crossing of two circles", problems);
+    // two lines meeting at (110, 0), the circle in its mode of touching two curves: a click on each line and one inside
+    // the corner lay a circle of the radius of the bar touching both
+    let mut hand = Hand::new(app);
+    hand.sk_tool(1).click2d(110.0, 0.0).double_click2d(140.0, 0.0);
+    hand.click2d(110.0, 0.0).double_click2d(110.0, 30.0);
+    hand.key(egui::Key::Escape).key(egui::Key::Escape);
+    hand.sk_tool(3);
+    assert!(hand.press_word(&qymcad_i18n::tr("opt-tangent-m"), egui::pos2(400.0, 0.0)), "no mode of touching on the bar of the circle");
+    let r = hand.app.tool_prefs.circ_r;
+    hand.click2d(130.0, 0.0).click2d(110.0, 20.0).hover2d(116.0, 6.0).click2d(116.0, 6.0);
+    hand.key(egui::Key::Escape).key(egui::Key::Escape);
+    let touching = curves(app)
+        .iter()
+        .any(|c| matches!(c, qymcad_core::model::curve::Curve::Round { centre, r: k, .. } if (k - r).abs() < 1e-6 && centre.dist(qymcad_core::geom::Point2::new(110.0 + r, r)) < 1e-4));
+    if !touching {
+        problems.push(format!("curves: no circle of R{r} touching the two lines met at (110, 0)"));
+    }
+    check_all(app, "curves: a circle touching two lines", problems);
+    // the circle in its mode of three points: three clicks lay the circle of radius 10 about (130, 30)
+    let mut hand = Hand::new(app);
+    hand.sk_tool(3);
+    assert!(hand.press_word(&qymcad_i18n::tr("opt-rect-3pt"), egui::pos2(400.0, 0.0)), "no mode of three points on the bar of the circle");
+    hand.click2d(140.0, 30.0).click2d(130.0, 40.0).click2d(120.0, 30.0);
+    hand.key(egui::Key::Escape).key(egui::Key::Escape);
+    let through = curves(app)
+        .iter()
+        .any(|c| matches!(c, qymcad_core::model::curve::Curve::Round { centre, r, .. } if centre.dist(qymcad_core::geom::Point2::new(130.0, 30.0)) < 1e-6 && (r - 10.0).abs() < 1e-6));
+    if !through {
+        problems.push("curves: three clicks in the mode of three points laid no circle of radius 10 about (130, 30)".into());
+    }
+    check_all(app, "curves: a circle by three points", problems);
     app.finish_sketch_edit();
 }

@@ -174,15 +174,18 @@ impl Placing {
 /// THE DRAWING TOOLS' PREFERENCES: each has a mode and numbers of its own. This is NOT the state of the current
 /// action (that lives in `Placing`) but preferences proper: they survive a change of tool, as in any grown-up CAD -
 /// come back to the polygon and the number of sides is the one left there.
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct SketchToolPrefs {
     /// the polygon: the number of sides and how its two clicks are read (see `polygon_from_clicks`)
     pub poly_n: u32,
     pub poly_mode: u8,
-    /// the construction modes: an arc (by three points or by a centre), a rectangle (corners or centre), a circle
+    /// the construction modes: an arc (by three points or by a centre), a rectangle (corners or centre), a circle (a
+    /// centre and a radius, two points, touching two curves, three points)
     pub arc_mode: u8,
     pub rect_mode: u8,
     pub circ_mode: u8,
+    /// THE RADIUS OF A CIRCLE TOUCHING TWO CURVES, laid at the pointer once both are picked
+    pub circ_r: f64,
     /// EXTEND TAKES BOTH ENDS of its line, each to the nearest geometry on its side ("Both sides" in its bar)
     pub extend_both: bool,
     /// the corner fillet's radius - the first leg of a chamfer - and the offset's distance
@@ -203,6 +206,31 @@ pub struct SketchToolPrefs {
     /// A setting of the tool, not a thing the application owns: the top bar shows the family here beside the
     /// height, and the label made by the next click keeps it. Empty until a font is chosen or found.
     pub font: qymcad_core::model::FontRef,
+}
+
+impl Default for SketchToolPrefs {
+    /// What a new window offers: a hexagon, a fillet, a chamfer leg and an offset of 3 mm, a text 10 mm high, a circle
+    /// touching two curves of radius 5 mm; every mode its first.
+    fn default() -> Self {
+        Self {
+            poly_n: 6,
+            poly_mode: 0,
+            arc_mode: 0,
+            rect_mode: 0,
+            circ_mode: 0,
+            circ_r: 5.0,
+            extend_both: false,
+            fillet: 3.0,
+            offset: 3.0,
+            chamfer_mode: Default::default(),
+            chamfer_second: 0.0,
+            fillet_by: Default::default(),
+            text: String::new(),
+            text_h: 10.0,
+            text_note: false,
+            font: Default::default(),
+        }
+    }
 }
 
 /// THE SKETCH PATTERN'S PARAMETERS: two directions with a step and a count each, plus the circular variant.
@@ -256,8 +284,9 @@ pub struct SketchTool {
     /// THE LINE EXTEND HOLDS: taken with the tool from the selection made before it, or picked by the first click; its
     /// extension is previewed up to what the pointer is over, and Enter or a click applies it
     pub extend: Option<Id>,
-    /// the tangent edge given for a circle (picked with THIS tool rather than globally)
-    pub circ_tan: Option<EdgeRef>,
+    /// THE CURVES A CIRCLE IS TO TOUCH, picked with the circle tool one after the other: two of them, and the circle of
+    /// the radius of the bar follows the pointer between them
+    pub circ_tan: Vec<Id>,
     /// THE STRING OF THE TEXT TOOL AS OUTLINES at the origin, for the preview at the pointer: baked once when the
     /// string, its height or its font change (the fonts are not at hand where the canvas is drawn) - (the string,
     /// the height, the font, the outlines)

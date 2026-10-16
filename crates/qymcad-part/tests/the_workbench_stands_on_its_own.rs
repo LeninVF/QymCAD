@@ -53,15 +53,14 @@ fn icon_tool_with_typed_ids_renders_in_toolbar() {
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
         // Line tool
         let _ = qymcad_ui_state::icon_tool(ui, qymcad_ui_state::IconId::SketchLine, "Line", false);
-        // Circle 3pt (migrated from procedural Gly::Circle3)
-        let _ = qymcad_ui_state::icon_tool(ui, qymcad_ui_state::IconId::SketchCircle3Pt, "Circle 3pt", false);
+        let _ = qymcad_ui_state::icon_tool(ui, qymcad_ui_state::IconId::SketchCircle, "Circle", false);
         // Ellipse (migrated from procedural Gly::Ellipse)
         let _ = qymcad_ui_state::icon_tool(ui, qymcad_ui_state::IconId::SketchEllipse, "Ellipse", false);
         // Part Extrude
         let _ = qymcad_ui_state::icon_tool(ui, qymcad_ui_state::IconId::PartExtrude, "Extrude", true);
     });
 
-    let tested_icons = [qymcad_ui_state::IconId::SketchLine, qymcad_ui_state::IconId::SketchCircle3Pt, qymcad_ui_state::IconId::SketchEllipse, qymcad_ui_state::IconId::PartExtrude];
+    let tested_icons = [qymcad_ui_state::IconId::SketchLine, qymcad_ui_state::IconId::SketchCircle, qymcad_ui_state::IconId::SketchEllipse, qymcad_ui_state::IconId::PartExtrude];
     for icon in tested_icons {
         let uri = icon.uri();
         let poll = ctx.try_load_image(uri, egui::load::SizeHint::default()).expect("toolbar icon must be loaded by image loader");

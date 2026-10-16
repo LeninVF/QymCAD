@@ -77,12 +77,21 @@ pub fn draw_sketch_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
         },
         3 => {
             if pn.tool_prefs.circ_mode == 2 {
-                // a tangent circle: once the base is chosen, a circle at the cursor with the tangency radius
-                if let (Some(eref), Some(si)) = (pn.tool.circ_tan, qymcad_ui_state::edit_si(pn.project, &pn.sketch_ses)) {
-                    let r = qymcad_ui_state::tangent_radius_to_edge(&DrawCtx { cam: &pn.cam, set: pn.set, scheme: pn.scheme, project: pn.project, active_path: pn.active_path }, si, eref, cur);
-                    if r > 1e-6 {
-                        let scn = sh.at(cur);
-                        let rp = (sh.at(Point2::new(cur.x + r, cur.y)).x - scn.x).abs();
+                // a circle touching the two curves picked: the one of the radius of the bar whose centre is nearest the
+                // pointer
+                if let (&[a, b], Some(si)) = (pn.tool.circ_tan.as_slice(), qymcad_ui_state::edit_si(pn.project, &pn.sketch_ses)) {
+                    let ask = qymcad_core::model::Touching { curves: [a, b], r: pn.tool_prefs.circ_r, near: cur };
+                    if let Some(c) = pn.project.circle_touching(si, ask) {
+                        let scn = sh.at(c);
+                        let rp = (sh.at(Point2::new(c.x + ask.r, c.y)).x - scn.x).abs();
+                        painter.circle_stroke(scn, rp, stroke);
+                    }
+                }
+            } else if pn.tool_prefs.circ_mode == 3 {
+                if let &[a, b] = pn.tool.pts.as_slice() {
+                    if let Some((cx, cy, r)) = qymcad_ui_state::circumcircle(a, b, cur) {
+                        let scn = sh.at(Point2::new(cx, cy));
+                        let rp = (sh.at(Point2::new(cx + r, cy)).x - scn.x).abs();
                         painter.circle_stroke(scn, rp, stroke);
                     }
                 }
@@ -214,13 +223,6 @@ pub fn draw_sketch_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
             sp.push(sc);
             if sp.len() >= 2 {
                 painter.add(egui::Shape::line(sp, stroke));
-            }
-        }
-        10 if pn.tool.pts.len() == 2 => {
-            if let Some((cx, cy, r)) = qymcad_ui_state::circumcircle(pn.tool.pts[0], pn.tool.pts[1], cur) {
-                let scn = sh.at(Point2::new(cx, cy));
-                let rp = (sh.at(Point2::new(cx + r, cy)).x - scn.x).abs();
-                painter.circle_stroke(scn, rp, stroke);
             }
         }
         _ => {}

@@ -44,11 +44,8 @@ fn the_first_half_of_a_broken_line_is_the_line_it_was() {
     let si = p.new_sketch("S");
     let l = p.add_line_entity(si, -20.0, 0.0, 20.0, 0.0, Purpose::Real);
     p.regen_sketch(si);
-    assert!(p.break_line(si, l, 5.0, 0.0), "the line broke");
-    let start = |p: &Project, id: u64| match p.sketches[si].entities.iter().find(|e| e.id == id).map(|e| e.kind) {
-        Some(EntityKind::Line { a, .. }) => p.point_xy(si, a),
-        _ => None,
-    };
+    assert!(p.break_curve(si, l, 5.0, 0.0), "the line broke");
+    let start = |p: &Project, id: u64| p.sketches[si].entities.iter().find(|e| e.id == id).and_then(|e| e.kind.as_line()).and_then(|l| p.point_xy(si, l.a));
     assert!(start(&p, l).is_some_and(|q| (q.0 + 20.0).abs() < 1e-9), "the half from the start of the line is not the line it was");
-    assert_eq!(p.sketches[si].entities.iter().filter(|e| matches!(e.kind, EntityKind::Line { .. })).count(), 2, "two halves");
+    assert_eq!(p.sketches[si].entities.iter().filter(|e| e.kind.as_line().is_some()).count(), 2, "two halves");
 }

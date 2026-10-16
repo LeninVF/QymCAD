@@ -54,7 +54,6 @@ pub static ALL: &[&Tool] = &[
     &sketch::CIRCLE,
     &sketch::POINT,
     &sketch::ARC,
-    &sketch::CIRCLE3,
     &sketch::POLYGON,
     &sketch::SLOT,
     &sketch::ELLIPSE,

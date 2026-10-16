@@ -884,7 +884,6 @@ impl<'a> Hand<'a> {
             7 => "tb-slot-hint",
             8 => "tb-ellipse-hint",
             9 => "tb-spline-hint",
-            10 => "tb-circle-3pt",
             _ => "tb-text-hint",
         };
         self.press_hint_or_fail(key)

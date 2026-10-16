@@ -272,6 +272,32 @@ impl Project {
     }
     pub(crate) fn break_curve_here(&mut self, si: usize, eid: Id, click: Point2) -> bool {
         let Some(curve) = self.sketches.get(si).and_then(|s| s.entity(eid).and_then(|e| Curve::of(s, e))) else { return false };
+        let before: Vec<Id> = self.sketches[si].entities.iter().map(|e| e.id).collect();
+        // where the piece keeping the id of the curve starts: at the start of an open curve, at the place of the click
+        // on a closed one
+        let start = if curve.closed() { curve.at(curve.nearest(click).t) } else { curve.at(0.0) };
+        let broken = self.break_curve_into_pieces(si, eid, &curve, click);
+        if broken {
+            self.piece_keeps_the_id(si, eid, &before, start);
+        }
+        broken
+    }
+    /// THE PIECE OF BROKEN CURVE `eid` THAT STARTS AT `start` TAKES ITS ID, of whatever kind the curve was: what was built
+    /// from the curve - the wall swept from it, and what stands on that wall - goes on naming it, as with a line broken in
+    /// two (`break_line_at`), where the first half is the line it was.
+    fn piece_keeps_the_id(&mut self, si: usize, eid: Id, before: &[Id], start: Point2) {
+        let s = &self.sketches[si];
+        if s.entity(eid).is_some() {
+            return;
+        }
+        let piece = s.entities.iter().filter(|e| !before.contains(&e.id)).find(|e| Curve::of(s, e).is_some_and(|c| c.at(0.0).dist(start) < 1e-6)).map(|e| e.id);
+        if let Some(e) = piece.and_then(|id| self.sketches[si].entities.iter_mut().find(|e| e.id == id)) {
+            e.id = eid;
+        }
+    }
+    /// The cut of `break_curve_here`: a line in two halves held as the line was, an arc or a circle into arcs about its
+    /// own centre, any other curve into pieces of its own kind.
+    fn break_curve_into_pieces(&mut self, si: usize, eid: Id, curve: &Curve, click: Point2) -> bool {
         let mut places = self.break_at(si, eid, click);
         places.sort_by(f64::total_cmp);
         match curve {
@@ -282,7 +308,7 @@ impl Project {
                     [t0, t1] => vec![[t0, t1], [t1, t0 + 1.0]],
                     _ => return false,
                 };
-                if self.round_pieces(si, eid, &curve, &runs).is_none() {
+                if self.round_pieces(si, eid, curve, &runs).is_none() {
                     return false;
                 }
                 self.settle_after_cut(si);

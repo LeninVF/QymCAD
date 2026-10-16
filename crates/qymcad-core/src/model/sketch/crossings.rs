@@ -16,6 +16,12 @@ struct Other {
     curve: Curve,
 }
 
+/// A PIECE OF A CURVE LEAVING A CROSSING, and the curve it is a piece of.
+struct Side {
+    of: Id,
+    half: crate::model::curve::Half,
+}
+
 /// ONE CURVE OF A CROSSING TO CUT: the entity, its curve, the curve it crosses, and the crossing.
 struct CutThrough<'a> {
     eid: Id,
@@ -89,6 +95,45 @@ impl Project {
         // the point the halves end at: a point of the origin may stand on the same place, and is not stitched to them
         let half_end = |p: Id| s.entities.iter().any(|e| !e.construction && entity_ends(e).is_some_and(|ends| ends.contains(&p)));
         s.points.iter().filter(|q| (q.x - at.x).hypot(q.y - at.y) < 1e-6).map(|q| q.id).find(|&p| half_end(p))
+    }
+
+    /// WHAT THE CORNER OF A CROSSING WOULD BE, changing nothing: the two curves of `crossing` as `cut_at_crossing` would
+    /// leave them, and the cut of the corner of the quarter `toward` stands in - the two pieces either side of it, of the
+    /// two curves. What the preview of a corner at a crossing draws before the crossing is cut.
+    pub fn crossing_blend(&self, si: usize, crossing: LinesCrossing, toward: Point2, cut: CornerCut) -> Option<CornerBlend> {
+        let LinesCrossing { one, other, at } = crossing;
+        let s = self.sketches.get(si)?;
+        let curve = |id: Id| s.entities.iter().find(|e| e.id == id).and_then(|e| Curve::of(s, e));
+        let (a, b) = (curve(one)?, curve(other)?);
+        let mut sides: Vec<Side> = a.halves_at(&b, at).into_iter().map(|half| Side { of: one, half }).chain(b.halves_at(&a, at).into_iter().map(|half| Side { of: other, half })).collect();
+        let angle = |u: Point2| u.y.atan2(u.x);
+        sides.sort_by(|x, y| angle(x.half.arm().leaving()).total_cmp(&angle(y.half.arm().leaving())));
+        let n = sides.len();
+        if n < 2 {
+            return None;
+        }
+        // the piece before the pointer and the piece after it, round the turn
+        let k = sides.partition_point(|x| angle(x.half.arm().leaving()) <= angle(toward - at)) % n;
+        let before = (k + n - 1) % n;
+        let (first, second) = (&sides[before], &sides[k]);
+        if first.of == second.of {
+            return None;
+        }
+        blend_of_arms([first.half.arm(), second.half.arm()], cut)
+    }
+
+    /// THE HALVES OF A CROSSING BEYOND ITS CORNER GO, once the corner at `point` is cut: the halves still ending at the
+    /// point the crossing was cut at are those of the other quarters - the two sides of the corner end at its arc or its
+    /// cut line now. As in the other CAD of the trade a corner of a crossing leaves its two sides alone; kept, the halves
+    /// stood joined at the corner point, held to it, and a drag of the corner pulled them round. Answers how many went.
+    pub fn drop_halves_beyond_corner(&mut self, si: usize, point: Id) -> usize {
+        let Some(s) = self.sketches.get(si) else { return 0 };
+        let beyond: Vec<Id> = s.entities.iter().filter(|e| !e.construction && entity_ends(e).is_some_and(|ends| ends.contains(&point))).map(|e| e.id).collect();
+        if !beyond.is_empty() {
+            self.delete_entities(si, &beyond);
+            self.solve_sketch(si);
+        }
+        beyond.len()
     }
 
     /// ONE CURVE OF A CROSSING CUT THERE, where it goes on past it: a line in two, any other open curve into its two

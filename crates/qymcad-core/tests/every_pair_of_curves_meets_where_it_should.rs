@@ -324,9 +324,9 @@ fn every_kind_offset_stands_at_its_distance() {
     use qymcad_core::model::curve::OFFSET_TOLERANCE;
     let mut failures = Vec::new();
     for k in kinds() {
-        // less than the least radius of curvature of any kind - the ends of the flat closed spline bend at about 1 mm:
-        // an offset past it folds into a loop, whose points stand nearer the curve than the distance
-        for d in [0.4, -0.3] {
+        // less than the least radius of curvature of any kind inwards - the tips of the flat closed spline bend at 0.25 mm
+        // (its way 3 and its turn 36 by 6 there: 27 / 108): an offset past it folds into a loop, cut away into pieces
+        for d in [0.4, -0.2] {
             let label = format!("{} offset {d}", k.name);
             let offsets = k.curve.offset(d);
             let [off] = offsets.as_slice() else {
@@ -386,4 +386,40 @@ fn an_offset_past_the_bend_of_a_spline_has_its_loop_cut_away() {
         let nearest = pieces.iter().flat_map(|c| (0..=200).map(move |k| c.at(k as f64 / 200.0))).map(|q| s_curve.nearest(q).off).fold(f64::MAX, f64::min);
         assert!(nearest > d.abs() - OFFSET_TOLERANCE, "offset {d}: a point of it stands {nearest:.3} from the curve");
     }
+}
+
+/// THE OFFSET OF A CLOSED SPLINE IS A SPLINE OF FEW NODES: a closed blob of seven nodes, about 50 by 40, offset 1.5 out and
+/// in, is one closed spline within `OFFSET_TOLERANCE` of the true offset, of tens of nodes - no more than eight for each
+/// node of the blob - not hundreds; offset 4, past the bend of its notch, its loop cut away, the pieces left as few.
+///
+/// Reported behaviour: the offset of a closed spline came out a spline of hundreds of nodes - 1038 degrees of freedom -
+/// and the program hung.
+#[test]
+fn the_offset_of_a_closed_spline_is_a_spline_of_few_nodes() {
+    use qymcad_core::model::curve::OFFSET_TOLERANCE;
+    let blob = [[-22.0, 6.0], [-14.0, 14.0], [-3.0, 7.0], [7.0, 25.0], [21.0, 9.0], [10.0, -9.0], [-17.0, -14.0]];
+    let curve = Curve::spline(blob.iter().map(|q| p2(*q)).collect(), &[], qymcad_core::feature::Ends::Closed);
+    let mut failures = Vec::new();
+    // offset 4 the notch of the blob bends tighter than that: its loop is cut away, and what is left is in pieces
+    let pieces: usize = curve.offset(4.0).iter().map(|c| if let Curve::Spline { nodes, .. } = c { nodes.len() } else { 0 }).sum();
+    let worst = curve.offset(4.0).iter().flat_map(|c| (0..=500).map(|i| c.at(i as f64 / 500.0)).collect::<Vec<_>>()).map(|p| (curve.nearest(p).off - 4.0).abs()).fold(0.0, f64::max);
+    if pieces == 0 || pieces > 8 * blob.len() || worst > OFFSET_TOLERANCE {
+        failures.push(format!("offset 4, its loop cut away: {pieces} nodes in all, {worst:.4} mm off the distance at worst"));
+    }
+    for d in [1.5, -1.5] {
+        let offsets = curve.offset(d);
+        let [off] = offsets.as_slice() else {
+            failures.push(format!("offset {d}: {} pieces, not one", offsets.len()));
+            continue;
+        };
+        let nodes = match off {
+            Curve::Spline { nodes, .. } => nodes.len(),
+            _ => 0,
+        };
+        let worst = (0..=2000).map(|i| off.at(i as f64 / 2000.0)).map(|p| (curve.nearest(p).off - d.abs()).abs()).fold(0.0, f64::max);
+        if nodes == 0 || nodes > 8 * blob.len() || worst > OFFSET_TOLERANCE || !off.closed() {
+            failures.push(format!("offset {d}: a closed {} spline of {nodes} nodes, {worst:.4} mm off the distance at worst", off.closed()));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

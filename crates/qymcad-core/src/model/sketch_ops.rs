@@ -1,6 +1,7 @@
 //! A SKETCH'S CURVES MIRRORED, COPIED AND PATTERNED, and its corners limited, rounded and cut.
 
 use super::*;
+use sketch::EdgeAt;
 
 impl Project {
     /// Hand out a new stable id.
@@ -227,21 +228,12 @@ impl Project {
         self.corner_sweep_of_pair(si, pid, (edges[0], edges[1]))
     }
 
-    /// The same for the corner the two named edges make at `pid`, where more than two edges may meet.
+    /// The same for the corner the two named edges make at `pid`, where more than two edges may meet: the ways they
+    /// leave the point, along a line or along the tangent of a curve.
     pub fn corner_sweep_of_pair(&self, si: usize, pid: Id, (e1, e2): (Id, Id)) -> Option<f64> {
-        let (pcx, pcy) = self.point_xy(si, pid)?;
-        let mut dirs = Vec::new();
-        for e in [e1, e2] {
-            let (a, b) = self.edge_end_ids(si, e)?;
-            let (ox, oy) = self.point_xy(si, if a == pid { b } else { a })?;
-            let l = (ox - pcx).hypot(oy - pcy);
-            if l < 1e-9 {
-                return None;
-            }
-            dirs.push(((ox - pcx) / l, (oy - pcy) / l));
-        }
-        let corner = (dirs[0].0 * dirs[1].0 + dirs[0].1 * dirs[1].1).clamp(-1.0, 1.0).acos();
-        Some(std::f64::consts::PI - corner)
+        let u = self.leaving(si, EdgeAt { edge: e1, corner: pid })?;
+        let v = self.leaving(si, EdgeAt { edge: e2, corner: pid })?;
+        Some(std::f64::consts::PI - (u.x * v.x + u.y * v.y).clamp(-1.0, 1.0).acos())
     }
 
     /// FILLET THE CORNER AT `pid` WITH A SIZE GIVEN BY ITS RADIUS, ITS CHORD OR ITS ARC LENGTH. The radius the size
@@ -282,8 +274,8 @@ impl Project {
         let Some(before) = self.sketches.get(si).cloned() else { return 0 };
         for corner in corners {
             let done = match cut {
-                CornerCut::Chamfer(legs) => self.chamfer_lines_of_pair(si, corner.pair, legs, toward),
-                CornerCut::Fillet(size) if size.by == FilletBy::Radius => self.fillet_at_pair(si, corner.pair, size.value),
+                CornerCut::Chamfer(legs) => self.chamfer_corner(si, *corner, legs, toward),
+                CornerCut::Fillet(size) if size.by == FilletBy::Radius => self.fillet_corner(si, *corner, size.value),
                 CornerCut::Fillet(size) => self.fillet_pair_by(si, *corner, size),
             };
             if !done {
@@ -299,7 +291,7 @@ impl Project {
     /// preview of the corner draws it, and the size kept as it was given.
     pub(crate) fn fillet_pair_by(&mut self, si: usize, corner: CornerAt, size: FilletSize) -> bool {
         let Some((_, r)) = self.corner_blend(si, corner.point, corner.pair, CornerCut::Fillet(size)).and_then(|b| b.arc) else { return false };
-        if !self.fillet_at_pair(si, corner.pair, r) {
+        if !self.fillet_corner(si, corner, r) {
             return false;
         }
         self.give_fillet_its_size(si, size);
@@ -327,33 +319,37 @@ impl Project {
 
     pub(crate) fn fillet_round(&mut self, si: usize, pid: Id, r: f64) -> bool {
         let Some(pair) = self.vertex_pair(si, pid, None) else { return false };
-        self.fillet_at_pair(si, pair, r)
+        self.fillet_corner(si, CornerAt { point: pid, pair }, r)
     }
 
     /// Fillet the corner at `pid` that the point `(x, y)` stands in, where more than two edges meet there.
     pub fn fillet_at_vertex_near(&mut self, si: usize, pid: Id, r: f64, x: f64, y: f64) -> bool {
         let Some(pair) = self.vertex_pair(si, pid, Some((x, y))) else { return false };
-        self.fillet_at_pair(si, pair, r)
+        self.fillet_corner(si, CornerAt { point: pid, pair }, r)
     }
 
     /// Fillet the corner the two named edges make at a shared vertex. The arc goes on the side of their bisector,
     /// which is what the fillet at a vertex has always done.
     pub fn fillet_at_pair(&mut self, si: usize, (e1, e2): (Id, Id), r: f64) -> bool {
-        let Some(shared) = self.corner_of_pair(si, e1, e2) else { return false };
-        let Some((pcx, pcy)) = self.point_xy(si, shared) else { return false };
-        let dir = |me: &Self, eid: Id| -> Option<(f64, f64)> {
-            let (a, b) = me.edge_end_ids(si, eid)?;
-            let other = if a == shared { b } else { a };
-            let (ox, oy) = me.point_xy(si, other)?;
-            let (dx, dy) = (ox - pcx, oy - pcy);
-            let l = (dx * dx + dy * dy).sqrt();
-            (l > 1e-9).then(|| (dx / l, dy / l))
-        };
-        let (Some(d1), Some(d2)) = (dir(self, e1), dir(self, e2)) else { return false };
-        let (bx, by) = (d1.0 + d2.0, d1.1 + d2.1);
+        let Some(point) = self.corner_of_pair(si, e1, e2) else { return false };
+        self.fillet_corner(si, CornerAt::of(point, [e1, e2]), r)
+    }
+
+    /// Fillet `corner` at its point. The arc goes on the side of the bisector of the ways the two edges leave the point -
+    /// along a line, along the tangent of an arc: taken along the chord to the far end, the halves of two circles cut
+    /// where they cross, whose far ends are one point, put the arc in the lens of the next quarter.
+    pub fn fillet_corner(&mut self, si: usize, corner: CornerAt, r: f64) -> bool {
+        let CornerAt { point, pair } = corner;
+        let (e1, e2) = pair;
+        if !self.corner_at(si, corner) {
+            return false;
+        }
+        let Some((pcx, pcy)) = self.point_xy(si, point) else { return false };
+        let (Some(d1), Some(d2)) = (self.leaving(si, EdgeAt { edge: e1, corner: point }), self.leaving(si, EdgeAt { edge: e2, corner: point })) else { return false };
+        let (bx, by) = (d1.x + d2.x, d1.y + d2.y);
         let bl = (bx * bx + by * by).sqrt();
-        let near = if bl < 1e-6 { (pcx, pcy) } else { (pcx + bx / bl * r * 0.3, pcy + by / bl * r * 0.3) };
-        self.fillet_curves(si, e1, e2, r, near.0, near.1)
+        let near = if bl < 1e-6 { Point2::new(pcx, pcy) } else { Point2::new(pcx + bx / bl * r * 0.3, pcy + by / bl * r * 0.3) };
+        self.fillet_curves_at(si, corner, r, near)
     }
 
     /// Fillet every corner (each vertex with exactly two edges) with radius `r`, returning how many

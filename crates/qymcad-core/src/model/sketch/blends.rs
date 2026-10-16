@@ -1,10 +1,10 @@
-//! A CORNER OF CURVES OF ANY KIND ROUNDED OR CHAMFERED: the corner a spline or an arc of an ellipse makes with any curve.
-//! A corner of two lines, two arcs or a line and an arc keeps its own path in `corners.rs`, with the shape of the corner
-//! held by tangencies and its sharp held on both lines; here the geometry comes from `curve::rounding` and
+//! A CORNER OF CURVES OF ANY KIND ROUNDED OR CHAMFERED: the corner a spline or an arc of an ellipse makes with any curve,
+//! and the preview of every corner with a curve in it. A fillet of two lines, two arcs or a line and an arc keeps its own
+//! path in `corners.rs`, with the shape of the corner held by tangencies and its sharp held on both lines; here the geometry comes from `curve::rounding` and
 //! `curve::chamfer`, each side is cut back to where the cut meets it and laid again as a piece of its own kind, and the
 //! side that is a line or an arc is held to the fillet as there.
 use super::*;
-use crate::model::curve::{chamfer, rounding, Arm, Curve, End};
+use crate::model::curve::{chamfer, radius_in, rounding, Arm, Curve, End};
 
 /// A SIDE OF A CORNER IN A SKETCH: the entity, its curve, the end of it on the corner, and the point at its other end.
 struct Leg {
@@ -31,6 +31,25 @@ pub(crate) struct EdgeAt {
 struct Corner {
     legs: [Leg; 2],
     point: Id,
+}
+
+/// WHAT THE CUT WOULD LEAVE AT THE CORNER OF TWO ARMS, changing nothing: the corner, where the cut meets each arm, and
+/// the arc of a fillet.
+pub(crate) fn blend_of_arms(arms: [Arm; 2], cut: CornerCut) -> Option<CornerBlend> {
+    let corner = arms[0].corner();
+    let (places, arc) = match cut {
+        CornerCut::Fillet(size) => {
+            let r = radius_in(arms, size)?;
+            let found = rounding(arms, r)?;
+            (found.at, Some(([found.centre.x, found.centre.y], r)))
+        }
+        CornerCut::Chamfer(legs_of_cut) => (chamfer(arms, legs_of_cut)?, None),
+    };
+    let end = |k: usize| {
+        let p = arms[k].curve.at(places[k]);
+        [p.x, p.y]
+    };
+    Some(CornerBlend { vertex: [corner.x, corner.y], ends: [end(0), end(1)], arc })
 }
 
 impl Project {
@@ -62,41 +81,24 @@ impl Project {
         eids.iter().all(|id| s.entity(*id).is_some_and(|e| e.kind.straight_or_round_ends().is_some()))
     }
 
-    /// The two sides of the corner the pair makes, and the corner point.
-    fn legs_of(&self, si: usize, [e1, e2]: [Id; 2]) -> Option<Corner> {
-        let corner = self.shared_vertex(si, e1, e2)?;
-        Some(Corner { legs: [self.leg(si, EdgeAt { edge: e1, corner })?, self.leg(si, EdgeAt { edge: e2, corner })?], point: corner })
+    /// Whether both entities are lines.
+    pub(crate) fn both_lines(&self, si: usize, eids: [Id; 2]) -> bool {
+        let Some(s) = self.sketches.get(si) else { return false };
+        eids.iter().all(|id| s.entity(*id).is_some_and(|e| e.kind.as_line().is_some()))
     }
 
-    /// The radius a fillet of `size` takes on the corner of the two sides: a chord or an arc length makes it on the turn
-    /// between the ways the sides leave the corner.
-    fn radius_for(legs: &[Leg; 2], size: FilletSize) -> Option<f64> {
-        if size.by == FilletBy::Radius {
-            return Some(size.value);
-        }
-        let [u, v] = [legs[0].arm().leaving(), legs[1].arm().leaving()];
-        size.radius_on(std::f64::consts::PI - (u.x * v.x + u.y * v.y).clamp(-1.0, 1.0).acos())
+    /// The two sides of `corner`, at its point.
+    fn legs_of(&self, si: usize, corner: CornerAt) -> Option<Corner> {
+        let CornerAt { point, pair } = corner;
+        let (e1, e2) = pair;
+        Some(Corner { legs: [self.leg(si, EdgeAt { edge: e1, corner: point })?, self.leg(si, EdgeAt { edge: e2, corner: point })?], point })
     }
 
     /// WHAT THE CUT WOULD LEAVE AT THE CORNER OF ANY TWO CURVES, changing nothing: `corner_blend` for a pair that is not
     /// two lines and arcs.
-    pub(crate) fn blend_any(&self, si: usize, pair: [Id; 2], cut: CornerCut) -> Option<CornerBlend> {
-        let legs = self.legs_of(si, pair)?.legs;
-        let corner = legs[0].arm().corner();
-        let arms = [legs[0].arm(), legs[1].arm()];
-        let (places, arc) = match cut {
-            CornerCut::Fillet(size) => {
-                let r = Self::radius_for(&legs, size)?;
-                let found = rounding(arms, r)?;
-                (found.at, Some(([found.centre.x, found.centre.y], r)))
-            }
-            CornerCut::Chamfer(legs_of_cut) => (chamfer(arms, legs_of_cut)?, None),
-        };
-        let end = |k: usize| {
-            let p = legs[k].curve.at(places[k]);
-            [p.x, p.y]
-        };
-        Some(CornerBlend { vertex: [corner.x, corner.y], ends: [end(0), end(1)], arc })
+    pub(crate) fn blend_any(&self, si: usize, corner: CornerAt, cut: CornerCut) -> Option<CornerBlend> {
+        let legs = self.legs_of(si, corner)?.legs;
+        blend_of_arms([legs[0].arm(), legs[1].arm()], cut)
     }
 
     /// CUT A SIDE BACK TO PLACE `t`: the piece of it from there to its far end laid in its stead, under its own id, of its
@@ -124,8 +126,8 @@ impl Project {
     /// ROUND THE CORNER OF ANY TWO CURVES with an arc of radius `r`: both sides cut back to where it touches them, the
     /// arc between, held to a side that is a line or an arc by a tangency and sized by its radius. Answers whether it
     /// was made - not where the radius does not fit.
-    pub(crate) fn round_any(&mut self, si: usize, pair: [Id; 2], r: f64) -> bool {
-        let Some(Corner { legs, point: pid }) = self.legs_of(si, pair) else { return false };
+    pub(crate) fn round_any(&mut self, si: usize, corner: CornerAt, r: f64) -> bool {
+        let Some(Corner { legs, point: pid }) = self.legs_of(si, corner) else { return false };
         let Some(found) = rounding([legs[0].arm(), legs[1].arm()], r) else { return false };
         let (Some(t1), Some(t2)) = (self.cut_leg_back(si, &legs[0], found.at[0]), self.cut_leg_back(si, &legs[1], found.at[1])) else { return false };
         let cen = self.point_exactly_at(si, found.centre);
@@ -137,19 +139,28 @@ impl Project {
         self.sketches[si].entities.push(SketchEntity { id: arc, kind: crate::model::ArcParts { center: cen, a: t1, b: t2, ccw }.into(), construction: false });
         for (leg, t) in legs.iter().zip([t1, t2]) {
             let kind = self.sketches[si].entity(leg.eid).map(|e| e.kind.clone());
-            let (line, arc) = (kind.as_ref().and_then(|k| k.as_line()), kind.as_ref().and_then(|k| k.as_arc()));
-            let touch = match (line, arc) {
-                (Some(_), _) => Some(Constraint::Tangent { a: leg.far, b: t, c: cen, r }),
-                (_, Some(arc)) => {
-                    let (Some((cx, cy)), Some((tx, ty))) = (self.point_xy(si, arc.center), self.point_xy(si, t)) else { continue };
+            let (line, round) = (kind.as_ref().and_then(|k| k.as_line()), kind.as_ref().and_then(|k| k.as_arc()));
+            let touch = match (line, round) {
+                (Some(_), _) => vec![Constraint::Tangent { a: leg.far, b: t, c: cen, r }],
+                (_, Some(round)) => {
+                    let (Some((cx, cy)), Some((tx, ty))) = (self.point_xy(si, round.center), self.point_xy(si, t)) else { continue };
                     let rad = (tx - cx).hypot(ty - cy);
                     let d = (found.centre.x - cx).hypot(found.centre.y - cy);
-                    Some(Constraint::CircleTangent { c1: arc.center, c2: cen, external: ((rad + r) - d).abs() <= ((rad - r).abs() - d).abs() })
+                    vec![Constraint::CircleTangent { c1: round.center, c2: cen, external: ((rad + r) - d).abs() <= ((rad - r).abs() - d).abs() }]
                 }
-                _ => None,
+                // a spline or an arc of an ellipse: touching the arc where it ends on it, as the tool of touching holds two
+                // curves of any kind (`tangency`). Held by nothing, the arc turned off the side under a drag of the other
+                _ => self.tangency(si, [arc, leg.eid]),
             };
             self.sketches[si].constraints.extend(touch);
-            self.hold_sharp(si, pid, leg);
+            if kind.as_ref().is_some_and(|k| k.as_spline().is_some()) {
+                // THE SHARP ON THE WAY OF A SPLINE PAST ITS END: the line of touching at the end of the side, square to the
+                // radius of the arc there. A point on a spline itself stops at its end: the sharp held there was drawn to
+                // the point of touching, and took the arc down to nothing with it
+                self.sketches[si].constraints.push(Constraint::Perpendicular { a: cen, b: t, c: t, d: pid });
+            } else {
+                self.hold_sharp(si, pid, leg);
+            }
         }
         let off = fillet_label_angle(&self.sketches[si].points, cen, t1, t2);
         self.sketches[si].constraints.push(Constraint::Diameter { c: cen, d: r, off, expr: String::new(), driven: false, diam: false, at: None });
@@ -160,8 +171,8 @@ impl Project {
     /// CHAMFER THE CORNER OF ANY TWO CURVES by `legs`, the first leg on the first of the pair: both sides cut back to
     /// where the cut meets them, the cut laid as a line, its size kept as dimensions - the cut of a symmetric one, a leg
     /// straight from the sharp otherwise. Answers whether it was made - not where a side does not reach as far.
-    pub(crate) fn chamfer_any(&mut self, si: usize, pair: [Id; 2], legs_of_cut: ChamferLegs) -> bool {
-        let Some(Corner { legs, point: pid }) = self.legs_of(si, pair) else { return false };
+    pub(crate) fn chamfer_any(&mut self, si: usize, corner: CornerAt, legs_of_cut: ChamferLegs) -> bool {
+        let Some(Corner { legs, point: pid }) = self.legs_of(si, corner) else { return false };
         let Some(places) = chamfer([legs[0].arm(), legs[1].arm()], legs_of_cut) else { return false };
         let (sharp, at1, at2) = (legs[0].arm().corner(), legs[0].curve.at(places[0]), legs[1].curve.at(places[1]));
         let (Some(t1), Some(t2)) = (self.cut_leg_back(si, &legs[0], places[0]), self.cut_leg_back(si, &legs[1], places[1])) else { return false };
@@ -178,7 +189,10 @@ impl Project {
             crate::feature::ChamferMode::DistAngle => vec![leg_dim([end_c, end_1], Side::AwayFrom(at2), sharp.dist(at1))],
         };
         self.sketches[si].constraints.extend(dims);
-        for leg in &legs {
+        // the sharp on a side that is a spline is not held on it: a point on a spline stops at its end, and the sharp drawn
+        // there took the cut down to nothing; the other side and the legs hold it
+        let held: Vec<&Leg> = legs.iter().filter(|l| self.sketches[si].entity(l.eid).is_some_and(|e| e.kind.as_spline().is_none())).collect();
+        for leg in held {
             self.hold_sharp(si, pid, leg);
         }
         self.regen_sketch(si);

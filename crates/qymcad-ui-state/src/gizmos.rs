@@ -162,25 +162,6 @@ pub fn body_giz_readout(body_giz: &BodyGizmo, set: &Settings, snap: bool) -> Opt
     }
 }
 
-/// The radius of a circle centred at `p` that touches the base edge (the perpendicular distance to a
-/// line, or |dist - R| to a circle).
-pub fn tangent_radius_to_edge(dc: &DrawCtx, si: usize, eref: EdgeRef, p: Point2) -> f64 {
-    match eref {
-        EdgeRef::Line { a, b } => match (sketch_pt(dc.project, si, a), sketch_pt(dc.project, si, b)) {
-            (Some(pa), Some(pb)) => {
-                let (dx, dy) = (pb.x - pa.x, pb.y - pa.y);
-                let len = (dx * dx + dy * dy).sqrt().max(1e-9);
-                ((dx * (p.y - pa.y) - dy * (p.x - pa.x)) / len).abs()
-            }
-            _ => 0.0,
-        },
-        EdgeRef::Circle { center, r } => match sketch_pt(dc.project, si, center) {
-            Some(pc) => (((p.x - pc.x).powi(2) + (p.y - pc.y).powi(2)).sqrt() - r).abs(),
-            None => 0.0,
-        },
-    }
-}
-
 /// The world (origin, normal) of the plane the command has picked — for the PREVIEW, without creating a
 /// datum (unlike `resolve_mirror_plane`). For a face, the local centroid and normal are taken into
 /// world space through the body's display transform.

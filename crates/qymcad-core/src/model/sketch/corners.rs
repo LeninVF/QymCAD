@@ -439,22 +439,25 @@ impl Project {
     /// (tangency to each edge plus a radius dimension). Works for line to line, line to arc and arc to arc.
     /// Returns whether it succeeded.
     pub fn fillet_curves(&mut self, si: usize, e1: Id, e2: Id, r: f64, nearx: f64, neary: f64) -> bool {
+        let Some(point) = self.shared_vertex(si, e1, e2) else { return false };
+        self.fillet_curves_at(si, CornerAt::of(point, [e1, e2]), r, Point2::new(nearx, neary))
+    }
+    /// The same at the point of `corner`, the centre the one of those that fit nearest `near`.
+    pub(crate) fn fillet_curves_at(&mut self, si: usize, corner: CornerAt, r: f64, near: Point2) -> bool {
+        let CornerAt { point: pc, pair } = corner;
+        let (e1, e2) = pair;
+        let (nearx, neary) = (near.x, near.y);
         if r <= 1e-9 {
             return false;
         }
         if !self.straight_or_round(si, [e1, e2]) {
-            return self.round_any(si, [e1, e2], r);
+            return self.round_any(si, corner, r);
         }
         let Some((e1a, e1b)) = self.edge_end_ids(si, e1) else { return false };
         let Some((e2a, e2b)) = self.edge_end_ids(si, e2) else { return false };
-        // The shared vertex.
-        let pc = if e1a == e2a || e1a == e2b {
-            e1a
-        } else if e1b == e2a || e1b == e2b {
-            e1b
-        } else {
+        if !(pc == e1a || pc == e1b) || !(pc == e2a || pc == e2b) {
             return false;
-        };
+        }
         let o1 = if e1a == pc { e1b } else { e1a };
         let o2 = if e2a == pc { e2b } else { e2a };
         let Some((pcx, pcy)) = self.point_xy(si, pc) else { return false };
@@ -730,12 +733,24 @@ impl Project {
     /// its tangent makes no corner either. Taken by the chord, it did: a click on the top of a rounded square by the end
     /// of its fillet named the joint a corner, and the fillet put on it stood its centre 8 above the square. The two
     /// are one straight within 1e-6 of a turn - what a solve leaves at a tangency.
+    ///
+    /// TWO CURVES SHARING BOTH THEIR ENDS - the halves of two circles cut where they cross, an arc closed by its chord -
+    /// make a corner at each end, and this answers the first; `corner_at` asks about one point.
     pub fn corner_of_pair(&self, si: usize, e1: Id, e2: Id) -> Option<Id> {
-        let pid = self.shared_vertex(si, e1, e2)?;
-        let (Some(u), Some(v)) = (self.leaving(si, EdgeAt { edge: e1, corner: pid }), self.leaving(si, EdgeAt { edge: e2, corner: pid })) else { return None };
-        let (x1, y1, x2, y2) = (u.x, u.y, v.x, v.y);
+        let (a, b) = self.edge_end_ids(si, e1)?;
+        [a, b].into_iter().find(|&point| self.corner_at(si, CornerAt::of(point, [e1, e2])))
+    }
+    /// WHETHER THE TWO EDGES OF `corner` MAKE A CORNER AT ITS POINT: both end there and do not go on along one straight
+    /// line through it.
+    pub fn corner_at(&self, si: usize, corner: CornerAt) -> bool {
+        let CornerAt { point, pair } = corner;
+        let (e1, e2) = pair;
+        if e1 == e2 {
+            return false;
+        }
+        let (Some(u), Some(v)) = (self.leaving(si, EdgeAt { edge: e1, corner: point }), self.leaving(si, EdgeAt { edge: e2, corner: point })) else { return false };
         // parallel means one straight line: the angle between them is 180 degrees, and there is no corner in it
-        ((x1 * y2 - y1 * x2).abs() > 1e-6).then_some(pid)
+        (u.x * v.y - u.y * v.x).abs() > 1e-6
     }
     /// THE CORNERS A NAMED SET OF LINES MAKES: every pair of them that meets, two at a time, in the order they
     /// were named.
@@ -799,11 +814,15 @@ impl Project {
     pub fn corner_blend(&self, si: usize, pid: Id, (e1, e2): (Id, Id), cut: CornerCut) -> Option<CornerBlend> {
         // THE PAIR MUST BE THE CORNER: two lines that meet nowhere, or that lie along one straight line, are not a
         // corner and there is nothing to show where they are not.
-        if self.corner_of_pair(si, e1, e2) != Some(pid) {
+        let corner = CornerAt::of(pid, [e1, e2]);
+        if !self.corner_at(si, corner) {
             return None;
         }
-        if !self.straight_or_round(si, [e1, e2]) {
-            return self.blend_any(si, [e1, e2], cut);
+        // A CORNER WITH A CURVE IN IT is read off the curves themselves: taken along the chords to the far ends, the
+        // preview of a fillet between two arcs of crossing circles stood 1.9 mm off the arc the fillet laid, and between the
+        // halves of two circles, whose far ends are one point, it was refused as a corner of no angle
+        if !self.both_lines(si, [e1, e2]) {
+            return self.blend_any(si, corner, cut);
         }
         let (pcx, pcy) = self.point_xy(si, pid)?;
         // the direction away from the corner along each edge, and how long that edge is
@@ -862,7 +881,8 @@ impl Project {
             return None;
         }
         if dirs.len() == 2 {
-            return self.corner_of_pair(si, dirs[0].0, dirs[1].0).map(|_| (dirs[0].0, dirs[1].0));
+            let pair = (dirs[0].0, dirs[1].0);
+            return self.corner_at(si, CornerAt { point: pid, pair }).then_some(pair);
         }
         let (nx, ny) = near?;
         let (tx, ty) = (nx - pcx, ny - pcy);
@@ -876,7 +896,7 @@ impl Project {
         let at = v.partition_point(|(_, a)| *a <= ty.atan2(tx)) % v.len();
         let pair = (v[(at + v.len() - 1) % v.len()].0, v[at].0);
         // the two sides bracketing the cursor are a corner unless they lie along one straight line
-        self.corner_of_pair(si, pair.0, pair.1).map(|_| pair)
+        self.corner_at(si, CornerAt { point: pid, pair }).then_some(pair)
     }
     /// THE CORNER OF ONE NAMED EDGE AT `pid`, on the side the point `near` stands.
     ///
@@ -929,7 +949,11 @@ impl Project {
         });
         let other = if forward { v[(at + 1) % len].0 } else { v[(at + len - 1) % len].0 };
         let pair = (eid, other);
-        self.corner_of_pair(si, pair.0, pair.1).map(|_| pair)
+        self.corner_at(si, CornerAt { point: pid, pair }).then_some(pair)
+    }
+    /// WHETHER ANY TWO EDGES MAKE A CORNER AT `pid`: what the fillet and the chamfer take a point for.
+    pub fn is_corner_point(&self, si: usize, pid: Id) -> bool {
+        self.vertex_pairs(si, pid).into_iter().any(|pair| self.corner_at(si, CornerAt { point: pid, pair }))
     }
     /// EVERY PAIR OF EDGES THAT COULD BE THE CORNER at `pid`, for the bounds that do not name a pair.
     pub fn vertex_pairs(&self, si: usize, pid: Id) -> Vec<(Id, Id)> {
@@ -949,19 +973,28 @@ impl Project {
     /// first.
     pub fn chamfer_at_vertex(&mut self, si: usize, pid: Id, legs: ChamferLegs, toward: Option<Point2>) -> bool {
         let Some(pair) = self.vertex_pair(si, pid, None) else { return false };
-        self.chamfer_lines_of_pair(si, pair, legs, toward)
+        self.chamfer_corner(si, CornerAt { point: pid, pair }, legs, toward)
     }
     /// Chamfer the corner at `pid` that the point `(x, y)` stands in, where more than two edges meet there.
     pub fn chamfer_at_vertex_near(&mut self, si: usize, pid: Id, legs: ChamferLegs, x: f64, y: f64, toward: Option<Point2>) -> bool {
         let Some(pair) = self.vertex_pair(si, pid, Some((x, y))) else { return false };
-        self.chamfer_lines_of_pair(si, pair, legs, toward)
+        self.chamfer_corner(si, CornerAt { point: pid, pair }, legs, toward)
     }
     /// The cut of `legs` off the corner the two named edges make: two lines by `chamfer_lines`, a corner with a curve in
     /// it cut along the curve by `chamfer_any` - its legs measured straight from the corner.
     pub fn chamfer_lines_of_pair(&mut self, si: usize, (e1, e2): (Id, Id), legs: ChamferLegs, toward: Option<Point2>) -> bool {
-        let Some(shared) = self.corner_of_pair(si, e1, e2) else {
+        let Some(point) = self.corner_of_pair(si, e1, e2) else {
             return false; // two lines in one straight line: nothing is cut, and the cut would be along them
         };
+        self.chamfer_corner(si, CornerAt::of(point, [e1, e2]), legs, toward)
+    }
+    /// The cut of `legs` off `corner`, at its point.
+    pub fn chamfer_corner(&mut self, si: usize, corner: CornerAt, legs: ChamferLegs, toward: Option<Point2>) -> bool {
+        let CornerAt { point: shared, pair } = corner;
+        let (e1, e2) = pair;
+        if !self.corner_at(si, corner) {
+            return false;
+        }
         // the side whose way from the corner leans nearer to the click is the first
         let lean = |me: &Self, eid: Id| -> f64 {
             let Some(toward) = toward else { return 0.0 };
@@ -970,11 +1003,10 @@ impl Project {
             -(u.x * vx + u.y * vy) / vx.hypot(vy).max(1e-12)
         };
         let (first, second) = if lean(self, e2) < lean(self, e1) { (e2, e1) } else { (e1, e2) };
-        let both_lines = [e1, e2].iter().all(|&eid| self.sketches.get(si).and_then(|s| s.entity(eid)).is_some_and(|e| e.kind.as_line().is_some()));
-        if both_lines {
+        if self.both_lines(si, [e1, e2]) {
             self.chamfer_lines(si, first, second, legs)
         } else {
-            self.chamfer_any(si, [first, second], legs)
+            self.chamfer_any(si, CornerAt::of(shared, [first, second]), legs)
         }
     }
     /// Connected shape: every entity reachable from `eid` through shared endpoints — a rectangle from one of

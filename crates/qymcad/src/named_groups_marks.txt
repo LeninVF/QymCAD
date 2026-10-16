@@ -32,7 +32,7 @@ crates/qymcad-acceptance/src/tools/sketch/constraints.rs 0 15 0
 crates/qymcad-acceptance/src/tools/sketch/corners.rs 0 18 0
 crates/qymcad-acceptance/src/tools/sketch/cuts.rs 0 10 0
 crates/qymcad-acceptance/src/tools/sketch/dims.rs 0 6 0
-crates/qymcad-acceptance/src/tools/sketch/draws.rs 0 32 0
+crates/qymcad-acceptance/src/tools/sketch/draws.rs 0 30 0
 crates/qymcad-acceptance/src/tools/sketch/edits.rs 0 7 0
 crates/qymcad-acceptance/src/tools/sketch/projects.rs 0 5 0
 crates/qymcad-acceptance/src/tools/sketch/reads.rs 0 4 0
@@ -136,13 +136,13 @@ crates/qymcad-core/src/model/hash_ser.rs 0 0 1
 crates/qymcad-core/src/model/keys.rs 2 3 1
 crates/qymcad-core/src/model/params.rs 0 4 0
 crates/qymcad-core/src/model/projection.rs 1 7 0
-crates/qymcad-core/src/model/refs.rs 7 5 0
+crates/qymcad-core/src/model/refs.rs 7 4 0
 crates/qymcad-core/src/model/regen.rs 1 0 1
 crates/qymcad-core/src/model/regen/apply.rs 6 0 0
 crates/qymcad-core/src/model/regen/prep_bodies.rs 3 8 0
 crates/qymcad-core/src/model/regen/prep_ops.rs 11 5 4
 crates/qymcad-core/src/model/regen/prep_profiles.rs 1 1 0
-crates/qymcad-core/src/model/regen/refs.rs 2 5 1
+crates/qymcad-core/src/model/regen/refs.rs 2 4 1
 crates/qymcad-core/src/model/regen/run.rs 0 2 0
 crates/qymcad-core/src/model/round.rs 5 5 0
 crates/qymcad-core/src/model/sketch.rs 10 7 0
@@ -153,7 +153,7 @@ crates/qymcad-core/src/model/sketch/entities.rs 25 8 3
 crates/qymcad-core/src/model/sketch/offset.rs 0 3 0
 crates/qymcad-core/src/model/sketch/profiles.rs 9 5 0
 crates/qymcad-core/src/model/sketch/solve.rs 1 5 1
-crates/qymcad-core/src/model/sketch/trim.rs 4 2 0
+crates/qymcad-core/src/model/sketch/trim.rs 4 1 0
 crates/qymcad-core/src/model/sketch_ops.rs 7 4 0
 crates/qymcad-core/src/model/sketch_types.rs 0 2 0
 crates/qymcad-core/src/model/tess.rs 9 28 0
@@ -407,7 +407,7 @@ crates/qymcad-scheme/src/tests.rs 1 7 0
 crates/qymcad-shell/src/lib.rs 0 0 1
 crates/qymcad-sketch/src/clicks.rs 0 3 1
 crates/qymcad-sketch/src/constraints.rs 0 1 0
-crates/qymcad-sketch/src/corners.rs 1 2 4
+crates/qymcad-sketch/src/corners.rs 1 2 3
 crates/qymcad-sketch/src/dims.rs 6 3 0
 crates/qymcad-sketch/src/drag.rs 5 2 1
 crates/qymcad-sketch/src/lib.rs 2 16 2
@@ -512,7 +512,7 @@ crates/qymcad-testkit/tests/what_a_rebuild_costs.rs 0 4 0
 crates/qymcad-testkit/tests/what_the_waves_look_like.rs 0 1 0
 crates/qymcad-ui-state/build.rs 2 0 0
 crates/qymcad-ui-state/src/contexts.rs 0 13 0
-crates/qymcad-ui-state/src/corners.rs 4 14 3
+crates/qymcad-ui-state/src/corners.rs 4 11 3
 crates/qymcad-ui-state/src/dims.rs 11 9 1
 crates/qymcad-ui-state/src/edits.rs 0 1 2
 crates/qymcad-ui-state/src/fields.rs 2 2 2

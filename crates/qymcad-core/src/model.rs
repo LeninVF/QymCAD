@@ -638,7 +638,7 @@ mod sketch;
 pub use sketch::{Crossing, LayAs, LoftEncoded, LoftSectionsEncoded};
 mod drag;
 mod round;
-pub use sketch::{ChamferLegs, CornerAt, CornerBlend, CornerCut, CornerTool, CurveExtension, ExtendAsk, ExtendSides, EndKept, FilletBy, FilletSize, LinesCrossing, TextSpec};
+pub use sketch::{ChamferLegs, CornerAt, CornerBlend, CornerCut, CornerTool, CurveExtension, ExtendAsk, ExtendSides, EndKept, FilletBy, FilletSize, LinesCrossing, TextSpec, Touching};
 pub(crate) mod comp_pattern;
 pub use comp_pattern::{CompPattern, CompPatternKind};
 mod projection;

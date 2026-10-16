@@ -196,7 +196,6 @@ pub fn sketch_tool_click(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: P
         7 => &qymcad_i18n::tr("sk-slot"),
         8 => &qymcad_i18n::tr("sk-ellipse"),
         9 => &qymcad_i18n::tr("sk-spline"),
-        10 => &qymcad_i18n::tr("sk-circle"), // a circle through three points is a circle
         11 => &qymcad_i18n::tr("sk-text"),
         _ => &qymcad_i18n::tr("sk-drawing"),
     };
@@ -311,27 +310,41 @@ pub fn sketch_tool_click_inner(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, 
             }
         }
         3 if sk.tool_prefs.circ_mode == 2 => {
-            // A TANGENT circle: the first click picks the base edge, the second the centre (the radius
-            // follows from the tangency)
-            if sk.tool.circ_tan.is_none() {
-                if let Some(eref) = ref_edge_at(sk, rect, pos, si) {
-                    sk.tool.circ_tan = Some(eref);
-                    *sk.status = Notice::info(qymcad_i18n::tr("sk-tangent-base-picked"));
-                } else {
-                    *sk.status = Notice::info(qymcad_i18n::tr("sk-tangent-pick-base"));
+            // A CIRCLE TOUCHING TWO CURVES: the first two clicks pick the curves, of any kind; the circle of the radius of
+            // the bar then follows the pointer between them, and the third click lays it held touching both, its size
+            // open to be typed
+            if sk.tool.circ_tan.len() < 2 {
+                match qymcad_pick::edit_target(&sk.pick(), rect, pos, si) {
+                    Some(eid) if !sk.tool.circ_tan.contains(&eid) => {
+                        sk.tool.circ_tan.push(eid);
+                        *sk.status = Notice::info(qymcad_i18n::tr(if sk.tool.circ_tan.len() == 1 { "sk-tangent-base-picked" } else { "sk-tangent-place" }));
+                    }
+                    _ => *sk.status = Notice::info(qymcad_i18n::tr("sk-tangent-pick-base")),
                 }
-            } else if let Some(eref) = sk.tool.circ_tan.take() {
-                let r = qymcad_ui_state::tangent_radius_to_edge(&sk.draw(), si, eref, w);
-                if r > 1e-6 {
-                    let eid = sk.project.add_circle_entity(si, w.x, w.y, r, qymcad_core::feature::Purpose::of(con));
-                    let cen = sk.project.sketch_point_at(si, w.x, w.y, 1e-6);
-                    qymcad_ui_state::add_tangent_to_edge(&mut *sk.project, si, eref, cen, w.x, w.y, r);
-                    sk.project.solve_sketch(si);
+            } else {
+                let ask = qymcad_core::model::Touching { curves: [sk.tool.circ_tan[0], sk.tool.circ_tan[1]], r: sk.tool_prefs.circ_r, near: w };
+                match sk.project.add_circle_touching(si, ask, qymcad_core::feature::Purpose::of(con)) {
+                    Some(eid) => {
+                        sk.tool.circ_tan.clear();
+                        qymcad_ui_state::invalidate(&mut *sk.regen);
+                        open_the_size_of_the_new_shape(sk, eid, qymcad_core::feature::Purpose::of(con));
+                    }
+                    None => *sk.status = Notice::refusal(qymcad_i18n::tr("sk-tangent-no-circle")),
+                }
+            }
+        }
+        3 if sk.tool_prefs.circ_mode == 3 => {
+            // a circle through three points
+            sk.tool.pts.push(w);
+            if sk.tool.pts.len() == 3 {
+                if let Some((cx, cy, r)) = qymcad_ui_state::circumcircle(sk.tool.pts[0], sk.tool.pts[1], sk.tool.pts[2]) {
+                    let eid = sk.project.add_circle_entity(si, cx, cy, r, qymcad_core::feature::Purpose::of(con));
                     qymcad_ui_state::invalidate(&mut *sk.regen);
                     open_the_size_of_the_new_shape(sk, eid, qymcad_core::feature::Purpose::of(con));
                 } else {
-                    *sk.status = Notice::refusal(qymcad_i18n::tr("sk-centre-on-edge"));
+                    *sk.status = Notice::refusal(qymcad_i18n::tr("sk-points-collinear-circle"));
                 }
+                sk.tool.pts.clear();
             }
         }
         3 => {
@@ -480,20 +493,6 @@ pub fn sketch_tool_click_inner(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, 
                 lay_the_spline(sk, qymcad_core::feature::Ends::Closed);
             } else if !sk.tool.pts.last().is_some_and(|last| same_place(sk, *last, w)) {
                 sk.tool.pts.push(w);
-            }
-        }
-        10 => {
-            // a circle through three points
-            sk.tool.pts.push(w);
-            if sk.tool.pts.len() == 3 {
-                if let Some((cx, cy, r)) = qymcad_ui_state::circumcircle(sk.tool.pts[0], sk.tool.pts[1], sk.tool.pts[2]) {
-                    let eid = sk.project.add_circle_entity(si, cx, cy, r, qymcad_core::feature::Purpose::of(con));
-                    qymcad_ui_state::invalidate(&mut *sk.regen);
-                    open_the_size_of_the_new_shape(sk, eid, qymcad_core::feature::Purpose::of(con));
-                } else {
-                    *sk.status = Notice::refusal(qymcad_i18n::tr("sk-points-collinear-circle"));
-                }
-                sk.tool.pts.clear();
             }
         }
         11 if sk.tool_prefs.text_note => {
@@ -683,7 +682,7 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                     // line beside it named that joint and nothing, and the line aimed at was not taken.
                     let over = {
                         let zone = qymcad_ui_state::corner_zone_px(sk.set);
-                        let is_corner = |id: Id| sk.project.vertex_pairs(si, id).into_iter().any(|(a, b)| sk.project.corner_of_pair(si, a, b).is_some());
+                        let is_corner = |id: Id| sk.project.is_corner_point(si, id);
                         let point = qymcad_pick::nearest_point_within_where(&sk.pick(), rect, pos, si, zone, is_corner).map(|id| {
                             let w = qymcad_ui_state::to_world(sk.view, rect, pos);
                             qymcad_ui_state::CornerOver::Point { id, at: (w.x, w.y) }
@@ -710,8 +709,11 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                     let mut act = qymcad_ui_state::corner_click(sk.project, si, sk.corner, sk.sel_sk, over, shift);
                     // TWO CHOSEN LINES THAT CROSS make their corners where they cross: the two are cut there - a step of
                     // undo the corner cut joins - and the corner is named at that point, on the side the pointer is.
-                    // Reported behaviour: "it must work as well with two lines chosen with Shift".
-                    let chosen: Vec<Id> = sk.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect();
+                    // Reported behaviour: "it must work as well with two lines chosen with Shift". THE CLICK THAT CHOSE A
+                    // CURVE OR LET ONE GO CUTS NOTHING: cut by the click that chose the second curve, the corner stood on
+                    // the side of that curve the click was on, before the pointer had been near the crossing.
+                    let chose = matches!(act, qymcad_ui_state::CornerClick::LineChosen(_) | qymcad_ui_state::CornerClick::LineLetGo(_));
+                    let chosen: Vec<Id> = if chose { Vec::new() } else { sk.sel_sk.items.iter().filter(|(k, _)| *k == 1).map(|(_, id)| *id).collect() };
                     let w = qymcad_ui_state::to_world(sk.view, rect, pos);
                     let crossing = chosen.iter().enumerate().find_map(|(i, &one)| chosen[i + 1..].iter().find_map(|&other| sk.project.crossing_of(si, [one, other], Point2::new(w.x, w.y))));
                     if let Some(crossing) = crossing {
@@ -729,10 +731,19 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                             act = qymcad_ui_state::CornerClick::AtPoint(sk.corner.set.click_at_point(&*sk.project, si, pid, read));
                         }
                     }
-                    // A POINT WITH MORE THAN ONE CORNER TO GIVE IS NAMED, NOT A SIDE OF IT: the corner follows the pointer
-                    // until a click on its side fixes it - for a crossing clicked or chosen by its lines, and for a point
-                    // several shapes meet at alike
-                    if matches!(act, qymcad_ui_state::CornerClick::AtPoint(qymcad_ui_state::PointAct::PointAdded)) && sk.corner.set.choice(&*sk.project, si) == qymcad_ui_state::Choice::Many {
+                    // A POINT WITH MORE THAN ONE CORNER TO GIVE, CLICKED ON ITSELF, IS NAMED, NOT A SIDE OF IT: the corner
+                    // follows the pointer until a click on its side fixes it - for a crossing clicked or chosen by its
+                    // curves, and for a point several shapes meet at alike. A click beside the point is on a side already,
+                    // the side the preview showed under the pointer, and fixes the corner there.
+                    if matches!(act, qymcad_ui_state::CornerClick::AtPoint(qymcad_ui_state::PointAct::PointAdded))
+                        && sk.corner.set.choice(&*sk.project, si) == qymcad_ui_state::Choice::Many
+                        && qymcad_ui_state::click_on_the_point(
+                            &*sk.project,
+                            si,
+                            &sk.corner.set,
+                            qymcad_ui_state::PointClick { at: w, reach: qymcad_ui_state::corner_zone_px(sk.set) / 3.0 / sk.view.scale },
+                        )
+                    {
                         sk.corner.aim = qymcad_ui_state::Aim::Following;
                     }
                     // WHERE THE CORNER WAS POINTED AT, on the sheet: the line of the corner the pointer stands

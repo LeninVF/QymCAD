@@ -21,6 +21,92 @@ pub struct Rounding {
     pub at: [f64; 2],
 }
 
+/// A PIECE OF A CURVE LEAVING A CROSSING, as a cut there would leave it: the piece and its end standing on the crossing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Half {
+    pub curve: Curve,
+    pub end: End,
+}
+
+impl Half {
+    /// The piece as a side of a corner on the crossing.
+    pub fn arm(&self) -> Arm<'_> {
+        Arm { curve: &self.curve, end: self.end }
+    }
+}
+
+impl Curve {
+    /// THE PIECES OF THE CURVE LEAVING `at`, where `other` crosses it, as a cut of the crossing leaves them: an open curve
+    /// in two there - one piece where it ends there - a closed one cut at every place `other` meets it, so the two pieces
+    /// at `at` run to the meetings either side. Nothing for a closed curve met at one place alone, which no cut takes.
+    pub fn halves_at(&self, other: &Curve, at: Point2) -> Vec<Half> {
+        let t = self.nearest(at).t;
+        let half = |run: [f64; 2], end: End| Half { curve: self.piece(run), end };
+        if !self.closed() {
+            let mut out = Vec::new();
+            if t < 1.0 - 1e-9 {
+                out.push(half([t, 1.0], End::Start));
+            }
+            if t > 1e-9 {
+                out.push(half([0.0, t], End::Finish));
+            }
+            return out;
+        }
+        let mut places: Vec<f64> = self.meet(other).iter().map(|m| m.ta).collect();
+        places.sort_by(f64::total_cmp);
+        places.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        let (Some(&first), Some(&last)) = (places.first(), places.last()) else { return Vec::new() };
+        if places.len() < 2 {
+            return Vec::new();
+        }
+        let next = places.iter().copied().find(|p| *p > t + 1e-9).unwrap_or(first + 1.0);
+        let prev = places.iter().copied().rev().find(|p| *p < t - 1e-9).unwrap_or(last - 1.0);
+        let back = if prev < 0.0 { [prev + 1.0, t + 1.0] } else { [prev, t] };
+        vec![half([t, next], End::Start), half(back, End::Finish)]
+    }
+}
+
+/// THE RADIUS A FILLET OF `size` TAKES IN THE CORNER of the two arms: a chord or an arc length makes it on the turn between
+/// the ways they leave the corner.
+pub fn radius_in(arms: [Arm; 2], size: FilletSize) -> Option<f64> {
+    if size.by == FilletBy::Radius {
+        return Some(size.value);
+    }
+    let [u, v] = [arms[0].leaving(), arms[1].leaving()];
+    size.radius_on(std::f64::consts::PI - (u.x * v.x + u.y * v.y).clamp(-1.0, 1.0).acos())
+}
+
+/// THE CENTRES OF THE CIRCLES OF RADIUS `r` TOUCHING BOTH CURVES: where their offsets by the radius meet, on either side
+/// of each. A line is taken as the whole straight line it lies on: a circle touching a line touches it anywhere along it.
+pub fn centres_touching(curves: [&Curve; 2], r: f64) -> Vec<Point2> {
+    if r <= 1e-9 {
+        return Vec::new();
+    }
+    let whole = |c: &Curve| match c {
+        Curve::Line { a, b } => {
+            let u = c.tangent(0.0);
+            Curve::Line { a: *a - mul(u, WHOLE_LINE), b: *b + mul(u, WHOLE_LINE) }
+        }
+        other => other.clone(),
+    };
+    let [a, b] = curves.map(whole);
+    let mut out = Vec::new();
+    for da in [-r, r] {
+        for db in [-r, r] {
+            for oa in a.offset(da) {
+                for ob in b.offset(db) {
+                    out.extend(oa.meet(&ob).into_iter().map(|m| m.at));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// How far a line is drawn on past each end to stand for the whole straight line it lies on, in mm: past the largest
+/// sheet a sketch is drawn on.
+const WHOLE_LINE: f64 = 1e4;
+
 /// How many points a curve is looked along from its end for the place a leg reaches.
 const LOOKS: usize = 400;
 

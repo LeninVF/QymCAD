@@ -210,7 +210,14 @@ pub fn corner_input_popup(cc: &mut qymcad_ui_state::CornerCtx, ctx: &egui::Conte
                 // the same cut the preview drew, and leaves the sketch as it was where one corner does not take it
                 let corners: Vec<qymcad_core::model::CornerAt> = standing.iter().map(|&(point, pair)| qymcad_core::model::CornerAt { point, pair }).collect();
                 let cut = corner_cut(cc, chamfer, r);
-                cc.project.cut_corner_set(si, &corners, cut, cc.corner.near)
+                let done = cc.project.cut_corner_set(si, &corners, cut, cc.corner.near);
+                // a corner of a crossing leaves its two sides alone: the halves beyond it go
+                if done > 0 && joins {
+                    for c in &corners {
+                        cc.project.drop_halves_beyond_corner(si, c.point);
+                    }
+                }
+                done
             };
             if cut > 0 {
                 // THE CHOSEN LINES THAT THE KNIFE HAS CONSUMED GO OUT OF THE SELECTION: a line that is no longer

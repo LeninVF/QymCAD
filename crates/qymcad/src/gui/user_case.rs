@@ -1254,7 +1254,7 @@ mod tests {
             let si = app.create_sketch_on(qymcad_core::feature::SketchPlane::default());
 
             // DRAWING: each tool with its own number of clicks, as in real work.
-            let draws: [Drawing; 11] = [
+            let draws: [Drawing; 10] = [
                 drawing(1, "line", &[(0.0, 0.0), (20.0, 0.0)]),
                 drawing(2, "rectangle", &[(30.0, 0.0), (50.0, 15.0)]),
                 drawing(3, "circle", &[(70.0, 10.0), (78.0, 10.0)]),
@@ -1264,7 +1264,6 @@ mod tests {
                 drawing(7, "slot", &[(70.0, 30.0), (85.0, 30.0), (85.0, 35.0)]),
                 drawing(8, "ellipse", &[(0.0, 55.0), (12.0, 55.0), (6.0, 62.0)]),
                 drawing(9, "spline", &[(25.0, 55.0), (32.0, 62.0), (40.0, 55.0), (48.0, 60.0)]),
-                drawing(10, "circle through three points", &[(60.0, 55.0), (68.0, 60.0), (72.0, 52.0)]),
                 drawing(11, "text", &[(0.0, 75.0)]),
             ];
             for Drawing { tool, name, clicks: pts } in draws {
