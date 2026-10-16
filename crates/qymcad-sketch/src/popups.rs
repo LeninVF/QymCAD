@@ -608,7 +608,7 @@ pub fn slot_size_popup(pl: &mut qymcad_ui_state::PlaceCtx, ctx: &egui::Context, 
     let mut buf = std::mem::take(&mut pl.place.buf);
     egui::Area::new(egui::Id::new(("slotsize", si)))
         .fixed_pos(qymcad_ui_state::clamp_popup((qymcad_ui_state::Sheet { view: *pl.view, rect }).at(at), rect) + egui::vec2(10.0, -10.0))
-        .order(egui::Order::Foreground)
+        .order(qymcad_ui_state::AT_GEOMETRY)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.horizontal(|ui| {

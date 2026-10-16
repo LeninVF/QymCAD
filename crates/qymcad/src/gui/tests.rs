@@ -89,6 +89,9 @@ mod a_projected_ellipse_follows_its_body;
 mod a_spline_survives_a_circle_deleted_by_hand;
 
 #[cfg(test)]
+mod a_reference_size_reads_the_curve_as_it_stands;
+
+#[cfg(test)]
 mod a_circle_shows_its_centre_lines;
 
 #[cfg(test)]
