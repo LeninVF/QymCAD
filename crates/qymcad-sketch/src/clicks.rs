@@ -69,7 +69,7 @@ pub fn sketch_select_click(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos:
     // a click on the diameter or radius caption of a circle or an arc (outside the contour) picks it as an
     // entity
     if hit.is_none() {
-        if let Some(eid) = qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si) {
+        if let Some(eid) = qymcad_pick::curve_or_caption_under(&sk.pick(), rect, pos, si) {
             hit = Some((1u8, eid));
         }
     }
@@ -801,7 +801,7 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                         _ => "tool-break",
                     };
                     qymcad_ui_state::begin_edit(&mut *sk.edits, &*sk.project, qymcad_i18n::tr(tool));
-                    // the curve nearest the pointer, of whatever kind; a line goes by the ways of a line
+                    // the curve nearest the pointer, of whatever kind
                     let target = qymcad_pick::edit_target(&sk.pick(), rect, pos, si);
                     let line_eid = target.filter(|e| sk.project.sketches[si].entity(*e).is_some_and(|x| x.kind.as_line().is_some()));
                     // EXTEND HOLDS A LINE, or takes the line clicked: the click applies what the preview shows
@@ -810,25 +810,15 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                         qymcad_ui_state::commit_edit_if_changed(&mut sk.rebuild()); // taking the line changes nothing
                         return;
                     }
-                    let ok = if let Some(eid) = line_eid {
-                        match sk.armed.click_op() {
-                            1 => sk.project.trim_line(si, eid, w.x, w.y),
-                            2 => sk.project.extend_line(si, eid, w.x, w.y),
-                            3 => sk.project.break_line(si, eid, w.x, w.y),
-                            _ => false,
-                        }
-                    } else {
-                        false
-                    };
-                    // not a line - the curve under the pointer; a line that did not work - a circle or an arc beside it
-                    let other = if line_eid.is_some() { qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si) } else { target };
-                    let ok = ok
-                        || other.is_some_and(|eid| match sk.armed.click_op() {
-                            1 => sk.project.trim_curve(si, eid, w.x, w.y),
-                            2 => sk.project.extend_curve(si, eid, w.x, w.y),
-                            3 => sk.project.break_curve(si, eid, w.x, w.y),
-                            _ => false,
-                        });
+                    // the curve nearest the pointer through the one door of the tool, whatever its kind; where it does not
+                    // take the edit, the next curve under the pointer
+                    let under = qymcad_pick::curves_under(&sk.pick(), rect, pos, si);
+                    let ok = under.iter().take(2).any(|&eid| match sk.armed.click_op() {
+                        1 => sk.project.trim_curve(si, eid, w.x, w.y),
+                        2 => sk.project.extend_curve(si, eid, w.x, w.y),
+                        3 => sk.project.break_curve(si, eid, w.x, w.y),
+                        _ => false,
+                    });
                     if ok {
                         sk.sel_sk.clear(); // the selection and whatever was waiting for it
                         qymcad_ui_state::invalidate(&mut *sk.regen);

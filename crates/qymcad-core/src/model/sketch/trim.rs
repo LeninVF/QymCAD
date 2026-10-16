@@ -1,71 +1,65 @@
 //! TRIM, EXTEND AND BREAK: the curves of a sketch cut where they cross.
 
 use super::*;
-
-/// The sketch `si` of the project; called only with an index the caller has just found a sketch at.
-fn s_of(p: &Project, si: usize) -> &Sketch {
-    &p.sketches[si]
-}
+use crate::model::curve::Curve;
+use crate::model::sketch::crossings::TrimCut;
 
 impl Project {
-    /// Trim segment `eid` at the clicked point: the segment is divided by its intersections with other
-    /// entities and the piece containing the click is removed.
-    pub fn trim_line(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
-        self.cut_projection(si, eid, |p| p.trim_line_here(si, eid, clickx, clicky))
+    /// TRIM CURVE `eid` OF ANY KIND AT THE CLICK, as its preview draws it (`trim_cut`): the piece under the click, between
+    /// the two crossings on either side of it - or an end - goes, and the rest stays whole: an open curve keeps the pieces
+    /// before and after, a closed one the one piece round from the far crossing to the near one. A curve crossed nowhere,
+    /// or a closed one crossed once, goes whole. A line keeps its pieces on its straight, an arc or a circle its centre,
+    /// and their cut points stay on what crosses them.
+    pub fn trim_curve(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
+        self.cut_projection(si, eid, |p| p.trim_curve_here(si, eid, Point2::new(clickx, clicky)))
     }
-    pub(crate) fn trim_line_here(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
+    pub(crate) fn trim_curve_here(&mut self, si: usize, eid: Id, click: Point2) -> bool {
+        let Some(TrimCut { curve, run }) = self.trim_cut(si, eid, click) else { return false };
+        let Some([from, to]) = run else { return self.trim_away_whole(si, eid) };
+        // what stays: round from the far crossing to the near one on a closed curve, before and after the run on an open one
+        let kept: Vec<[f64; 2]> = if curve.closed() {
+            vec![if to <= 1.0 { [to, from + 1.0] } else { [to - 1.0, from] }]
+        } else {
+            [[0.0, from], [to, 1.0]].into_iter().filter(|[a, b]| b - a > 1e-9).collect()
+        };
+        match curve {
+            Curve::Line { .. } => self.keep_line_pieces(si, eid, &curve, &kept),
+            Curve::Round { .. } => match self.round_pieces(si, eid, &curve, &kept) {
+                Some(ends) => {
+                    // the ends of the arcs are anchored to the crossing curves, so a cut point does not drift along the
+                    // angle on the next solve
+                    for p in ends {
+                        self.anchor_cut_point(si, p);
+                    }
+                    self.settle_after_cut(si);
+                    true
+                }
+                None => false,
+            },
+            _ => self.trim_piece(si, eid, &curve, [from, to], click),
+        }
+    }
+    /// PUT THE PIECES `kept` OF LINE `eid` IN ITS STEAD, as places along it, and hold them as one line: the inner cut
+    /// points on the straight through the outermost points, each cut point on the curve crossing it there.
+    fn keep_line_pieces(&mut self, si: usize, eid: Id, line: &Curve, kept: &[[f64; 2]]) -> bool {
         let Some((a, b)) = self.line_ends(si, eid) else { return false };
-        let (Some((pax, pay)), Some((pbx, pby))) = (self.point_xy(si, a), self.point_xy(si, b)) else { return false };
-        let dlen2 = (pbx - pax).powi(2) + (pby - pay).powi(2);
-        if dlen2 < 1e-12 {
-            return false;
-        }
-        // Cut points from the intersections, as the parameter t along a to b: the places the other curves of the
-        // sketch meet it, construction geometry a boundary as well
-        let mut cuts: Vec<f64> = self.crossings_on(si, eid).into_iter().map(|x| x.t).filter(|t| *t > 1e-9 && *t < 1.0 - 1e-9).collect();
-        if cuts.is_empty() {
-            return self.trim_away_whole(si, eid);
-        }
-        cuts.push(0.0);
-        cuts.push(1.0);
-        cuts.sort_by(|x, y| x.total_cmp(y));
-        cuts.dedup_by(|x, y| (*x - *y).abs() < 1e-6);
-        // Parameter of the click.
-        let tc = ((clickx - pax) * (pbx - pax) + (clicky - pay) * (pby - pay)) / dlen2;
-        let mut keep: Vec<(f64, f64)> = Vec::new();
-        let mut removed = false;
-        for w in cuts.windows(2) {
-            let (t0, t1) = (w[0], w[1]);
-            if !removed && tc >= t0 - 1e-9 && tc <= t1 + 1e-9 {
-                removed = true;
-                continue;
-            }
-            keep.push((t0, t1));
-        }
-        if !removed {
-            return false;
-        }
-        // Rebuild: delete the original segment and add the remaining pieces.
+        let con = self.sketches[si].entity(eid).is_some_and(|e| e.construction);
         self.sketches[si].entities.retain(|e| e.id != eid);
-        let mut seg_pts: Vec<(Id, Id)> = Vec::new();
-        for (t0, t1) in keep {
-            let p0 = if t0 <= 1e-9 { a } else { self.sketch_point_at(si, pax + (pbx - pax) * t0, pay + (pby - pay) * t0, 1e-9) };
-            let p1 = if t1 >= 1.0 - 1e-9 { b } else { self.sketch_point_at(si, pax + (pbx - pax) * t1, pay + (pby - pay) * t1, 1e-9) };
-            let id = self.alloc_id();
-            self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::LineParts { a: p0, b: p1 }.into(), construction: false });
-            seg_pts.push((p0, p1));
-        }
-        // The pieces of one line stay on one straight line: the interior cut points are held by `PointOnLine`
-        // against the line through the outermost points, which the solver cannot collapse (the residual is
-        // divided by the length). Otherwise editing a dimension spreads the pieces into a parallelogram and the
-        // notch or arc flies away.
         let mut order: Vec<Id> = Vec::new();
-        for &(p0, p1) in &seg_pts {
+        for run in kept {
+            let [q0, q1] = line.piece(*run).ends();
+            let (p0, p1) = (self.sketch_point_at(si, q0.x, q0.y, 1e-9), self.sketch_point_at(si, q1.x, q1.y, 1e-9));
+            let id = self.alloc_id();
+            self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::LineParts { a: p0, b: p1 }.into(), construction: con });
             if order.last() != Some(&p0) {
                 order.push(p0);
             }
             order.push(p1);
         }
+        // The pieces of one line stay on one straight line: the interior cut points are held by `PointOnLine`
+        // against the line through the outermost points, which the solver cannot collapse (the residual is
+        // divided by the length). Otherwise editing a dimension spreads the pieces into a parallelogram and the
+        // notch or arc flies away.
         order.dedup();
         if order.len() >= 3 {
             let (r0, r1) = (order[0], order[order.len() - 1]);
@@ -76,14 +70,38 @@ impl Project {
         // The cut points (not the original endpoints) are anchored to the crossing curve — a circle, an arc or
         // another line — so a point stays at the intersection instead of sliding along it and the pieces do not
         // spread when a dimension is edited.
-        let cut_pts: Vec<Id> = order.iter().copied().filter(|&pi| pi != a && pi != b).collect();
-        for pi in cut_pts {
+        for pi in order.into_iter().filter(|&pi| pi != a && pi != b) {
             self.anchor_cut_point(si, pi);
         }
-        self.merge_close_points(si, 1e-3); // Stitch coincident cut points so the pieces stay connected.
-        self.prune_orphan_sketch_points(si); // Leave no dangling points behind a trim.
-        self.solve_sketch(si); // the edit ends at the solver, not at a rebuild: `regen_sketch` recomputes the contours and checks no constraint
+        self.settle_after_cut(si);
         true
+    }
+    /// PUT THE PIECES `runs` OF CIRCLE OR ARC `eid` IN ITS STEAD, as places along it: arcs about its own centre, each the
+    /// way its piece runs. Answers the ends of the arcs; `None` where `eid` is no circle or arc of the sketch.
+    fn round_pieces(&mut self, si: usize, eid: Id, round: &Curve, runs: &[[f64; 2]]) -> Option<Vec<Id>> {
+        let s = self.sketches.get(si)?;
+        let e = s.entity(eid)?;
+        let (con, center) = (e.construction, e.kind.circle_by(&|id| s.point(id).map(|q| Point2::new(q.x, q.y)))?.center);
+        self.sketches[si].entities.retain(|x| x.id != eid);
+        let mut ends = Vec::new();
+        for run in runs {
+            let piece = round.piece(*run);
+            let Curve::Round { sweep, .. } = piece else { continue };
+            let [q0, q1] = piece.ends();
+            let (pa, pb) = (self.sketch_point_at(si, q0.x, q0.y, 1e-6), self.sketch_point_at(si, q1.x, q1.y, 1e-6));
+            let id = self.alloc_id();
+            self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::ArcParts { center, a: pa, b: pb, ccw: sweep > 0.0 }.into(), construction: con });
+            ends.extend([pa, pb]);
+        }
+        Some(ends)
+    }
+    /// After a cut: coincident cut points stitched so the pieces stay connected, no dangling point left, and the sketch
+    /// solved - the edit ends at the solver, not at a rebuild (`regen_sketch` recomputes the contours and checks no
+    /// constraint).
+    pub(crate) fn settle_after_cut(&mut self, si: usize) {
+        self.merge_close_points(si, 1e-3);
+        self.prune_orphan_sketch_points(si);
+        self.solve_sketch(si);
     }
     /// THE PLACES LINE `eid` CAN BE EXTENDED TO: where its axis meets another curve beyond each end, nearest first, each
     /// with the curve met there. `None` when `eid` is no line of the sketch or has no length. Construction geometry is a
@@ -260,71 +278,20 @@ impl Project {
         moved
     }
 
-    /// Extend: the segment endpoint nearer to the click is stretched to the nearest intersection with another
-    /// entity. Returns whether it was extended.
-    pub fn extend_line(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
-        let ask = ExtendAsk { pointer: crate::geom::Point2::new(clickx, clicky), over: None, sides: ExtendSides::Nearer };
-        let ext = self.line_extension(si, eid, &ask);
-        self.extend_line_by(si, eid, ext)
-    }
-    /// Extend an arc: the endpoint nearer to the click is stretched along its own circle to the nearest
-    /// intersection with another entity, within the gap outside the current span of the arc. Returns whether it
-    /// was extended.
+    /// EXTEND CURVE `eid` OF ANY KIND AT THE CLICK, as its preview draws it (`extended`): from its end nearer the click to
+    /// the nearest curve on its way - a line along its straight, an arc round its circle, an arc of an ellipse round its
+    /// ellipse, a spline by a straight span along the tangent of its end. An end joined to other geometry stays.
     pub fn extend_curve(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
-        use std::f64::consts::TAU;
-        // a curve of another kind is stretched along its own way (`extend_piece`)
-        if !self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).is_some_and(|e| e.kind.as_arc().is_some()) {
-            return self.extend_piece(si, eid, Point2::new(clickx, clicky));
-        }
-        // Arc geometry; the coordinates are copied to release the borrow before calling
-        // `curve_cut_angles`.
-        let (center, a, b, ccw, cx, cy, ax, ay, bx, by) = {
-            let Some(s) = self.sketches.get(si) else { return false };
-            let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return false };
-            let p = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-            let Some(crate::model::ArcParts { center, a, b, ccw }) = e.kind.as_arc() else { return false };
-            let (Some((cx, cy)), Some((ax, ay)), Some((bx, by))) = (p(center), p(a), p(b)) else { return false };
-            (center, a, b, ccw, cx, cy, ax, ay, bx, by)
-        };
-        let r = ((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt();
-        let a0 = (ay - cy).atan2(ax - cx);
-        let a1 = (by - cy).atan2(bx - cx);
-        let sweep = if ccw { (a1 - a0).rem_euclid(TAU) } else { (a0 - a1).rem_euclid(TAU) };
-        // Which endpoint is stretched: the one nearer to the click.
-        let extend_b = ((clickx - bx).powi(2) + (clicky - by).powi(2)) < ((clickx - ax).powi(2) + (clicky - ay).powi(2));
-        // Angles where the full circle meets the other entities, as a parameter along the direction of the
-        // arc.
-        let cuts = self.curve_cut_angles(si, eid, cx, cy, r);
-        let to_param = |ang: f64| if ccw { (ang - a0).rem_euclid(TAU) } else { (a0 - ang).rem_euclid(TAU) };
-        let gap: Vec<f64> = cuts.iter().map(|&ang| to_param(ang)).filter(|&pp| pp > sweep + 1e-6 && pp < TAU - 1e-6).collect();
-        // Extending b takes the first cut in the gap just past endpoint b; extending a takes the last one,
-        // nearer to a from the other side.
-        let target = if extend_b { gap.into_iter().min_by(|x, y| x.total_cmp(y)) } else { gap.into_iter().max_by(|x, y| x.total_cmp(y)) };
-        let Some(pp) = target else { return false };
-        let new_ang = if ccw { a0 + pp } else { a0 - pp };
-        let (nx, ny) = (cx + r * new_ang.cos(), cy + r * new_ang.sin());
-        let pid = if extend_b { b } else { a };
-        let _ = center;
-        self.lift_the_place_of(si, pid);
-        if let Some(p) = self.sketches[si].points.iter_mut().find(|q| q.id == pid) {
-            p.x = nx;
-            p.y = ny;
-        }
-        self.solve_sketch(si); // the edit ends at the solver, not at a rebuild: `regen_sketch` recomputes the contours and checks no constraint
-        true
+        self.cut_projection(si, eid, |p| p.extend_piece(si, eid, Point2::new(clickx, clicky)))
     }
-    /// Break: split a segment into two at the clicked point.
-    pub fn break_line(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
-        self.cut_projection(si, eid, |p| p.break_line_here(si, eid, clickx, clicky))
-    }
-    pub(crate) fn break_line_here(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
+    /// BREAK LINE `eid` INTO TWO at place `tc` along it, the halves held as the line was.
+    fn break_line_at(&mut self, si: usize, eid: Id, tc: f64) -> bool {
         let Some((a, b)) = self.line_ends(si, eid) else { return false };
         let (Some((pax, pay)), Some((pbx, pby))) = (self.point_xy(si, a), self.point_xy(si, b)) else { return false };
         let dlen2 = (pbx - pax).powi(2) + (pby - pay).powi(2);
         if dlen2 < 1e-12 {
             return false;
         }
-        let Some(&tc) = self.break_at(si, eid, Point2::new(clickx, clicky)).first() else { return false };
         let mid = self.sketch_point_at(si, pax + (pbx - pax) * tc, pay + (pby - pay) * tc, 1e-9);
         let con = self.sketches[si].entities.iter().find(|e| e.id == eid).is_some_and(|e| e.construction);
         // THE FIRST HALF IS THE LINE IT WAS, the second a line added: what was built from the line - the wall swept from
@@ -353,9 +320,7 @@ impl Project {
                 None => self.sketches[si].constraints.push(c),
             }
         }
-        self.merge_close_points(si, 1e-3); // Stitch coincident cut points so the pieces stay connected.
-        self.prune_orphan_sketch_points(si); // Leave no dangling points behind a trim.
-        self.solve_sketch(si); // the edit ends at the solver, not at a rebuild: `regen_sketch` recomputes the contours and checks no constraint
+        self.settle_after_cut(si);
         true
     }
     pub(crate) fn line_ends(&self, si: usize, eid: Id) -> Option<(Id, Id)> {
@@ -364,15 +329,6 @@ impl Project {
             Some(crate::model::LineParts { a, b }) => Some((a, b)),
             _ => None,
         })
-    }
-    /// Angles, about centre (cx, cy) with radius r, of the places the other curves of the sketch, construction geometry
-    /// included, meet the whole circle there, excluding `eid_self`. These are the cut points of a circle or an arc.
-    pub(crate) fn curve_cut_angles(&self, si: usize, eid_self: Id, cx: f64, cy: f64, r: f64) -> Vec<f64> {
-        let full = crate::model::curve::Curve::Round { centre: Point2::new(cx, cy), r, from: 0.0, sweep: std::f64::consts::TAU };
-        let mut angs: Vec<f64> = self.meetings(si, &full, eid_self).iter().map(|x| (x.at.y - cy).atan2(x.at.x - cx)).collect();
-        angs.sort_by(|a, b| a.total_cmp(b));
-        angs.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-        angs
     }
     /// Intersections of entity `eid` with the other entities (construction included) that lie on `eid` - inside it for an
     /// open curve - in world coordinates. Used for the hover preview of trim and break.
@@ -390,146 +346,32 @@ impl Project {
         self.solve_sketch(si);
         true
     }
-    /// Trim a circle or an arc: it is cut at the intersections, the angular span under the click is removed and
-    /// the remaining spans become arcs. Lines are handled by `trim_line`. Returns whether it succeeded.
-    pub fn trim_curve(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
-        self.cut_projection(si, eid, |p| p.trim_curve_here(si, eid, clickx, clicky))
-    }
-    pub(crate) fn trim_curve_here(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
-        use std::f64::consts::TAU;
-        // an ellipse, an arc of one, a spline: the piece under the click goes (`trim_piece`)
-        if !self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).is_some_and(|e| round_entity(s_of(self, si), e).is_some()) {
-            return self.trim_piece(si, eid, Point2::new(clickx, clicky));
-        }
-        let Some(s) = self.sketches.get(si) else { return false };
-        let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return false };
-        let con = e.construction;
-        let Some(Round { center_id, cx, cy, r, span }) = round_entity(s, e) else { return false };
-        let cuts = self.curve_cut_angles(si, eid, cx, cy, r);
-        if cuts.is_empty() {
-            return self.trim_away_whole(si, eid);
-        }
-        let click_ang = (clicky - cy).atan2(clickx - cx);
-        // One click removes only the span under the cursor, between the two nearest cut points, and the rest
-        // stays whole: a circle leaves one remaining arc and an arc leaves up to two pieces, before and after
-        // the removed window. Cutting at every intersection at once shatters a circle into a pile of arcs, which
-        // breaks selection and radius editing and makes a pie slice impossible to cut out. Each remaining arc is
-        // a tuple of (angle0, angle1, ccw).
-        let mut kept: Vec<(f64, f64, bool)> = Vec::new();
-        match span {
-            None => {
-                // A circle: one span under the click is removed and the remainder is a single arc, running
-                // around the circle past the other cuts.
-                let mut a: Vec<f64> = cuts.iter().map(|x| x.rem_euclid(TAU)).collect();
-                a.sort_by(|x, y| x.total_cmp(y));
-                a.dedup_by(|x, y| (*x - *y).abs() < 1e-6);
-                if a.len() < 2 {
-                    // touched at one point at most: there is no span to cut out, so the circle goes
-                    return self.trim_away_whole(si, eid);
-                }
-                let ca = click_ang.rem_euclid(TAU);
-                let n = a.len();
-                for i in 0..n {
-                    let (lo, hi) = (a[i], if i + 1 < n { a[i + 1] } else { a[0] + TAU });
-                    if (ca >= lo - 1e-9 && ca < hi) || (ca + TAU >= lo && ca + TAU < hi) {
-                        kept.push((hi, lo + TAU, true)); // The remainder is one arc, from hi around to lo.
-                        break;
-                    }
-                }
-            }
-            Some((a0, a1, ccw)) => {
-                // An arc: the parameter runs along its direction over [0, sweep]; the window under the click is
-                // removed and the pieces before and after it stay whole.
-                let to_param = |ang: f64| if ccw { (ang - a0).rem_euclid(TAU) } else { (a0 - ang).rem_euclid(TAU) };
-                let sweep = if ccw { (a1 - a0).rem_euclid(TAU) } else { (a0 - a1).rem_euclid(TAU) };
-                let mut ps: Vec<f64> = cuts.iter().map(|&x| to_param(x)).filter(|&v| v > 1e-6 && v < sweep - 1e-6).collect();
-                ps.push(0.0);
-                ps.push(sweep);
-                ps.sort_by(|x, y| x.total_cmp(y));
-                ps.dedup_by(|x, y| (*x - *y).abs() < 1e-6);
-                let cp = to_param(click_ang);
-                let ang = |param: f64| if ccw { a0 + param } else { a0 - param };
-                // an arc crossed at its ends only is one window from end to end: nothing of it is left
-                if ps.len() == 2 && cp > 1e-9 && cp < sweep - 1e-9 {
-                    return self.trim_away_whole(si, eid);
-                }
-                for w in ps.windows(2) {
-                    if cp > w[0] + 1e-9 && cp < w[1] - 1e-9 {
-                        // Remove the window [w0, w1] under the click and keep the pieces before and after it,
-                        // each as a single arc.
-                        if w[0] > 1e-9 {
-                            kept.push((ang(0.0), ang(w[0]), ccw));
-                        }
-                        if w[1] < sweep - 1e-9 {
-                            kept.push((ang(w[1]), ang(sweep), ccw));
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        if kept.is_empty() {
-            return false;
-        }
-        // Replace the original entity with the remaining arcs.
-        self.sketches[si].entities.retain(|x| x.id != eid);
-        for (g0, g1, accw) in kept {
-            let pa = self.sketch_point_at(si, cx + r * g0.cos(), cy + r * g0.sin(), 1e-6);
-            let pb = self.sketch_point_at(si, cx + r * g1.cos(), cy + r * g1.sin(), 1e-6);
-            let id = self.alloc_id();
-            self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::ArcParts { center: center_id, a: pa, b: pb, ccw: accw }.into(), construction: con });
-            // The arc endpoints are anchored to the crossing entities, so a cut point does not drift along the
-            // angle on the next solve.
-            self.anchor_cut_point(si, pa);
-            self.anchor_cut_point(si, pb);
-        }
-        self.merge_close_points(si, 1e-3); // Stitch coincident cut points so the pieces stay connected.
-        self.prune_orphan_sketch_points(si); // Leave no dangling points behind a trim.
-        self.solve_sketch(si); // the edit ends at the solver, not at a rebuild: `regen_sketch` recomputes the contours and checks no constraint
-        true
-    }
-    /// Break a circle or an arc at the clicked point: an arc becomes two arcs, a circle becomes two half arcs
-    /// (split at the click and at the opposite point). Lines are handled by `break_line`. Returns whether it
-    /// succeeded.
+    /// BREAK CURVE `eid` OF ANY KIND AT THE CLICK, where its preview cuts (`break_at`): an open curve into two at the place
+    /// nearest the click, a closed one into two halves there and opposite. A line keeps what it was held by in each half;
+    /// an arc or a circle becomes arcs about its own centre.
     pub fn break_curve(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
-        self.cut_projection(si, eid, |p| p.break_curve_here(si, eid, clickx, clicky))
+        self.cut_projection(si, eid, |p| p.break_curve_here(si, eid, Point2::new(clickx, clicky)))
     }
-    pub(crate) fn break_curve_here(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
-        // an ellipse, an arc of one, a spline: cut where it was clicked (`break_piece`)
-        if !self.sketches.get(si).and_then(|s| s.entities.iter().find(|e| e.id == eid)).is_some_and(|e| round_entity(s_of(self, si), e).is_some()) {
-            return self.break_piece(si, eid, Point2::new(clickx, clicky));
-        }
-        let Some(s) = self.sketches.get(si) else { return false };
-        let Some(e) = s.entities.iter().find(|e| e.id == eid) else { return false };
-        let con = e.construction;
-        let Some(Round { center_id, cx, cy, r, span }) = round_entity(s, e) else { return false };
-        let ca = (clicky - cy).atan2(clickx - cx);
-        // the first piece is the curve it was, as a line broken in two (`break_line_here`)
-        let mut first = Some(eid);
-        let mut mk = |me: &mut Self, g0: f64, g1: f64, ccw: bool| {
-            let pa = me.sketch_point_at(si, cx + r * g0.cos(), cy + r * g0.sin(), 1e-6);
-            let pb = me.sketch_point_at(si, cx + r * g1.cos(), cy + r * g1.sin(), 1e-6);
-            let id = first.take().unwrap_or_else(|| me.alloc_id());
-            me.sketches[si].entities.push(SketchEntity { id, kind: crate::model::ArcParts { center: center_id, a: pa, b: pb, ccw }.into(), construction: con });
-        };
-        self.sketches[si].entities.retain(|x| x.id != eid);
-        match span {
-            None => {
-                // A circle becomes two arcs: [click, click + pi] and [click + pi, click].
-                let opp = ca + std::f64::consts::PI;
-                mk(self, ca, opp, true);
-                mk(self, opp, ca, true);
+    pub(crate) fn break_curve_here(&mut self, si: usize, eid: Id, click: Point2) -> bool {
+        let Some(curve) = self.sketches.get(si).and_then(|s| s.entity(eid).and_then(|e| Curve::of(s, e))) else { return false };
+        let mut places = self.break_at(si, eid, click);
+        places.sort_by(f64::total_cmp);
+        match curve {
+            Curve::Line { .. } => places.first().is_some_and(|t| self.break_line_at(si, eid, *t)),
+            Curve::Round { .. } => {
+                let runs = match places[..] {
+                    [t] => vec![[0.0, t], [t, 1.0]],
+                    [t0, t1] => vec![[t0, t1], [t1, t0 + 1.0]],
+                    _ => return false,
+                };
+                if self.round_pieces(si, eid, &curve, &runs).is_none() {
+                    return false;
+                }
+                self.settle_after_cut(si);
+                true
             }
-            Some((a0, a1, ccw)) => {
-                // An arc becomes two arcs at the clicked point.
-                mk(self, a0, ca, ccw);
-                mk(self, ca, a1, ccw);
-            }
+            _ => self.break_piece(si, eid, click),
         }
-        self.merge_close_points(si, 1e-3); // Stitch coincident cut points so the pieces stay connected.
-        self.prune_orphan_sketch_points(si); // Leave no dangling points behind a trim.
-        self.solve_sketch(si); // the edit ends at the solver, not at a rebuild: `regen_sketch` recomputes the contours and checks no constraint
-        true
     }
     /// WHERE A POINT STANDS in the drawing, or `None` where the sketch has no such point.
     pub fn point_xy(&self, si: usize, id: Id) -> Option<(f64, f64)> {

@@ -669,7 +669,8 @@ pub fn open_shape_size(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
             return true;
         }
     }
-    if let Some(eid) = qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si) {
+    let round = |eid: &Id| sk.project.sketches[si].entity(*eid).is_some_and(|e| e.kind.as_circle().is_some() || e.kind.as_arc().is_some());
+    if let Some(eid) = qymcad_pick::curve_or_caption_under(&sk.pick(), rect, pos, si).filter(round) {
         // a circle has its diameter edited, or the field of its size opened; an arc the field of its radius
         let center = sk.project.sketches[si].entity(eid).and_then(|e| e.kind.as_circle()).map(|k| k.center);
         // the circumscribed circle of a polygon (the vertices hang on it) opens the polygon popup (the radius plus the

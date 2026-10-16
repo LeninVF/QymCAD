@@ -33,8 +33,8 @@ mod arc_pick {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
         let sh = qymcad_ui_state::Sheet { view, rect };
         let at = |x: f64, y: f64| sh.at(qymcad_core::geom::Point2::new(x, y));
-        assert_eq!(super::nearest_circle_entity(&pick, rect, at(0.0, 10.0), si), Some(arc), "the top of the arc");
-        assert_eq!(super::nearest_circle_entity(&pick, rect, at(0.0, -10.0), si), None, "where the cut half had been");
+        assert_eq!(super::curve_or_caption_under(&pick, rect, at(0.0, 10.0), si), Some(arc), "the top of the arc");
+        assert_eq!(super::curve_or_caption_under(&pick, rect, at(0.0, -10.0), si), None, "where the cut half had been");
     }
 }
 

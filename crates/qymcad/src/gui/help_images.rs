@@ -627,7 +627,7 @@ mod tests {
             save("sketch-trim/00.png", &shot_sketch_fixed(&mut app, si, 6.0));
             let ids: Vec<qymcad_core::model::Id> = app.project.sketches[si].entities.iter().map(|e| e.id).collect();
             if let Some(first) = ids.first() {
-                app.project.trim_line(si, *first, 25.0, 0.0); // clicked on the tail to the right of the crossing
+                app.project.trim_curve(si, *first, 25.0, 0.0); // clicked on the tail to the right of the crossing
             }
             save("sketch-trim/01.png", &shot_sketch_fixed(&mut app, si, 6.0));
         }
@@ -1005,7 +1005,7 @@ mod tests {
             let short = app.project.add_line_entity(si, -30.0, 0.0, -16.0, 0.0, qymcad_core::feature::Purpose::Real);
             std::fs::create_dir_all(img_dir().join("sketch-extend")).expect("the frame directory");
             save("sketch-extend/00.png", &shot_sketch_fixed(&mut app, si, 6.5));
-            app.project.extend_line(si, short, -16.0, 0.0); // pulled by the right-hand end
+            app.project.extend_curve(si, short, -16.0, 0.0); // pulled by the right-hand end
             save("sketch-extend/01.png", &shot_sketch_fixed(&mut app, si, 6.5));
         }
 
@@ -1407,7 +1407,7 @@ mod tests {
             app.project.add_line_entity(si, 0.0, -18.0, 0.0, 18.0, qymcad_core::feature::Purpose::Real);
             std::fs::create_dir_all(img_dir().join("sketch-break")).expect("the frame directory");
             save("sketch-break/00.png", &shot_sketch_fixed(&mut app, si, 5.5));
-            assert!(app.project.break_line(si, line, 0.0, 0.0), "the segment must split - otherwise the frames are identical");
+            assert!(app.project.break_curve(si, line, 0.0, 0.0), "the segment must split - otherwise the frames are identical");
             save("sketch-break/01.png", &shot_sketch_fixed(&mut app, si, 5.5));
         }
 

@@ -235,14 +235,13 @@ pub fn power_trim_sweep(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, prev: P
         let w = qymcad_ui_state::to_world(&*sk.view, rect, at);
         // the curve nearest the trail, of whatever kind, as a click takes it
         let Some(eid) = qymcad_pick::edit_target(&sk.pick(), rect, at, si) else { continue };
-        let is_line = sk.project.sketches[si].entity(eid).is_some_and(|e| e.kind.as_line().is_some());
         // ONE SPAN, ONE CUT PER DRAG: the key is the entity plus the span that was hit. Without it a
         // trembling cursor standing still would go on trimming the neighbouring pieces.
         let span = trim_span_key(&*sk.project, si, eid, w.x, w.y);
         if !sk.trim.done.insert((eid, span)) {
             continue;
         }
-        let ok = if is_line { sk.project.trim_line(si, eid, w.x, w.y) } else { sk.project.trim_curve(si, eid, w.x, w.y) };
+        let ok = sk.project.trim_curve(si, eid, w.x, w.y);
         if ok {
             cut += 1;
         }
@@ -314,14 +313,10 @@ pub fn resolve_dim_ref(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
     if let Some(id) = qymcad_pick::nearest_sketch_point(&sk.pick(), rect, pos, si) {
         return Some(qymcad_ui_state::DimRef::Point(id));
     }
-    // 2) a line entity under the cursor
-    if let Some((a, b)) = qymcad_pick::nearest_line_entity(&sk.pick(), rect, pos, si) {
-        return Some(qymcad_ui_state::DimRef::Line(a, b));
-    }
-    // 2b) a curve of any other kind under the cursor - a circle, an arc, an ellipse, a spline - is the curve itself: a
-    // distance to it is the least one, to its rim, as the person sees it measured
-    if let Some(eid) = qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si).or_else(|| qymcad_pick::nearest_curve_eid(&sk.pick(), rect, pos, si)) {
-        return Some(qymcad_ui_state::DimRef::Curve(eid));
+    // 2) the curve under the cursor, of whatever kind: a line by its ends; a circle, an arc, an ellipse, a spline is the
+    // curve itself - a distance to it is the least one, to its rim, as the person sees it measured
+    if let Some(r) = qymcad_pick::curve_or_caption_under(&sk.pick(), rect, pos, si).map(|eid| curve_ref(sk, si, eid)) {
+        return Some(r);
     }
     // 3) a coordinate axis
     let o = (qymcad_ui_state::Sheet { view: *sk.view, rect }).at(Point2::new(0.0, 0.0));
@@ -618,4 +613,12 @@ pub fn drag_point_to(sk: &mut qymcad_ui_state::SketchCtx, si: usize, pi: usize, 
         sk.project.solve_sketch_drag_fast(si, Some((id, w.x, w.y)));
     }
     qymcad_ui_state::invalidate(&mut *sk.regen);
+}
+
+/// A curve as a dimension refers to it: a line by its ends, a curve of any other kind by itself.
+pub(crate) fn curve_ref(sk: &qymcad_ui_state::SketchCtx, si: usize, eid: Id) -> qymcad_ui_state::DimRef {
+    match sk.project.sketches[si].entity(eid).and_then(|e| e.kind.as_line()) {
+        Some(qymcad_core::model::LineParts { a, b }) => qymcad_ui_state::DimRef::Line(a, b),
+        None => qymcad_ui_state::DimRef::Curve(eid),
+    }
 }

@@ -162,14 +162,14 @@ fn no_editing_tool_leaves_a_constraint_unsatisfied() {
         row("scale", |p, si, e| p.scale_entities(si, &[e], 10.0, 0.0, 2.0)),
         row("trim", |p, si, e| {
             p.add_line_entity(si, 20.0, -10.0, 20.0, 10.0, qymcad_core::feature::Purpose::Real); // the cutting line
-            p.trim_line(si, e, 25.0, 0.0);
+            p.trim_curve(si, e, 25.0, 0.0);
         }),
         row("extend", |p, si, e| {
             p.add_line_entity(si, 45.0, -10.0, 45.0, 10.0, qymcad_core::feature::Purpose::Real); // the line extended up to
-            p.extend_line(si, e, 29.0, 0.0);
+            p.extend_curve(si, e, 29.0, 0.0);
         }),
         row("break", |p, si, e| {
-            p.break_line(si, e, 20.0, 0.0);
+            p.break_curve(si, e, 20.0, 0.0);
         }),
     ];
 

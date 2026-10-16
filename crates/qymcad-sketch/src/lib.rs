@@ -186,23 +186,8 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
     if let Some((_, id)) = best_pt.or(best_sys) {
         return Some((0u8, id));
     }
-    // 2) the nearest entity; construction geometry yields to an ordinary curve only where the two are as near, within
-    // `CONSTRUCTION_YIELDS` pixels. Yielding over the whole grab radius (8 px), the construction circle of a hexagon
-    // R7 - 0.94 mm, 5.6 px at 6 px/mm from its sides at most - could not be clicked anywhere.
-    const CONSTRUCTION_YIELDS: f32 = 2.0;
-    let mut best_e: Option<(f32, Id)> = None;
-    for e in &s.entities {
-        // the distance to the curve as it is drawn, whatever its kind
-        let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).into_iter().map(|p| sh.at(p)).collect();
-        let d = line.windows(2).map(|w| qymcad_ui_state::screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min);
-        if d <= qymcad_ui_state::grab::grab(pick.set, Grab::Curve) {
-            let weighed = if e.construction { d + CONSTRUCTION_YIELDS } else { d };
-            if best_e.is_none_or(|(bd, _)| weighed < bd) {
-                best_e = Some((weighed, e.id));
-            }
-        }
-    }
-    best_e.map(|(_, id)| (1u8, id))
+    // 2) the nearest curve, of whatever kind, a construction one yielding to an ordinary one as near (`curves_under`)
+    qymcad_pick::curves_under(pick, rect, pos, si).first().map(|&id| (1u8, id))
 }
 
 /// FINISH THE SPLINE - what a double click does.

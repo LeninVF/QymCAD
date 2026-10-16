@@ -268,7 +268,7 @@ pub fn tools() -> Vec<Tool> {
             name: "a side of a rectangle trimmed",
             work: |p, t| {
                 let at = third_along(p, t.chain[1]);
-                let _ = p.trim_line(0, t.chain[1], at.x, at.y);
+                let _ = p.trim_curve(0, t.chain[1], at.x, at.y);
             },
             effect: Effect::Any,
         },
@@ -276,7 +276,7 @@ pub fn tools() -> Vec<Tool> {
             name: "a line broken",
             work: |p, t| {
                 let at = third_along(p, t.one);
-                let _ = p.break_line(0, t.one, at.x, at.y);
+                let _ = p.break_curve(0, t.one, at.x, at.y);
             },
             effect: Effect::Adds,
         },
@@ -285,7 +285,7 @@ pub fn tools() -> Vec<Tool> {
             work: |p, t| {
                 let (_, b) = ends(p, t.short);
                 let tip = at(p, b);
-                let _ = p.extend_line(0, t.short, tip.x - 1.0, tip.y);
+                let _ = p.extend_curve(0, t.short, tip.x - 1.0, tip.y);
             },
             effect: Effect::Moves,
         },

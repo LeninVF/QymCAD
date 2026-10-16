@@ -134,7 +134,7 @@ fn trim_removes_middle_segment() {
     let hid = p.sketches[si].entities[0].id; // The horizontal line.
     let n_before = p.sketches[si].entities.len();
     // Trim the middle piece, picked at x = 15.
-    let ok = p.trim_line(si, hid, 15.0, 0.0);
+    let ok = p.trim_curve(si, hid, 15.0, 0.0);
     assert!(ok, "the trim must apply");
     // The horizontal line is replaced by two pieces (0..10 and 20..30), which is one entity more.
     assert_eq!(p.sketches[si].entities.len(), n_before + 1, "the middle piece is removed and two remain");
@@ -247,7 +247,7 @@ fn extend_reaches_crossing() {
     p.add_line_entity(si, 0.0, 0.0, 10.0, 0.0, qymcad_core::feature::Purpose::Real); // A short horizontal line.
     p.add_line_entity(si, 20.0, -5.0, 20.0, 5.0, qymcad_core::feature::Purpose::Real); // A crossing line further out.
     let hid = p.sketches[si].entities[0].id;
-    assert!(p.extend_line(si, hid, 9.0, 0.0), "the extend must apply");
+    assert!(p.extend_curve(si, hid, 9.0, 0.0), "the extend must apply");
     // The right end reaches x = 20.
     let maxx = p.sketches[si].points.iter().map(|q| q.x).fold(f64::MIN, f64::max);
     assert!((maxx - 20.0).abs() < 1e-6, "it must extend to the crossing at x = 20: {maxx}");
@@ -259,7 +259,7 @@ fn break_splits_in_two() {
     let si = p.new_sketch("b");
     p.add_line_entity(si, 0.0, 0.0, 10.0, 0.0, qymcad_core::feature::Purpose::Real);
     let id = p.sketches[si].entities[0].id;
-    assert!(p.break_line(si, id, 5.0, 0.0), "the break must apply");
+    assert!(p.break_curve(si, id, 5.0, 0.0), "the break must apply");
     let lines = p.sketches[si].entities.iter().filter(|e| e.kind.as_line().is_some()).count();
     assert_eq!(lines, 2, "the segment must be split in two");
 }
@@ -586,7 +586,7 @@ fn trim_split_pieces_stay_on_line() {
     let lb = p.sketch_point_at(si, 10.0, 0.0, 1e-6);
     p.sketches[si].constraints.push(Constraint::Fixed { p: la });
     p.sketches[si].constraints.push(Constraint::Fixed { p: lb });
-    p.trim_line(si, lid, 0.0, 0.0); // Two segments; the inner ends at (±5,0) are held on the line la-lb.
+    p.trim_curve(si, lid, 0.0, 0.0); // Two segments; the inner ends at (±5,0) are held on the line la-lb.
     assert_eq!(p.sketches[si].entities.iter().filter(|e| e.kind.as_line().is_some()).count(), 2, "two segments");
     let onl = p.sketches[si].constraints.iter().filter(|c| matches!(c, Constraint::PointOnLine { .. })).count();
     assert_eq!(onl, 2, "both inner cut points must be held on the line");
@@ -620,13 +620,13 @@ fn trim_both_orders_make_notch() {
     let cid = p.sketches[si].entities.iter().find(|e| e.kind.as_circle().is_some()).unwrap().id;
     let lid = p.sketches[si].entities.iter().find(|e| e.kind.as_line().is_some()).unwrap().id;
     assert!(p.trim_curve(si, cid, 0.0, 5.0), "the circle must be trimmed");
-    p.trim_line(si, lid, 0.0, 0.0);
+    p.trim_curve(si, lid, 0.0, 0.0);
     assert_eq!(counts(&p, si), (1, 2), "circle then line gives one arc and two pieces");
     // Order two: the line, then the circle.
     let (mut p, si) = build();
     let cid = p.sketches[si].entities.iter().find(|e| e.kind.as_circle().is_some()).unwrap().id;
     let lid = p.sketches[si].entities.iter().find(|e| e.kind.as_line().is_some()).unwrap().id;
-    p.trim_line(si, lid, 0.0, 0.0);
+    p.trim_curve(si, lid, 0.0, 0.0);
     assert!(p.trim_curve(si, cid, 0.0, 5.0), "the circle must be trimmed after the line");
     assert_eq!(counts(&p, si), (1, 2), "line then circle gives one arc and two pieces");
 }
@@ -720,7 +720,7 @@ fn trim_uses_construction_as_boundary() {
     p.add_line_entity(si, 0.0, 0.0, 10.0, 0.0, qymcad_core::feature::Purpose::Real);
     p.add_line_entity(si, 5.0, -5.0, 5.0, 5.0, qymcad_core::feature::Purpose::Construction); // A construction vertical at x = 5.
     let eid = p.sketches[si].entities.iter().find(|e| !e.construction).unwrap().id;
-    assert!(p.trim_line(si, eid, 8.0, 0.0), "a trim against a construction boundary must work");
+    assert!(p.trim_curve(si, eid, 8.0, 0.0), "a trim against a construction boundary must work");
     // The left half (0,0)-(5,0) remains: exactly one non-construction line of length 5.
     let lines: Vec<_> = p.sketches[si].entities.iter().filter(|e| !e.construction && e.kind.as_line().is_some()).collect();
     assert_eq!(lines.len(), 1, "one line must remain");
@@ -1062,8 +1062,7 @@ fn every_trim_click_removes_what_is_under_it() {
                 sins.push(format!("{name}: setup - nothing under ({x}, {y}) to click, the nearest is {what} {d:.4} away"));
                 break;
             }
-            let is_line = p.sketches[si].entities.iter().find(|e| e.id == eid).is_some_and(|e| e.kind.as_line().is_some());
-            let ok = if is_line { p.trim_line(si, eid, x, y) } else { p.trim_curve(si, eid, x, y) };
+            let ok = p.trim_curve(si, eid, x, y);
             let (d, what, _) = nearest_geometry(&p, si, x, y);
             if !ok || d < 1e-3 {
                 sins.push(format!("{name}: a click at ({x}, {y}) answered {ok} and left {what} {d:.4} from it"));

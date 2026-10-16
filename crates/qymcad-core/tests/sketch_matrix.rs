@@ -277,7 +277,7 @@ fn matrix_trim_no_orphan_points() {
     let l = p.add_line_entity(si, -20.0, 0.0, 20.0, 0.0, qymcad_core::feature::Purpose::Real);
     // cut off the right-hand tail of the line by clicking (15,0), with the cuts at ±10, which would orphan
     // the endpoint at (20,0)
-    if !p.trim_line(si, l, 15.0, 0.0) {
+    if !p.trim_curve(si, l, 15.0, 0.0) {
         fails.push("trim_line of the tail returned false".into());
     }
     let s = &p.sketches[si];

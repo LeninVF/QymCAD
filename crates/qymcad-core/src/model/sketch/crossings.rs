@@ -11,9 +11,9 @@ struct Stretch {
 }
 
 /// WHAT TRIM DOES AT A CLICK: the curve, and the run of it that goes - `None` when the whole of it goes.
-struct TrimCut {
-    curve: Curve,
-    run: Option<[f64; 2]>,
+pub(crate) struct TrimCut {
+    pub(crate) curve: Curve,
+    pub(crate) run: Option<[f64; 2]>,
 }
 
 /// ONE CURVE OF A CROSSING TO CUT: the entity, its curve, the curve it crosses, and the crossing.
@@ -100,7 +100,7 @@ impl Project {
             return true;
         }
         if matches!(me, Curve::Line { .. }) {
-            self.break_line(si, eid, at.x, at.y);
+            self.break_curve(si, eid, at.x, at.y);
         } else if me.closed() {
             let places: Vec<f64> = me.meet(them).iter().map(|m| m.ta).collect();
             if places.len() < 2 {
@@ -129,7 +129,7 @@ impl Project {
     /// WHAT TRIM DOES AT A CLICK ON CURVE `eid`: the curve, and the run of it under the click between the two crossings on
     /// either side of it - or an end - which goes; `None` for the run when the whole curve goes, crossed nowhere, or a
     /// closed one crossed once. The run of a closed curve may pass its start: its end is then past 1.
-    fn trim_cut(&self, si: usize, eid: Id, click: Point2) -> Option<TrimCut> {
+    pub(crate) fn trim_cut(&self, si: usize, eid: Id, click: Point2) -> Option<TrimCut> {
         let s = self.sketches.get(si)?;
         let curve = s.entities.iter().find(|e| e.id == eid).and_then(|e| Curve::of(s, e))?;
         let mut cuts: Vec<f64> = self.crossings_on(si, eid).into_iter().map(|x| x.t).collect();
@@ -161,13 +161,9 @@ impl Project {
         })
     }
 
-    /// TRIM CURVE `eid` OF ANY KIND AT THE CLICK: the piece under the click, between the two crossings on either side of
-    /// it - or an end - goes, the rest stays whole: an open curve keeps the pieces before and after, a closed one the one
-    /// piece round from the far crossing to the near one. A curve crossed nowhere, or a closed one crossed once, goes
-    /// whole.
-    pub(crate) fn trim_piece(&mut self, si: usize, eid: Id, click: Point2) -> bool {
-        let Some(TrimCut { curve, run }) = self.trim_cut(si, eid, click) else { return false };
-        let Some([from, to]) = run else { return self.trim_away_whole(si, eid) };
+    /// TRIM CURVE `eid` OF A KIND THAT HOLDS NOTHING OF ITS OWN - an ellipse, an arc of one, a spline - taking away its
+    /// run `[from, to]` under the click: it is cut at both ends of the run and the piece holding the click goes.
+    pub(crate) fn trim_piece(&mut self, si: usize, eid: Id, curve: &Curve, [from, to]: [f64; 2], click: Point2) -> bool {
         // an open curve is cut where the run starts and ends inside it; a closed one at both, round its start
         let places: Vec<f64> = if curve.closed() { vec![from, to.rem_euclid(1.0)] } else { [from, to].into_iter().filter(|t| *t > 1e-9 && *t < 1.0 - 1e-9).collect() };
         let pieces = self.cut_curve(si, eid, &places);
@@ -175,9 +171,7 @@ impl Project {
         if let Some(g) = pieces.iter().copied().find(|id| self.piece_holds(si, *id, click)) {
             self.delete_entities(si, &[g]);
         }
-        self.merge_close_points(si, 1e-3);
-        self.prune_orphan_sketch_points(si);
-        self.solve_sketch(si);
+        self.settle_after_cut(si);
         true
     }
 
@@ -211,9 +205,7 @@ impl Project {
         if places.is_empty() || self.cut_curve(si, eid, &places).is_empty() {
             return false;
         }
-        self.merge_close_points(si, 1e-3);
-        self.prune_orphan_sketch_points(si);
-        self.solve_sketch(si);
+        self.settle_after_cut(si);
         true
     }
 
@@ -230,6 +222,12 @@ impl Project {
         }
         let [start, finish] = c.ends();
         let end = if click.dist(start) < click.dist(finish) { End::Start } else { End::Finish };
+        // AN END JOINED TO OTHER GEOMETRY STAYS (`end_held`), as the end of a line does: moved, it pulled what it is
+        // joined to. A spline grows by a node past its end, which does not move.
+        let moves = s.entity(eid)?.kind.as_spline().is_none();
+        if moves && self.end_point_of(si, eid, end).is_some_and(|p| self.end_held(si, eid, p)) {
+            return None;
+        }
         // the longest the curve could get is its stretch to the nearest curve met on its way
         let curve = s.entities.iter().filter(|o| o.id != eid).filter_map(|o| Curve::of(s, o)).filter_map(|o| c.stretched(end, &o)).min_by(|x, y| x.length().total_cmp(&y.length()))?;
         Some(Stretch { end, curve })
@@ -262,8 +260,10 @@ impl Project {
                 }
             }
             None => {
-                // the end point of the curve - its first or its last point along it - moves to where it reaches
+                // the end point of the curve - its first or its last point along it - moves to where it reaches, free of
+                // what placed it where it stood
                 let Some(end_id) = self.end_point_of(si, eid, end) else { return false };
+                self.lift_the_place_of(si, end_id);
                 if let Some(q) = self.sketches[si].points.iter_mut().find(|q| q.id == end_id) {
                     q.x = reached.x;
                     q.y = reached.y;

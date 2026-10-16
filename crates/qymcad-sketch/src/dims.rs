@@ -325,22 +325,19 @@ pub fn dim_click_inner(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
                     }
                 })
                 .or_else(|| {
-                    // a click on ANOTHER roughly parallel line gives the distance between the two lines (the
-                    // body of a line used to be ignored, and the gap between two parallels could not be
-                    // measured). Parallel ones only - a perpendicular edge of a square next to the leader does
-                    // NOT switch it, and a length is placed instead.
-                    qymcad_pick::nearest_line_entity(&sk.pick(), rect, pos, si)
-                        .filter(|&(a2, b2)| (a2, b2) != (la, lb) && (a2, b2) != (lb, la))
-                        .filter(|&(a2, b2)| qymcad_ui_state::lines_parallel(&sk.draw(), si, la, lb, a2, b2))
-                        .map(|(a2, b2)| qymcad_ui_state::DimRef::Line(a2, b2))
-                })
-                .or_else(|| {
-                    // a click on a curve of any other kind - a circle, an arc, an ellipse, a spline - gives the least
-                    // distance from the line to it
-                    qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si)
-                        .or_else(|| qymcad_pick::nearest_curve_eid(&sk.pick(), rect, pos, si))
-                        .filter(|eid| !sk.project.is_straight(si, *eid))
-                        .map(qymcad_ui_state::DimRef::Curve)
+                    // the curve under the pointer, of whatever kind: ANOTHER roughly parallel line gives the distance
+                    // between the two lines (the body of a line used to be ignored, and the gap between two parallels
+                    // could not be measured) - parallel ones only, a perpendicular edge of a square next to the leader
+                    // does NOT switch it, and a length is placed instead; a circle, an arc, an ellipse, a spline gives
+                    // the least distance from the line to it
+                    let eid = qymcad_pick::curve_or_caption_under(&sk.pick(), rect, pos, si)?;
+                    match curve_ref(sk, si, eid) {
+                        qymcad_ui_state::DimRef::Line(a2, b2) => {
+                            let other = (a2, b2) != (la, lb) && (a2, b2) != (lb, la);
+                            (other && qymcad_ui_state::lines_parallel(&sk.draw(), si, la, lb, a2, b2)).then_some(qymcad_ui_state::DimRef::Line(a2, b2))
+                        }
+                        r => Some(r),
+                    }
                 });
             if let Some(r2) = r2 {
                 sk.project.sketches[si].constraints.remove(ci); // remove the provisional length
@@ -362,7 +359,9 @@ pub fn dim_click_inner(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
     }
     // a radius or a diameter: a circle entity (a diameter or radius dimension) or a circle primitive
     if sk.armed.dim_kind() == 3 {
-        if let Some(eid) = qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si) {
+        let under = qymcad_pick::curve_or_caption_under(&sk.pick(), rect, pos, si);
+        let round = |eid: &Id| sk.project.sketches[si].entity(*eid).is_some_and(|e| e.kind.as_circle().is_some() || e.kind.as_arc().is_some());
+        if let Some(eid) = under.filter(round) {
             // a circle gets a parametric diameter dimension (a Diameter constraint); an arc has its radius
             // edited
             let center = sk.project.sketches[si].entity(eid).and_then(|e| e.kind.as_circle()).map(|k| k.center);
@@ -387,7 +386,7 @@ pub fn dim_click_inner(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos
             return true;
         }
         // an ellipse: its half axis, the major one, typed at once
-        if let Some(eid) = qymcad_pick::nearest_curve_eid(&sk.pick(), rect, pos, si) {
+        if let Some(eid) = under {
             if let Some(size @ Constraint::Distance { .. }) = curve_size(&*sk.project, si, eid) {
                 sk.project.sketches[si].constraints.push(size);
                 let ci = sk.project.sketches[si].constraints.len() - 1;

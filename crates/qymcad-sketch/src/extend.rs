@@ -40,7 +40,7 @@ pub fn project_clicked_edge(sk: &mut qymcad_ui_state::SketchCtx, si: usize, rect
 pub(crate) fn auto_project_under(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, si: usize, at: Point2) {
     use qymcad_core::model::ProjSource;
     let pos = (qymcad_ui_state::Sheet { view: *sk.view, rect }).at(at);
-    if qymcad_pick::nearest_line_eid(&sk.pick(), rect, pos, si).is_some() || qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si).is_some() {
+    if !qymcad_pick::curves_under(&sk.pick(), rect, pos, si).is_empty() {
         return;
     }
     let Some((body, edge)) = nearest_ref_edge(sk, si, rect, pos) else { return };
@@ -66,7 +66,7 @@ pub(crate) struct ExtendAt {
 pub(crate) fn extend_ask(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, pos: Pos2, si: usize) -> qymcad_core::model::ExtendAsk {
     let w = qymcad_ui_state::to_world(&*sk.view, rect, pos);
     let held = sk.tool.extend;
-    let over = qymcad_pick::nearest_line_eid(&sk.pick(), rect, pos, si).filter(|e| Some(*e) != held).or_else(|| qymcad_pick::nearest_circle_entity(&sk.pick(), rect, pos, si));
+    let over = qymcad_pick::curves_under(&sk.pick(), rect, pos, si).into_iter().find(|e| Some(*e) != held);
     let sides = if sk.tool_prefs.extend_both { qymcad_core::model::ExtendSides::Both } else { qymcad_core::model::ExtendSides::Nearer };
     qymcad_core::model::ExtendAsk { pointer: Point2::new(w.x, w.y), over, sides }
 }

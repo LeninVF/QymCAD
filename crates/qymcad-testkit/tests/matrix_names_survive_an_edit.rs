@@ -465,7 +465,7 @@ const EDITS: [Edit; 7] = [
         left: Left::Straight,
         apply: |mut p, laid| {
             let (si, lines) = left_lines(&p, laid.base.sketch);
-            assert!(p.break_line(si, lines[0], 0.0, 15.0), "the left side did not break");
+            assert!(p.break_curve(si, lines[0], 0.0, 15.0), "the left side did not break");
             if let Some(q) = p.sketches[si].points.iter_mut().find(|q| q.x.abs() < 1e-9 && (q.y - 15.0).abs() < 1e-6) {
                 q.x = -5.0;
             }

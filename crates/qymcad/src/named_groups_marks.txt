@@ -145,7 +145,7 @@ crates/qymcad-core/src/model/regen/prep_profiles.rs 1 1 0
 crates/qymcad-core/src/model/regen/refs.rs 2 5 1
 crates/qymcad-core/src/model/regen/run.rs 0 2 0
 crates/qymcad-core/src/model/round.rs 5 5 0
-crates/qymcad-core/src/model/sketch.rs 10 8 0
+crates/qymcad-core/src/model/sketch.rs 10 7 0
 crates/qymcad-core/src/model/sketch/contours.rs 1 8 0
 crates/qymcad-core/src/model/sketch/corners.rs 12 24 0
 crates/qymcad-core/src/model/sketch/edit.rs 8 7 2
@@ -153,7 +153,7 @@ crates/qymcad-core/src/model/sketch/entities.rs 25 8 3
 crates/qymcad-core/src/model/sketch/offset.rs 0 3 0
 crates/qymcad-core/src/model/sketch/profiles.rs 9 5 0
 crates/qymcad-core/src/model/sketch/solve.rs 1 5 1
-crates/qymcad-core/src/model/sketch/trim.rs 12 5 0
+crates/qymcad-core/src/model/sketch/trim.rs 4 3 0
 crates/qymcad-core/src/model/sketch_ops.rs 7 4 0
 crates/qymcad-core/src/model/sketch_types.rs 0 2 0
 crates/qymcad-core/src/model/tess.rs 9 28 0
@@ -391,7 +391,7 @@ crates/qymcad-part/tests/the_bar_describes_the_thread_it_will_build.rs 0 1 0
 crates/qymcad-paths/src/lib.rs 0 1 0
 crates/qymcad-pick/src/body_hits.rs 1 28 2
 crates/qymcad-pick/src/infer.rs 1 14 0
-crates/qymcad-pick/src/sketch_hits.rs 4 19 1
+crates/qymcad-pick/src/sketch_hits.rs 3 15 0
 crates/qymcad-render/src/cards.rs 0 0 2
 crates/qymcad-render/src/gizmos.rs 1 0 0
 crates/qymcad-render/src/lib.rs 0 0 1
@@ -410,7 +410,7 @@ crates/qymcad-sketch/src/constraints.rs 0 1 0
 crates/qymcad-sketch/src/corners.rs 1 2 4
 crates/qymcad-sketch/src/dims.rs 6 3 0
 crates/qymcad-sketch/src/drag.rs 5 2 1
-crates/qymcad-sketch/src/lib.rs 2 17 2
+crates/qymcad-sketch/src/lib.rs 2 16 2
 crates/qymcad-sketch/src/menu.rs 0 3 0
 crates/qymcad-sketch/src/offset.rs 0 1 0
 crates/qymcad-sketch/src/snap.rs 0 13 0

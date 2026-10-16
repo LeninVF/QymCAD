@@ -260,7 +260,7 @@ pub(crate) fn draw_extend_preview(pn: &Painting, painter: &egui::Painter, rect: 
     let (Some(pa), Some(pb)) = (at(a), at(b)) else { return };
     let green = pn.scheme.pal.add();
     painter.line_segment([sh.at(pa), sh.at(pb)], Stroke::new(3.0, green));
-    let over = qymcad_pick::nearest_line_eid(&pick, rect, held.pos, held.si).filter(|e| *e != held.line).or_else(|| qymcad_pick::nearest_circle_entity(&pick, rect, held.pos, held.si));
+    let over = qymcad_pick::curves_under(&pick, rect, held.pos, held.si).into_iter().find(|e| *e != held.line);
     let sides = if pn.tool_prefs.extend_both { qymcad_core::model::ExtendSides::Both } else { qymcad_core::model::ExtendSides::Nearer };
     let Some(pointer) = pn.cursor else { return };
     let ext = pn.project.line_extension(held.si, held.line, &qymcad_core::model::ExtendAsk { pointer, over, sides });

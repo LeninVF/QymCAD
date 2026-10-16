@@ -673,35 +673,6 @@ fn arc_label_angle(points: &[SketchPoint], arc: ArcEnds) -> f64 {
     -mid
 }
 
-/// A CIRCLE OR AN ARC READ AS ONE THING: the centre, the radius, and for an arc the angular range.
-///
-/// It used to be built twice, in two commands, as the same five-place tuple with the same comment beside it -
-/// and `Option<(f64, f64, bool)>` in a signature says nothing about what the three are.
-pub(crate) struct Round {
-    /// The point that is the centre.
-    center_id: Id,
-    /// The centre, in sketch coordinates.
-    cx: f64,
-    cy: f64,
-    /// The radius.
-    r: f64,
-    /// `None` for a circle. For an arc: the start angle, the end angle, and whether it runs anticlockwise.
-    span: Option<(f64, f64, bool)>,
-}
-
-/// Read a circle or an arc; anything else, or a missing point, gives `None`.
-fn round_entity(s: &crate::model::Sketch, e: &crate::model::SketchEntity) -> Option<Round> {
-    let at = |id: Id| s.point(id).map(|q| Point2::new(q.x, q.y));
-    let circle = e.kind.circle_by(&at)?;
-    let c = at(circle.center)?;
-    let angle = |id: Id| at(id).map(|q| (q.y - c.y).atan2(q.x - c.x));
-    let span = match e.kind.as_arc() {
-        Some(arc) => Some((angle(arc.a)?, angle(arc.b)?, arc.ccw)),
-        None => None,
-    };
-    Some(Round { center_id: circle.center, cx: c.x, cy: c.y, r: circle.r, span })
-}
-
 fn at_of(pts: &[SketchPoint], id: Id) -> Option<(f64, f64)> {
     pts.iter().find(|p| p.id == id).map(|p| (p.x, p.y))
 }

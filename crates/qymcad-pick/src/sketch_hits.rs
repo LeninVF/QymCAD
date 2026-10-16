@@ -60,10 +60,8 @@ pub fn nearest_sketch_point(pick: &PickCtx, rect: Rect, screen: Pos2, si: usize)
 
 /// The line entity nearest to a screen point -> ITS OWN id (not its ends).
 ///
-/// A method of its own precisely because the neighbouring `nearest_line_entity` returns THE ENDS of a
-/// line: while choosing the axis of a revolution the id of a point was compared against a list of
-/// lines, there was never a match, and the half-sketcher opened while not one line could be
-/// selected.
+/// The id of the line, not its ends: while choosing the axis of a revolution the id of a point was compared against a
+/// list of lines, there was never a match, and the half-sketcher opened while not one line could be selected.
 pub fn nearest_line_id(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize, only: &[Id]) -> Option<Id> {
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
     let s = pick.project.sketches.get(si)?;
@@ -82,28 +80,6 @@ pub fn nearest_line_id(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize, only: &
         }
     }
     best.map(|(_, id)| id)
-}
-
-/// The line entity nearest to a screen point -> its ends (a, b).
-pub fn nearest_line_entity(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<(Id, Id)> {
-    let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
-    let s = pick.project.sketches.get(si)?;
-    // the hierarchy: an ordinary line outranks a construction one (for dimensions and constraints)
-    let mut best: Option<(u8, f32, (Id, Id))> = None;
-    for e in &s.entities {
-        if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
-            if let (Some(pa), Some(pb)) = (sketch_pt(pick.project, si, a), sketch_pt(pick.project, si, b)) {
-                let d = screen_dist_seg(pos, sh.at(pa), sh.at(pb));
-                if d <= grab(pick.set, Grab::Curve) {
-                    let tier = if e.construction { 1u8 } else { 0u8 };
-                    if best.is_none_or(|(bt, bd, _)| (tier, d) < (bt, bd)) {
-                        best = Some((tier, d, (a, b)));
-                    }
-                }
-            }
-        }
-    }
-    best.map(|(_, _, ab)| ab)
 }
 
 /// The vertex (sketch point) nearest to a screen point within the tolerance — for clicking a corner.
@@ -151,106 +127,69 @@ pub fn nearest_point_within_where(pick: &PickCtx, rect: Rect, pos: Pos2, si: usi
     best.or(best_origin).map(|(_, id)| id)
 }
 
-/// The nearest line entity -> the Id of the entity (for trimming).
-pub fn nearest_line_eid(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
+/// HOW FAR A CONSTRUCTION CURVE YIELDS to an ordinary one under the pointer, in pixels: it is taken only where it is
+/// nearer by more than this. Yielding over the whole grab radius (8 px), the construction circle of a hexagon R7 - 0.94
+/// mm, 5.6 px at 6 px/mm from its sides at most - could not be clicked anywhere.
+const CONSTRUCTION_YIELDS: f32 = 2.0;
+
+/// THE CURVES UNDER THE POINTER, nearest first: every curve of the sketch, of whatever kind, within the grab of a curve
+/// of its outline as it is drawn, a construction curve counted `CONSTRUCTION_YIELDS` farther. The one path a click of the
+/// arrow, a dimension, a constraint, Trim, Break, Extend and the corner tool take a curve by: a tool that asked for a line
+/// first and a circle after took a line 6 px beside a spline, a circle or an ellipse under the pointer.
+pub fn curves_under(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Vec<Id> {
+    let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
+    let Some(s) = pick.project.sketches.get(si) else { return Vec::new() };
+    let mut near: Vec<(f32, Id)> = s
+        .entities
+        .iter()
+        .filter_map(|e| {
+            let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).into_iter().map(|p| sh.at(p)).collect();
+            let d = line.windows(2).map(|w| screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min);
+            (d <= grab(pick.set, Grab::Curve)).then_some((if e.construction { d + CONSTRUCTION_YIELDS } else { d }, e.id))
+        })
+        .collect();
+    near.sort_by(|a, b| a.0.total_cmp(&b.0));
+    near.into_iter().map(|(_, id)| id).collect()
+}
+
+/// THE CURVE UNDER THE POINTER, or the circle or the arc whose size caption is: what a click that asks for a curve's size
+/// takes - a dimension, a double click, a drag of the caption. The caption stands where `draw_sketch_dims` draws it: a
+/// diameter above the middle of the leader from the centre to the rim, a radius at the rim of an arc towards its middle.
+pub fn curve_or_caption_under(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
+    if let Some(&id) = curves_under(pick, rect, pos, si).first() {
+        return Some(id);
+    }
     let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
     let s = pick.project.sketches.get(si)?;
-    let mut best: Option<(f32, Id)> = None;
-    for e in &s.entities {
-        if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
-            if let (Some(pa), Some(pb)) = (sketch_pt(pick.project, si, a), sketch_pt(pick.project, si, b)) {
-                let d = screen_dist_seg(pos, sh.at(pa), sh.at(pb));
-                if d <= grab(pick.set, Grab::Curve) && best.is_none_or(|(bd, _)| d < bd) {
-                    best = Some((d, e.id));
-                }
-            }
-        }
-    }
-    best.map(|(_, id)| id)
+    s.entities
+        .iter()
+        .filter_map(|e| Some((size_caption(pick.project, si, &sh, e)?.distance(pos), e.id)))
+        .filter(|(d, _)| *d <= grab(pick.set, Grab::Label))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, id)| id)
 }
 
-/// HOW FAR A SCREEN POINT IS FROM AN ARC, on screen: to its outline where the point stands within the arc's sweep, to the
-/// nearer end past it. Measured round the whole circle the arc lies on, a click where the cut half of a trimmed circle
-/// of radius 10 had been - (0, -10), nothing drawn there - took the upper half left.
-pub fn arc_screen_dist(sh: &qymcad_ui_state::Sheet, pos: Pos2, c: Point2, pa: Point2, pb: Point2, ccw: bool) -> f32 {
-    use std::f64::consts::TAU;
-    let sc = sh.at(c);
-    let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
-    let rp = (sh.at(Point2::new(c.x + r, c.y)).x - sc.x).abs();
-    let w = qymcad_ui_state::to_world(&sh.view, sh.rect, pos);
-    let ang = |x: f64, y: f64| (y - c.y).atan2(x - c.x);
-    let (a0, a1, at) = (ang(pa.x, pa.y), ang(pb.x, pb.y), ang(w.x, w.y));
-    let along = |from: f64, to: f64| if ccw { (to - from).rem_euclid(TAU) } else { (from - to).rem_euclid(TAU) };
-    if along(a0, at) <= along(a0, a1) {
-        (sc.distance(pos) - rp).abs()
-    } else {
-        sh.at(pa).distance(pos).min(sh.at(pb).distance(pos))
-    }
-}
-
-/// The circle or arc entity nearest to a screen point -> its Id. It catches both the outline and the
-/// diameter or radius label (the position of the label is where `draw_sketch_dims` draws it).
-pub fn nearest_circle_entity(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
-    let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
+/// Where the size caption of circle or arc `e` stands on screen; `None` for a curve of another kind.
+fn size_caption(project: &Project, si: usize, sh: &qymcad_ui_state::Sheet, e: &qymcad_core::model::SketchEntity) -> Option<Pos2> {
     use qymcad_core::model::{ArcParts, CircleParts};
-    let s = pick.project.sketches.get(si)?;
-    let mut best: Option<(f32, Id)> = None;
-    for e in &s.entities {
-        // an arc is caught along its own sweep (see `arc_screen_dist`)
-        let mut past_ends: Option<f32> = None;
-        let (center, r, label) = if let Some(CircleParts { center, r }) = e.kind.as_circle() {
-            let Some(c) = sketch_pt(pick.project, si, center) else { continue };
-            let sc = sh.at(c);
-            let ed = sh.at(Point2::new(c.x + r, c.y));
-            // the diameter label sits above the middle of the leader from the centre to the rim
-            (c, r, ((sc.to_vec2() + ed.to_vec2()) / 2.0 + egui::vec2(0.0, -8.0)).to_pos2())
-        } else if let Some(ArcParts { center, a, b, ccw }) = e.kind.as_arc() {
-            let (Some(c), Some(pa), Some(pb)) = (sketch_pt(pick.project, si, center), sketch_pt(pick.project, si, a), sketch_pt(pick.project, si, b)) else { continue };
-            let r = ((pa.x - c.x).powi(2) + (pa.y - c.y).powi(2)).sqrt();
-            // the radius label sits at the rim of the arc towards its middle (as in
-            // `draw_sketch_dims`)
-            let mid = Point2::new((pa.x + pb.x) / 2.0 - c.x, (pa.y + pb.y) / 2.0 - c.y);
-            let ml = (mid.x * mid.x + mid.y * mid.y).sqrt().max(1e-9);
-            let edge = Point2::new(c.x + mid.x / ml * r, c.y + mid.y / ml * r);
-            past_ends = Some(arc_screen_dist(&sh, pos, c, pa, pb, ccw));
-            (c, r, (sh.at(edge).to_vec2() + egui::vec2(10.0, -8.0)).to_pos2())
-        } else {
-            continue;
-        };
-        let sc = sh.at(center);
-        let rp = (sh.at(Point2::new(center.x + r, center.y)).x - sc.x).abs();
-        let d_out = past_ends.unwrap_or_else(|| (sc.distance(pos) - rp).abs()); // by the outline of the circle, or the arc
-        let d_label = label.distance(pos); // by the diameter or radius label
-        let d = d_out.min(d_label);
-        if d <= grab(pick.set, Grab::Label) && best.is_none_or(|(bd, _)| d < bd) {
-            best = Some((d, e.id));
-        }
+    if let Some(CircleParts { center, r }) = e.kind.as_circle() {
+        let c = sketch_pt(project, si, center)?;
+        let (sc, ed) = (sh.at(c), sh.at(Point2::new(c.x + r, c.y)));
+        return Some(((sc.to_vec2() + ed.to_vec2()) / 2.0 + egui::vec2(0.0, -8.0)).to_pos2());
     }
-    best.map(|(_, id)| id)
+    let ArcParts { center, a, b, .. } = e.kind.as_arc()?;
+    let (c, pa, pb) = (sketch_pt(project, si, center)?, sketch_pt(project, si, a)?, sketch_pt(project, si, b)?);
+    let r = pa.dist(c);
+    let mid = Point2::new((pa.x + pb.x) / 2.0 - c.x, (pa.y + pb.y) / 2.0 - c.y);
+    let ml = mid.x.hypot(mid.y).max(1e-9);
+    let edge = Point2::new(c.x + mid.x / ml * r, c.y + mid.y / ml * r);
+    Some((sh.at(edge).to_vec2() + egui::vec2(10.0, -8.0)).to_pos2())
 }
 
 /// THE CURVE A CLICK OF TRIM, BREAK OR EXTEND TAKES: the one nearest the pointer, of whatever kind. Taken a line first, a
 /// line 6 px beside a spline under the pointer - within the grab of a curve, 8 px - was cut instead of the spline.
 pub fn edit_target(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
-    nearest_curve_eid(pick, rect, pos, si)
-}
-
-/// THE CURVE OF ANY KIND UNDER THE POINTER, within reach of a curve: the nearest by the points it is laid out by. What a
-/// tool that cuts or stretches a curve takes when no line and no circle is under the pointer - an ellipse, an arc of one,
-/// a spline.
-pub fn nearest_curve_eid(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<Id> {
-    let sh = qymcad_ui_state::Sheet { view: *pick.view, rect };
-    let s = pick.project.sketches.get(si)?;
-    s.entities
-        .iter()
-        .map(|e| {
-            let line: Vec<Pos2> = qymcad_ui_state::entity_outline(s, e).into_iter().map(|p| sh.at(p)).collect();
-            let d = line.windows(2).map(|w| screen_dist_seg(pos, w[0], w[1])).fold(f32::INFINITY, f32::min);
-            (d, e.id)
-        })
-        .filter(|(d, _)| *d <= grab(pick.set, Grab::Curve))
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, id)| id)
+    curves_under(pick, rect, pos, si).first().copied()
 }
 
 /// The circle or arc that the segment p1-p2 is ALMOST TANGENT to (the distance from the centre to the
