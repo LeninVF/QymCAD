@@ -62,13 +62,7 @@ fn spline() -> Vec<(String, usize)> {
 
 /// Every corner of every curve read.
 fn corners(s: &qymcad_io::ImportedSketch) -> Vec<(f64, f64)> {
-    s.curves
-        .iter()
-        .flat_map(|c| match c {
-            qymcad_core::geom::ProfEdge::Line { a, b } => vec![(a.x, a.y), (b.x, b.y)],
-            _ => Vec::new(),
-        })
-        .collect()
+    s.curves.iter().filter_map(|c| c.ends()).flatten().map(|p| (p.x, p.y)).collect()
 }
 
 #[test]

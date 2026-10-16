@@ -240,37 +240,38 @@ pub fn draw_sketch_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
 /// THE RING WHERE AN EXTENDED END LANDS, in px.
 pub const EXTEND_RING: f32 = 4.0;
 
-/// THE LINE EXTEND HOLDS and where the pointer stands on the canvas.
+/// THE CURVE EXTEND HOLDS and where the pointer stands on the canvas.
 #[derive(Clone, Copy)]
 pub(crate) struct ExtendHeld {
     pub(crate) si: usize,
-    pub(crate) line: Id,
+    pub(crate) curve: Id,
     pub(crate) pos: Pos2,
 }
 
-/// THE PREVIEW OF EXTEND: the line it holds lit, and from each end that goes, a dashed line to where it goes - the
-/// curve under the pointer when it lies on that side of the axis, else the nearest there. A side meeting nothing draws
-/// nothing.
+/// THE PREVIEW OF EXTEND: the curve it holds lit, and from each end that goes, dashes along the way the curve goes on to
+/// where it goes (`curve_extension`) - the curve under the pointer when its way meets it, else the nearest on its way -
+/// and a ring where the end lands. A side meeting nothing draws nothing.
 pub(crate) fn draw_extend_preview(pn: &Painting, painter: &egui::Painter, rect: Rect, held: ExtendHeld) {
     let sh = qymcad_ui_state::Sheet { view: pn.view, rect };
     let pick = PickCtx { project: pn.project, set: pn.set, view: &pn.view };
     let Some(s) = pn.project.sketches.get(held.si) else { return };
-    let Some(qymcad_core::model::LineParts { a, b }) = s.entity(held.line).and_then(|e| e.kind.as_line()) else { return };
-    let at = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| Point2::new(q.x, q.y));
-    let (Some(pa), Some(pb)) = (at(a), at(b)) else { return };
+    let Some(curve) = s.entity(held.curve).and_then(|e| qymcad_core::model::curve::Curve::of(s, e)) else { return };
+    let on_screen = |c: &qymcad_core::model::curve::Curve| c.polyline().into_iter().map(|p| sh.at(p)).collect::<Vec<Pos2>>();
     let green = pn.scheme.pal.add();
-    painter.line_segment([sh.at(pa), sh.at(pb)], Stroke::new(3.0, green));
-    let over = qymcad_pick::curves_under(&pick, rect, held.pos, held.si).into_iter().find(|e| *e != held.line);
+    painter.add(egui::Shape::line(on_screen(&curve), Stroke::new(3.0, green)));
+    let over = qymcad_pick::curves_under(&pick, rect, held.pos, held.si).into_iter().find(|e| *e != held.curve);
     let sides = if pn.tool_prefs.extend_both { qymcad_core::model::ExtendSides::Both } else { qymcad_core::model::ExtendSides::Nearer };
     let Some(pointer) = pn.cursor else { return };
-    let ext = pn.project.line_extension(held.si, held.line, &qymcad_core::model::ExtendAsk { pointer, over, sides });
-    let along = |t: f64| Point2::new(pa.x + (pb.x - pa.x) * t, pa.y + (pb.y - pa.y) * t);
-    for (end, t) in [(pa, ext.a), (pb, ext.b)] {
-        if let Some(t) = t {
-            // the dashes, and a ring where the end lands: the last dash stops short of it by up to a gap
-            painter.add(egui::Shape::dashed_line(&[sh.at(end), sh.at(along(t))], Stroke::new(2.0, green), 6.0, 4.0));
-            painter.circle_stroke(sh.at(along(t)), EXTEND_RING, Stroke::new(2.0, green));
-        }
+    let Some(ext) = pn.project.curve_extension(held.si, held.curve, &qymcad_core::model::ExtendAsk { pointer, over, sides }) else { return };
+    let [start, finish] = curve.ends();
+    for end in &ext.goes {
+        // the stretch from where the end stood to where it lands, on the curve as it will run
+        let (stood, lands) = if *end == qymcad_core::model::curve::End::Start { (start, 0.0) } else { (finish, 1.0) };
+        let t = ext.curve.nearest(stood).t;
+        let stretch = ext.curve.piece(if lands == 0.0 { [0.0, t] } else { [t, 1.0] });
+        // the dashes, and a ring where the end lands: the last dash stops short of it by up to a gap
+        painter.add(egui::Shape::dashed_line(&on_screen(&stretch), Stroke::new(2.0, green), 6.0, 4.0));
+        painter.circle_stroke(sh.at(ext.curve.at(lands)), EXTEND_RING, Stroke::new(2.0, green));
     }
 }
 
@@ -287,7 +288,7 @@ pub fn draw_trim_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
     let Sel::Sketch(si) = pn.sel else { return };
     let pos = sh.at(cur);
     if let (2, Some(held)) = (pn.armed.click_op(), pn.tool.extend) {
-        draw_extend_preview(pn, painter, rect, ExtendHeld { si, line: held, pos });
+        draw_extend_preview(pn, painter, rect, ExtendHeld { si, curve: held, pos });
         return;
     }
     let pick = PickCtx { project: pn.project, set: pn.set, view: &pn.view };

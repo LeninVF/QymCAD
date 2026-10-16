@@ -803,11 +803,12 @@ pub fn sketch_click_at(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context,
                     qymcad_ui_state::begin_edit(&mut *sk.edits, &*sk.project, qymcad_i18n::tr(tool));
                     // the curve nearest the pointer, of whatever kind
                     let target = qymcad_pick::edit_target(&sk.pick(), rect, pos, si);
-                    let line_eid = target.filter(|e| sk.project.sketches[si].entity(*e).is_some_and(|x| x.kind.as_line().is_some()));
-                    // EXTEND HOLDS A LINE, or takes the line clicked: the click applies what the preview shows
-                    if sk.armed.click_op() == 2 && (sk.tool.extend.is_some() || line_eid.is_some()) {
-                        extend_click(sk, ExtendAt { rect, pos, si, line: line_eid });
-                        qymcad_ui_state::commit_edit_if_changed(&mut sk.rebuild()); // taking the line changes nothing
+                    let s = &sk.project.sketches[si];
+                    let open = target.filter(|e| s.entity(*e).and_then(|x| qymcad_core::model::curve::Curve::of(s, x)).is_some_and(|c| !c.closed()));
+                    // EXTEND HOLDS AN OPEN CURVE, or takes the one clicked: the click applies what the preview shows
+                    if sk.armed.click_op() == 2 && (sk.tool.extend.is_some() || open.is_some()) {
+                        extend_click(sk, ExtendAt { rect, pos, si, curve: open });
+                        qymcad_ui_state::commit_edit_if_changed(&mut sk.rebuild()); // taking the curve changes nothing
                         return;
                     }
                     // the curve nearest the pointer through the one door of the tool, whatever its kind; where it does not

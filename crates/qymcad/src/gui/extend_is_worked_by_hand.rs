@@ -92,11 +92,48 @@ mod tests {
             assert!(hand.app.tool_prefs.extend_both, "GUARD: Both sides ticked");
             hand.hover2d(5.0, 1.0);
             hand.key(egui::Key::Enter);
-            if ends_x(&hand, line) != want {
+            let got = ends_x(&hand, line);
+            if (got.0 - want.0).abs() > 1e-9 || (got.1 - want.1).abs() > 1e-9 {
                 failures.push(format!("lines across at {across:?}: the line runs {:?}, wanted {want:?}; the constraints {:?}", ends_x(&hand, line), hand.app.project.sketches[0].constraints));
             }
         }
         assert!(failures.is_empty(), "both sides:\n{}", failures.join("\n"));
+    }
+
+    /// AN ARC IS HELD AS A LINE IS: the arc of radius 10 about the origin from 0 to 90 deg, an upright line at x = -5 and a
+    /// level line at y = -6 across its circle; the arc selected, Extend taken, Both sides ticked, Enter - the finish goes
+    /// round to x = -5 and the start down to y = -6. Reported behaviour: a curve other than a line was extended at once,
+    /// from its nearer end to the nearest curve, with no Both sides and no curve under the pointer to go to.
+    #[test]
+    fn both_sides_extend_each_end_of_an_arc() {
+        let (mut app, _ctx) = running();
+        let si = app.create_sketch_on(SketchPlane::default());
+        app.enter_sketch_edit(si);
+        let real = qymcad_core::feature::Purpose::Real;
+        let centre = qymcad_core::geom::Point2::new(0.0, 0.0);
+        let start = qymcad_core::geom::Point2::new(10.0, 0.0);
+        let finish = qymcad_core::geom::Point2::new(0.0, 10.0);
+        app.project.add_arc_entity(si, centre, start, finish, qymcad_core::feature::Winding::Ccw, real);
+        let arc = app.project.sketches[si].entities.last().map(|e| e.id).expect("the arc");
+        app.project.add_line_entity(si, -5.0, -20.0, -5.0, 20.0, real);
+        app.project.add_line_entity(si, -20.0, -6.0, 20.0, -6.0, real);
+        app.project.regen_sketch(si);
+        let mut hand = Hand::new(&mut app);
+        // the arc picked by a click on it at 45 deg
+        let r = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+        hand.sk_tool(0).click2d(r, r);
+        take_extend(&mut hand);
+        assert_eq!(hand.app.tools.tool.extend, Some(arc), "Extend did not take the arc selected before it");
+        assert!(hand.press_word(&crate::i18n::tr("opt-extend-both"), egui::pos2(0.0, 0.0)), "no Both sides in the bar");
+        hand.hover2d(7.0, 7.0);
+        hand.key(egui::Key::Enter);
+        let s = &hand.app.project.sketches[si];
+        let ends = s.entity(arc).and_then(|e| qymcad_core::model::curve::Curve::of(s, e)).map(|c| c.ends());
+        let status = hand.app.status.clone();
+        assert!(
+            ends.is_some_and(|[start, finish]| (start.y + 6.0).abs() < 1e-6 && (finish.x + 5.0).abs() < 1e-6),
+            "both sides of the arc: it runs {ends:?}, not from y -6 to x -5; the status line says {status:?}"
+        );
     }
 
     #[test]

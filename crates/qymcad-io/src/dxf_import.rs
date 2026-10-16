@@ -1,7 +1,8 @@
 //! Importing DXF into exact primitive curves — segments, arcs and circles — rather than a tessellation.
 //!
-//! Read: LINE, CIRCLE, ARC and polylines, including bulge arcs from fillets; ELLIPSE and SPLINE as runs of segments
-//! whose corners lie on the curve, fine enough that no chord strays from it by more than `CHORD` mm; INSERT as the
+//! Read: LINE, CIRCLE, ARC and polylines, including bulge arcs from fillets; ELLIPSE as the ellipse it is; a SPLINE of
+//! degree 3 with no weights of its own as the cubic spans it is made of, and any other as a run of segments whose corners
+//! lie on the curve, fine enough that no chord strays from it by more than `CHORD` mm; INSERT as the
 //! entities of its block, placed, turned and scaled, repeated over its rows and columns. A circle stays a circle and an
 //! arc stays an arc; they are not broken into segments, or importing a drawing would yield thousands of them. Every
 //! other entity is counted by its kind and named, not silently dropped: a drawing that lost its texts or hatches must
@@ -10,6 +11,7 @@
 use dxf::entities::{Entity, EntityType};
 use dxf::Drawing;
 use qymcad_core::geom::{Point2, ProfEdge};
+use qymcad_core::model::curve::Curve;
 
 use crate::ImportedSketch;
 
@@ -164,7 +166,20 @@ fn read(drawing: &Drawing, entities: &[&Entity], place: &Place, depth: usize, cu
                 let (nx, ny) = (-my * turn * e.minor_axis_ratio, mx * turn * e.minor_axis_ratio);
                 let (from, to) = (e.start_parameter, e.end_parameter);
                 let to = if to <= from { to + std::f64::consts::TAU } else { to };
-                run(|t| place.at(e.center.x + mx * t.cos() + nx * t.sin(), e.center.y + my * t.cos() + ny * t.sin()), from, to, curves);
+                let at = |t: f64| place.at(e.center.x + mx * t.cos() + nx * t.sin(), e.center.y + my * t.cos() + ny * t.sin());
+                // an ellipse placed by a turn and an even scale keeps its axes square; one stretched unevenly is the ellipse
+                // through its points, whose axes are its own
+                let oval = match place.uniform() {
+                    Some(_) => {
+                        let c = place.at(e.center.x, e.center.y);
+                        Some(ProfEdge::Oval { centre: c, major: at(0.0) - c, minor: at(std::f64::consts::FRAC_PI_2) - c, from, sweep: to - from })
+                    }
+                    None => Curve::oval_through(&(0..=48).map(|k| at(from + (to - from) * k as f64 / 48.0)).collect::<Vec<_>>()).and_then(|c| c.to_edges().into_iter().next()),
+                };
+                match oval {
+                    Some(o) if [e.center.x, e.center.y, mx, my, nx, ny, from, to].iter().all(|v| v.is_finite()) => curves.push(o),
+                    _ => run(at, from, to, curves),
+                }
             }
             EntityType::Spline(sp) => {
                 let under = match spline(sp, place, curves) {
@@ -272,7 +287,20 @@ fn spline(sp: &dxf::entities::Spline, place: &Place, curves: &mut Vec<ProfEdge>)
     // they are what the spline would be drawn by. A spline given by fit points alone is not invalid.
     let invalid = !made && (!ctrl.is_empty() || !knots.is_empty() || !fit_finite);
     let drawn = made || (sp.fit_points.len() >= 2 && fit_finite);
-    if made {
+    let even = w.iter().all(|v| (v - w[0]).abs() <= 1e-12 * w[0]);
+    if made && p == 3 && even {
+        // a cubic with no weights of its own: each span between knots is a cubic, the Bezier of the blossoms of its ends
+        for span in p..ctrl.len() {
+            let (a, b) = (knots[span], knots[span + 1]);
+            if b - a > 1e-12 * (knots[ctrl.len()] - knots[p]) {
+                let q = |u: [f64; 3]| {
+                    let (x, y) = blossom(&ctrl, knots, span, u);
+                    place.at(x, y)
+                };
+                curves.push(ProfEdge::Cubic { a: q([a, a, a]), c1: q([a, a, b]), c2: q([a, b, b]), b: q([b, b, b]) });
+            }
+        }
+    } else if made {
         let (lo, hi) = (knots[p], knots[ctrl.len()]);
         let at = |t: f64| {
             let t = t.clamp(lo, hi);
@@ -301,18 +329,14 @@ fn spline(sp: &dxf::entities::Spline, place: &Place, curves: &mut Vec<ProfEdge>)
         };
         run(at, lo, hi, curves);
     } else if drawn {
-        let pts: Vec<(f64, f64)> = sp.fit_points.iter().map(|q| (q.x, q.y)).collect();
+        // through the fit points as a Catmull-Rom curve: each span the cubic Bezier with handles a sixth of the chord
+        // across its ends
+        let pts: Vec<Point2> = sp.fit_points.iter().map(|q| Point2::new(q.x, q.y)).collect();
         let n = pts.len();
         for k in 0..n - 1 {
-            let p0 = pts[k.saturating_sub(1)];
-            let (p1, p2) = (pts[k], pts[k + 1]);
-            let p3 = pts[(k + 2).min(n - 1)];
-            let at = |t: f64| {
-                let (t2, t3) = (t * t, t * t * t);
-                let f = |a: f64, b: f64, c: f64, d: f64| 0.5 * (2.0 * b + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (3.0 * b - a - 3.0 * c + d) * t3);
-                place.at(f(p0.0, p1.0, p2.0, p3.0), f(p0.1, p1.1, p2.1, p3.1))
-            };
-            run(at, 0.0, 1.0, curves);
+            let (p0, p1, p2, p3) = (pts[k.saturating_sub(1)], pts[k], pts[k + 1], pts[(k + 2).min(n - 1)]);
+            let (c1, c2) = (p1 + (p2 - p0) * (1.0 / 6.0), p2 - (p3 - p1) * (1.0 / 6.0));
+            curves.push(ProfEdge::Cubic { a: place.at(p1.x, p1.y), c1: place.at(c1.x, c1.y), c2: place.at(c2.x, c2.y), b: place.at(p2.x, p2.y) });
         }
     }
     match (drawn, invalid) {
@@ -321,6 +345,21 @@ fn spline(sp: &dxf::entities::Spline, place: &Place, curves: &mut Vec<ProfEdge>)
         (false, true) => SplineRead::Invalid,
         (false, false) => SplineRead::Skipped,
     }
+}
+
+/// THE BLOSSOM of the cubic B-spline of `ctrl` and `knots` on span `span` at `u`: de Boor's rule with the parameter of
+/// each level its own. At (a, a, a), (a, a, b), (a, b, b), (b, b, b) for a span from a to b it is the Bezier of the span.
+fn blossom(ctrl: &[(f64, f64)], knots: &[f64], span: usize, u: [f64; 3]) -> (f64, f64) {
+    let mut d: Vec<(f64, f64)> = ctrl[span - 3..=span].to_vec();
+    for (r, ur) in (1..=3).zip(u) {
+        for j in (r..=3).rev() {
+            let i = span - 3 + j;
+            let den = knots[i + 4 - r] - knots[i];
+            let a = if den.abs() < 1e-300 { 0.0 } else { (ur - knots[i]) / den };
+            d[j] = ((1.0 - a) * d[j - 1].0 + a * d[j].0, (1.0 - a) * d[j - 1].1 + a * d[j].1);
+        }
+    }
+    d[3]
 }
 
 /// WHAT BECAME OF A SPLINE, one of four: two flags side by side read the same and swap without a word.

@@ -4,16 +4,16 @@
 use super::*;
 use crate::model::curve::{Curve, End};
 
-/// HOW A CURVE IS STRETCHED: the end it grows from, and the curve it becomes.
-struct Stretch {
-    end: End,
-    curve: Curve,
-}
-
 /// WHAT TRIM DOES AT A CLICK: the curve, and the run of it that goes - `None` when the whole of it goes.
 pub(crate) struct TrimCut {
     pub(crate) curve: Curve,
     pub(crate) run: Option<[f64; 2]>,
+}
+
+/// ANOTHER CURVE OF THE SKETCH, by its id.
+struct Other {
+    id: Id,
+    curve: Curve,
 }
 
 /// ONE CURVE OF A CROSSING TO CUT: the entity, its curve, the curve it crosses, and the crossing.
@@ -209,50 +209,90 @@ impl Project {
         true
     }
 
-    /// EXTEND CURVE `eid` OF ANY KIND from its end nearer the click to the nearest curve on its way: an arc of an ellipse
-    /// round its ellipse, a spline by a straight span along the tangent of its end. The end of an arc moves along its
-    /// curve; a spline gains a node. `false` for a closed curve or when its way meets nothing.
-    /// HOW AN EXTENSION AT THE CLICK STRETCHES CURVE `eid`: its end nearer the click, and the curve stretched from it to
-    /// the nearest curve on its way. `None` for a closed curve or when its way meets nothing.
-    fn stretch_at(&self, si: usize, eid: Id, click: Point2) -> Option<Stretch> {
+    /// HOW CURVE `eid` GOES AS THE EXTEND TOOL ASKS: each end asked taken to the curve the pointer is over when its way
+    /// meets that curve, else to the nearest curve on its way - a line along its straight, an arc round its circle, an arc
+    /// of an ellipse round its ellipse, a spline by a straight span along the tangent of its end; an end whose way meets
+    /// nothing stays. One end - the one whose way meets the curve under the pointer, else the one nearer the pointer - or
+    /// both. `None` for a closed curve or no curve of the sketch.
+    ///
+    /// AN END JOINED TO OTHER GEOMETRY STAYS (`end_held`): moved, it pulled what it is joined to, and the solve pulled it
+    /// back. Reported behaviour: Extend on the side two rectangles share, its end the end of a fillet, moved the drawing
+    /// (the ends of the fillet by 5e-6 mm, enough to lose the face of the rectangle), extended nothing and said it was
+    /// done. A spline grows by a node past its end, which does not move, and is never kept.
+    pub fn curve_extension(&self, si: usize, eid: Id, ask: &ExtendAsk) -> Option<CurveExtension> {
         let s = self.sketches.get(si)?;
         let c = Curve::of(s, s.entity(eid)?)?;
         if c.closed() {
             return None;
         }
+        let others: Vec<Other> = s.entities.iter().filter(|o| o.id != eid).filter_map(|o| Curve::of(s, o).map(|curve| Other { id: o.id, curve })).collect();
+        // the curve each end goes to: the one under the pointer when its way meets it, else the nearest on its way
+        let target = |end: End| {
+            let met: Vec<Other> = others.iter().filter_map(|o| c.stretched(end, &o.curve).map(|longer| Other { id: o.id, curve: longer })).collect();
+            let under = met.iter().find(|m| Some(m.id) == ask.over);
+            under.or(met.iter().min_by(|x, y| x.curve.length().total_cmp(&y.curve.length()))).map(|m| m.id)
+        };
         let [start, finish] = c.ends();
-        let end = if click.dist(start) < click.dist(finish) { End::Start } else { End::Finish };
-        // AN END JOINED TO OTHER GEOMETRY STAYS (`end_held`), as the end of a line does: moved, it pulled what it is
-        // joined to. A spline grows by a node past its end, which does not move.
+        let asked: Vec<End> = match ask.sides {
+            ExtendSides::Both => vec![End::Start, End::Finish],
+            ExtendSides::Nearer => {
+                let meets_under = |end: End| ask.over.is_some() && target(end) == ask.over;
+                let nearer = if ask.pointer.dist(start) < ask.pointer.dist(finish) { End::Start } else { End::Finish };
+                vec![if meets_under(End::Finish) {
+                    End::Finish
+                } else if meets_under(End::Start) {
+                    End::Start
+                } else {
+                    nearer
+                }]
+            }
+        };
         let moves = s.entity(eid)?.kind.as_spline().is_none();
-        if moves && self.end_point_of(si, eid, end).is_some_and(|p| self.end_held(si, eid, p)) {
-            return None;
+        let mut out = CurveExtension { curve: c.clone(), goes: Vec::new(), kept: EndKept::Free };
+        for end in asked {
+            let Some(to) = target(end).and_then(|id| others.iter().find(|o| o.id == id)) else { continue };
+            if moves && self.end_point_of(si, eid, end).is_some_and(|p| self.end_held(si, eid, p)) {
+                out.kept = EndKept::Joined;
+                continue;
+            }
+            if let Some(longer) = out.curve.stretched(end, &to.curve) {
+                out.curve = longer;
+                out.goes.push(end);
+            }
         }
-        // the longest the curve could get is its stretch to the nearest curve met on its way
-        let curve = s.entities.iter().filter(|o| o.id != eid).filter_map(|o| Curve::of(s, o)).filter_map(|o| c.stretched(end, &o)).min_by(|x, y| x.length().total_cmp(&y.length()))?;
-        Some(Stretch { end, curve })
+        Some(out)
     }
 
     /// CURVE `eid` AS AN EXTENSION AT THE CLICK LEAVES IT, stretched from its end nearer the click to the nearest curve on
-    /// its way. What the preview of the extension draws.
+    /// its way; `None` when nothing goes. What the preview of the extension under the pointer draws.
     pub fn extended(&self, si: usize, eid: Id, click: Point2) -> Option<Curve> {
-        self.stretch_at(si, eid, click).map(|s| s.curve)
+        self.curve_extension(si, eid, &ExtendAsk { pointer: click, over: None, sides: ExtendSides::Nearer }).filter(|x| !x.goes.is_empty()).map(|x| x.curve)
     }
 
-    pub(crate) fn extend_piece(&mut self, si: usize, eid: Id, click: Point2) -> bool {
-        let Some(Stretch { end, curve: longer }) = self.stretch_at(si, eid, click) else { return false };
+    /// EXTEND CURVE `eid` AS `ext` SAYS: the ends that go move to where the curve now ends, free of what placed them
+    /// where they stood; a spline gains a node past each end that goes. Answers whether an end went.
+    pub fn extend_curve_by(&mut self, si: usize, eid: Id, ext: &CurveExtension) -> bool {
+        self.cut_projection(si, eid, |p| p.extend_curve_by_here(si, eid, ext))
+    }
+    fn extend_curve_by_here(&mut self, si: usize, eid: Id, ext: &CurveExtension) -> bool {
+        if ext.goes.is_empty() {
+            return false;
+        }
         let Some(e) = self.sketches.get(si).and_then(|s| s.entity(eid)) else { return false };
-        let reached = if end == End::Start { longer.at(0.0) } else { longer.at(1.0) };
+        let reached = |end: End| if end == End::Start { ext.curve.at(0.0) } else { ext.curve.at(1.0) };
         let spline = e.kind.as_spline().map(|sp| (sp.nodes.to_vec(), sp.ends));
         match spline {
             Some((mut nodes, ends)) => {
-                let Curve::Spline { tangents, .. } = &longer else { return false };
-                let id = self.alloc_id();
-                self.sketches[si].points.push(SketchPoint { id, x: reached.x, y: reached.y });
-                if end == End::Start {
-                    nodes.insert(0, id);
-                } else {
-                    nodes.push(id);
+                let Curve::Spline { tangents, .. } = &ext.curve else { return false };
+                for &end in &ext.goes {
+                    let at = reached(end);
+                    let id = self.alloc_id();
+                    self.sketches[si].points.push(SketchPoint { id, x: at.x, y: at.y });
+                    if end == End::Start {
+                        nodes.insert(0, id);
+                    } else {
+                        nodes.push(id);
+                    }
                 }
                 let handles = tangents.iter().map(|t| Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect();
                 if let Some(x) = self.sketches[si].entities.iter_mut().find(|x| x.id == eid) {
@@ -260,13 +300,14 @@ impl Project {
                 }
             }
             None => {
-                // the end point of the curve - its first or its last point along it - moves to where it reaches, free of
-                // what placed it where it stood
-                let Some(end_id) = self.end_point_of(si, eid, end) else { return false };
-                self.lift_the_place_of(si, end_id);
-                if let Some(q) = self.sketches[si].points.iter_mut().find(|q| q.id == end_id) {
-                    q.x = reached.x;
-                    q.y = reached.y;
+                for &end in &ext.goes {
+                    let Some(id) = self.end_point_of(si, eid, end) else { continue };
+                    let at = reached(end);
+                    self.lift_the_place_of(si, id);
+                    if let Some(q) = self.sketches[si].points.iter_mut().find(|q| q.id == id) {
+                        q.x = at.x;
+                        q.y = at.y;
+                    }
                 }
             }
         }
@@ -274,12 +315,11 @@ impl Project {
         true
     }
 
-    /// THE POINT AT `end` OF CURVE `eid`: the end of the curve standing there, among the points it stands on.
+    /// THE POINT AT `end` OF CURVE `eid`: its first end along it, or its last (`entity_ends`). Looked up by the place of
+    /// the end, an arc of an ellipse from 0 to 90 deg took the end of its minor axis standing on its last end, and Extend
+    /// moved the axis.
     fn end_point_of(&self, si: usize, eid: Id, end: End) -> Option<Id> {
-        let s = self.sketches.get(si)?;
-        let e = s.entities.iter().find(|e| e.id == eid)?;
-        let c = Curve::of(s, e)?;
-        let at = if end == End::Start { c.at(0.0) } else { c.at(1.0) };
-        entity_points(e).into_iter().filter_map(|id| s.point(id).map(|p| (id, Point2::new(p.x, p.y)))).find(|(_, p)| p.dist(at) < 1e-9).map(|(id, _)| id)
+        let [first, last] = entity_ends(self.sketches.get(si)?.entity(eid)?)?;
+        Some(if end == End::Start { first } else { last })
     }
 }

@@ -1217,7 +1217,10 @@ impl Project {
         // Endpoint deduplication cache: nearby endpoints of adjacent curves become one sketch point, which is
         // what makes the chain connected and closable.
         let mut cache = ImportPoints { welded: super::tess::Welded::new(IMPORT_WELD), ids: Vec::new() };
-        for e in &curves {
+        let mut k = 0;
+        while k < curves.len() {
+            let e = &curves[k];
+            k += 1;
             match *e {
                 ProfEdge::Line { a, b } => {
                     let (ai, bi) = (self.import_intern_pt(si, &mut cache, a.x, a.y), self.import_intern_pt(si, &mut cache, b.x, b.y));
@@ -1241,9 +1244,17 @@ impl Project {
                     let id = self.alloc_id();
                     self.sketches[si].entities.push(SketchEntity { id, kind: crate::model::CircleParts { center: ci, r }.into(), construction: false });
                 }
-                // an ellipse and a span of a spline are laid as the curves they are
-                ProfEdge::Oval { .. } | ProfEdge::Cubic { .. } => {
+                ProfEdge::Oval { .. } => {
                     self.lay_curve(si, &crate::model::curve::Curve::of_edge(e), crate::model::LayAs::default());
+                }
+                // the spans of a spline joined end to end are one spline
+                ProfEdge::Cubic { .. } => {
+                    let joined = curves[k - 1..].windows(2).take_while(|w| matches!((w[0].ends(), &w[1]), (Some([_, b]), ProfEdge::Cubic { a, .. }) if b.dist(*a) < 1e-9)).count();
+                    let spans = &curves[k - 1..k + joined];
+                    k += joined;
+                    if let Some(spline) = crate::model::curve::Curve::of_spans(spans) {
+                        self.lay_curve(si, &spline, crate::model::LayAs::default());
+                    }
                 }
             }
         }

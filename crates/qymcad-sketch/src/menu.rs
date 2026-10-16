@@ -19,7 +19,7 @@ pub fn sketch_tool_keys(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context
     }
     let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else { return };
     qymcad_ui_state::begin_edit(&mut *sk.edits, &*sk.project, qymcad_i18n::tr("tool-extend"));
-    extend_apply(sk, ExtendAt { rect, pos, si, line: None }, held);
+    extend_apply(sk, ExtendAt { rect, pos, si, curve: None }, held);
     qymcad_ui_state::commit_edit_if_changed(&mut sk.rebuild());
 }
 

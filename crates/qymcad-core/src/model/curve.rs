@@ -13,6 +13,7 @@ use super::*;
 
 mod blend;
 mod edges;
+mod fit;
 mod marks;
 pub mod kinds;
 mod meet;

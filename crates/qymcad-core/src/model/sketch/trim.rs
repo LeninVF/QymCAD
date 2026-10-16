@@ -103,41 +103,6 @@ impl Project {
         self.prune_orphan_sketch_points(si);
         self.solve_sketch(si);
     }
-    /// THE PLACES LINE `eid` CAN BE EXTENDED TO: where its axis meets another curve beyond each end, nearest first, each
-    /// with the curve met there. `None` when `eid` is no line of the sketch or has no length. Construction geometry is a
-    /// boundary as well.
-    pub fn extend_stops(&self, si: usize, eid: Id) -> Option<ExtendStops> {
-        let (a, b) = self.line_ends(si, eid)?;
-        let ((pax, pay), (pbx, pby)) = (self.point_xy(si, a)?, self.point_xy(si, b)?);
-        if (pbx - pax).powi(2) + (pby - pay).powi(2) < 1e-12 {
-            return None;
-        }
-        let mut cand: Vec<ExtendStop> = Vec::new();
-        let s = self.sketches.get(si)?;
-        for e in s.entities.iter().filter(|e| e.id != eid) {
-            let ts = crate::model::curve::Curve::of(s, e).map(|c| c.meets_line([Point2::new(pax, pay), Point2::new(pbx, pby)])).unwrap_or_default();
-            cand.extend(ts.into_iter().map(|t| ExtendStop { t, by: e.id }));
-        }
-        let mut stops = ExtendStops { before_a: cand.iter().copied().filter(|s| s.t < -1e-6).collect(), past_b: cand.into_iter().filter(|s| s.t > 1.0 + 1e-6).collect() };
-        stops.before_a.sort_by(|x, y| y.t.total_cmp(&x.t));
-        stops.past_b.sort_by(|x, y| x.t.total_cmp(&y.t));
-        Some(stops)
-    }
-
-    /// WHERE LINE `eid` GOES, ASKED AS THE EXTEND TOOL ASKS: each end taken to the curve the pointer is over when that
-    /// curve lies on its side of the axis, else to the nearest curve there; an end with nothing on its side stays. One
-    /// end - the one on the side of the curve under the pointer, else the one nearer the pointer - or both.
-    ///
-    /// AN END JOINED TO OTHER GEOMETRY STAYS (`end_held`): moved, it pulled what it is joined to, and the solve pulled
-    /// it back. Reported behaviour: Extend on the side two rectangles share, its end the end of a fillet, moved the
-    /// drawing (the ends of the fillet by 5e-6 mm, enough to lose the face of the rectangle), extended nothing and said
-    /// it was done. The line answers `EndKept::Joined`, and a new line is drawn from that end instead.
-    pub fn line_extension(&self, si: usize, eid: Id, ask: &ExtendAsk) -> LineExtension {
-        let free = self.line_extension_free(si, eid, ask);
-        let Some((a, b)) = self.line_ends(si, eid) else { return free };
-        let (held_a, held_b) = (free.a.is_some() && self.end_held(si, eid, a), free.b.is_some() && self.end_held(si, eid, b));
-        LineExtension { a: free.a.filter(|_| !held_a), b: free.b.filter(|_| !held_b), kept: if held_a || held_b { EndKept::Joined } else { EndKept::Free } }
-    }
 
     /// THE CURVES LYING OVER CURVE `eid` - `eid` first, then the others in the order of the sketch: a line on the same
     /// straight with a stretch in common, an arc or a circle on the same circle with a stretch of it in common. A side
@@ -198,8 +163,8 @@ impl Project {
         std::iter::once(eid).chain(s.entities.iter().filter(|e| e.id != eid && over(e)).map(|e| e.id)).collect()
     }
 
-    /// WHETHER END `p` OF LINE `eid` IS HELD BY SOMETHING BUT THE DIRECTION OF THE LINE: another curve ends there, or a
-    /// constraint other than one that turns the line (horizontal, vertical, an angle, parallel, perpendicular,
+    /// WHETHER END `p` OF CURVE `eid` IS HELD BY SOMETHING BUT THE DIRECTION OF A LINE: another curve ends there, or a
+    /// constraint other than one that turns a line (horizontal, vertical, an angle, parallel, perpendicular,
     /// collinear) or puts the end where it stands holds the point - an anchor, a dimension. A tie that only puts the end
     /// there - a coincidence with a point no curve ends at, a point on a line, an axis or a circle, a middle - is lifted
     /// by the extension (`lift_the_place_of`): a line drawn from the origin, held on it, was not extended at all.
@@ -230,59 +195,12 @@ impl Project {
         })
     }
 
-    pub(crate) fn line_extension_free(&self, si: usize, eid: Id, ask: &ExtendAsk) -> LineExtension {
-        let Some(stops) = self.extend_stops(si, eid) else { return LineExtension::default() };
-        let to = |side: &[ExtendStop]| side.iter().find(|s| Some(s.by) == ask.over).or(side.first()).map(|s| s.t);
-        let (at_a, at_b) = (to(&stops.before_a), to(&stops.past_b));
-        if ask.sides == ExtendSides::Both {
-            return LineExtension { a: at_a, b: at_b, ..Default::default() };
-        }
-        let over_side = |side: &[ExtendStop]| ask.over.is_some_and(|o| side.iter().any(|s| s.by == o));
-        let past_b = if over_side(&stops.past_b) {
-            true
-        } else if over_side(&stops.before_a) {
-            false
-        } else {
-            let Some((a, b)) = self.line_ends(si, eid) else { return LineExtension::default() };
-            let (Some((pax, pay)), Some((pbx, pby))) = (self.point_xy(si, a), self.point_xy(si, b)) else { return LineExtension::default() };
-            let tc = ((ask.pointer.x - pax) * (pbx - pax) + (ask.pointer.y - pay) * (pby - pay)) / ((pbx - pax).powi(2) + (pby - pay).powi(2));
-            tc >= 0.5
-        };
-        if past_b {
-            LineExtension { a: None, b: at_b, ..Default::default() }
-        } else {
-            LineExtension { a: at_a, b: None, ..Default::default() }
-        }
-    }
-
-    /// EXTEND LINE `eid` AS `ext` SAYS: each end given a place along the axis goes there, and the sketch is solved.
-    /// Returns whether an end moved.
-    pub fn extend_line_by(&mut self, si: usize, eid: Id, ext: LineExtension) -> bool {
-        self.cut_projection(si, eid, |p| p.extend_line_by_here(si, eid, ext))
-    }
-    pub(crate) fn extend_line_by_here(&mut self, si: usize, eid: Id, ext: LineExtension) -> bool {
-        let Some((a, b)) = self.line_ends(si, eid) else { return false };
-        let (Some((pax, pay)), Some((pbx, pby))) = (self.point_xy(si, a), self.point_xy(si, b)) else { return false };
-        let mut moved = false;
-        for (pid, t) in [(a, ext.a), (b, ext.b)] {
-            let Some(t) = t else { continue };
-            self.lift_the_place_of(si, pid);
-            if let Some(p) = self.sketches[si].points.iter_mut().find(|q| q.id == pid) {
-                (p.x, p.y) = (pax + (pbx - pax) * t, pay + (pby - pay) * t);
-                moved = true;
-            }
-        }
-        if moved {
-            self.solve_sketch(si); // the edit ends at the solver, not at a rebuild: `regen_sketch` recomputes the contours and checks no constraint
-        }
-        moved
-    }
-
     /// EXTEND CURVE `eid` OF ANY KIND AT THE CLICK, as its preview draws it (`extended`): from its end nearer the click to
     /// the nearest curve on its way - a line along its straight, an arc round its circle, an arc of an ellipse round its
     /// ellipse, a spline by a straight span along the tangent of its end. An end joined to other geometry stays.
     pub fn extend_curve(&mut self, si: usize, eid: Id, clickx: f64, clicky: f64) -> bool {
-        self.cut_projection(si, eid, |p| p.extend_piece(si, eid, Point2::new(clickx, clicky)))
+        let ask = ExtendAsk { pointer: Point2::new(clickx, clicky), over: None, sides: ExtendSides::Nearer };
+        self.curve_extension(si, eid, &ask).is_some_and(|ext| self.extend_curve_by(si, eid, &ext))
     }
     /// BREAK LINE `eid` INTO TWO at place `tc` along it, the halves held as the line was.
     fn break_line_at(&mut self, si: usize, eid: Id, tc: f64) -> bool {

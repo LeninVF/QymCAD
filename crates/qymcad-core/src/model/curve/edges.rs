@@ -22,6 +22,35 @@ impl Curve {
         }
     }
 
+    /// THE SPLINE OF CUBIC SPANS joined end to end, a node where each meets the next, each node left and arrived at by the
+    /// tangents its spans give - three times the pull of their Bezier points; a loop when the last span ends where the
+    /// first begins. `None` for spans that are not cubics joined end to end.
+    pub fn of_spans(spans: &[ProfEdge]) -> Option<Curve> {
+        let cubics: Vec<[Point2; 4]> = spans
+            .iter()
+            .map(|e| match *e {
+                ProfEdge::Cubic { a, c1, c2, b } => Some([a, c1, c2, b]),
+                _ => None,
+            })
+            .collect::<Option<_>>()?;
+        let (first, last) = (cubics.first()?, cubics.last()?);
+        if cubics.windows(2).any(|w| w[0][3].dist(w[1][0]) > 1e-9) {
+            return None;
+        }
+        let leave = |s: &[Point2; 4]| (s[1] - s[0]) * 3.0;
+        let arrive = |s: &[Point2; 4]| (s[3] - s[2]) * 3.0;
+        let closed = cubics.len() > 1 && last[3].dist(first[0]) < 1e-9;
+        let mut nodes: Vec<Point2> = cubics.iter().map(|s| s[0]).collect();
+        let mut tangents: Vec<NodeTangents> = cubics.iter().enumerate().map(|(k, s)| NodeTangents { arrive: if k == 0 { leave(s) } else { arrive(&cubics[k - 1]) }, leave: leave(s) }).collect();
+        if closed {
+            tangents[0].arrive = arrive(last);
+        } else {
+            nodes.push(last[3]);
+            tangents.push(NodeTangents { arrive: arrive(last), leave: arrive(last) });
+        }
+        Some(Curve::Spline { nodes, tangents, ends: if closed { crate::feature::Ends::Closed } else { crate::feature::Ends::Open } })
+    }
+
     /// THE CURVE OF AN EDGE: a cubic is a spline of one span, its tangents three times the pull of its Bezier points.
     pub fn of_edge(e: &ProfEdge) -> Curve {
         let turn = std::f64::consts::TAU;

@@ -1,5 +1,6 @@
-//! A LINE IS EXTENDED AS THE EXTEND TOOL ASKS: the nearer end to the nearest curve across its axis, or to the curve the
-//! pointer is over; both ends with "Both sides", each to its own; an end with nothing on its side stays.
+//! A CURVE IS EXTENDED AS THE EXTEND TOOL ASKS: the nearer end to the nearest curve on its way, or to the curve the
+//! pointer is over; both ends with "Both sides", each to its own; an end with nothing on its way stays - a line along
+//! its axis, an arc and an arc of an ellipse round their own curve.
 //!
 //! Reported behaviour: Extend stretched the end nearer the click to the nearest crossing at once - no choice of which
 //! curve to stop at, and no way to extend both ends.
@@ -54,8 +55,9 @@ fn a_line_is_extended_to_where_it_is_asked() {
     for case in cases {
         let (mut p, si, line, across) = lines(case.across);
         let ask = ExtendAsk { pointer: Point2::new(case.pointer_x, 0.0), over: case.over.map(|k| across[k]), sides: case.sides };
-        let ext = p.line_extension(si, line, &ask);
-        p.extend_line_by(si, line, ext);
+        if let Some(ext) = p.curve_extension(si, line, &ask) {
+            p.extend_curve_by(si, line, &ext);
+        }
         let got = ends_x(&p, si, line);
         if (got.0 - case.ends.0).abs() > 1e-6 || (got.1 - case.ends.1).abs() > 1e-6 {
             failures.push(format!("{}: the line runs {got:?}, wanted {:?}", case.name, case.ends));
@@ -85,16 +87,78 @@ fn an_end_joined_to_other_geometry_is_not_extended() {
         let places = |p: &Project| p.sketches[si].points.iter().map(|q| (q.id, q.x.to_bits(), q.y.to_bits())).collect::<Vec<_>>();
         let before = places(&p);
         let ask = ExtendAsk { pointer: Point2::new(9.0, 0.0), over: None, sides: ExtendSides::Nearer };
-        let ext = p.line_extension(si, line, &ask);
-        if ext.b.is_some() || ext.kept != EndKept::Joined {
-            failures.push(format!("{joined}: the joined end is asked to go to {:?}, kept {:?}", ext.b, ext.kept));
+        let ext = p.curve_extension(si, line, &ask).expect("the line is open");
+        if !ext.goes.is_empty() || ext.kept != EndKept::Joined {
+            failures.push(format!("{joined}: the joined end is asked to go {:?}, kept {:?}", ext.goes, ext.kept));
         }
-        if p.extend_line_by(si, line, ext) || places(&p) != before {
+        if p.extend_curve_by(si, line, &ext) || places(&p) != before {
             failures.push(format!("{joined}: extending the joined end moved the sketch"));
         }
-        let free = p.line_extension(si, line, &ExtendAsk { pointer: Point2::new(1.0, 0.0), over: None, sides: ExtendSides::Nearer });
-        if joined == "another line ends there" && free.a != Some(-1.5) {
-            failures.push(format!("{joined}: the free end (0, 0) is not extended to the line at -15: {:?}", free.a));
+        let free = p.curve_extension(si, line, &ExtendAsk { pointer: Point2::new(1.0, 0.0), over: None, sides: ExtendSides::Nearer }).expect("the line is open");
+        let start = free.curve.at(0.0);
+        if joined == "another line ends there" && ((start.x + 15.0).abs() > 1e-9 || start.y.abs() > 1e-9) {
+            failures.push(format!("{joined}: the free end (0, 0) is not extended to the line at -15: it starts at {start:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// AN ARC IS EXTENDED AS A LINE IS: the arc of radius 10 about the origin from 0 to 90 deg, and upright lines at x = -5
+/// and x = -8 and a level line at y = -6 across its circle. Both sides take each end to its nearest - the finish round
+/// to x = -5, the start down to y = -6; the pointer over the farther upright takes the finish there and leaves the start.
+/// The same for an arc of an ellipse 10 by 6.
+#[test]
+fn an_arc_and_an_arc_of_an_ellipse_are_extended_as_asked() {
+    use qymcad_core::feature::Winding;
+    use qymcad_core::model::curve::Curve;
+    use qymcad_core::model::EllipseArcSpec;
+    /// A CURVE OF THE CASE: its name and how it is laid, answering its id.
+    struct Kind {
+        name: &'static str,
+        lay: fn(&mut Project, usize) -> u64,
+    }
+    fn arc(p: &mut Project, si: usize) -> u64 {
+        p.add_arc_entity(si, Point2::new(0.0, 0.0), Point2::new(10.0, 0.0), Point2::new(0.0, 10.0), Winding::Ccw, Purpose::Real);
+        p.sketches[si].entities.last().expect("the arc").id
+    }
+    fn ellipse_arc(p: &mut Project, si: usize) -> u64 {
+        let spec = EllipseArcSpec { centre: Point2::new(0.0, 0.0), radii: Point2::new(10.0, 6.0), rot: 0.0, angles: [0.0, std::f64::consts::FRAC_PI_2], winding: Winding::Ccw };
+        p.add_ellipse_arc_entity(si, spec, Purpose::Real)
+    }
+    /// WHAT IS ASKED: which ends, and whether the pointer is over the farther upright.
+    #[derive(Clone, Copy, Debug)]
+    enum Asked {
+        BothSides,
+        OverTheFartherLine,
+    }
+    let mut failures = Vec::new();
+    for kind in [Kind { name: "an arc", lay: arc }, Kind { name: "an arc of an ellipse", lay: ellipse_arc }] {
+        for asked in [Asked::BothSides, Asked::OverTheFartherLine] {
+            let mut p = Project::default();
+            p.new_document();
+            let si = p.new_sketch("S");
+            let curve = (kind.lay)(&mut p, si);
+            p.add_line_entity(si, -5.0, -20.0, -5.0, 20.0, Purpose::Real);
+            let far = p.add_line_entity(si, -8.0, -20.0, -8.0, 20.0, Purpose::Real);
+            p.add_line_entity(si, -20.0, -6.0, 20.0, -6.0, Purpose::Real);
+            let ask = match asked {
+                Asked::BothSides => ExtendAsk { pointer: Point2::new(5.0, 5.0), over: None, sides: ExtendSides::Both },
+                Asked::OverTheFartherLine => ExtendAsk { pointer: Point2::new(-8.0, 5.0), over: Some(far), sides: ExtendSides::Nearer },
+            };
+            let Some(ext) = p.curve_extension(si, curve, &ask) else {
+                failures.push(format!("{} {asked:?}: no extension", kind.name));
+                continue;
+            };
+            p.extend_curve_by(si, curve, &ext);
+            let s = &p.sketches[si];
+            let [start, finish] = Curve::of(s, s.entity(curve).expect("the curve")).expect("its curve").ends();
+            let (finish_x, start_ok) = match asked {
+                Asked::BothSides => (-5.0, (start.y + 6.0).abs() < 1e-6),
+                Asked::OverTheFartherLine => (-8.0, start.dist(Point2::new(10.0, 0.0)) < 1e-6),
+            };
+            if (finish.x - finish_x).abs() > 1e-6 || !start_ok {
+                failures.push(format!("{} {asked:?}: it runs from {start:?} to {finish:?}", kind.name));
+            }
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

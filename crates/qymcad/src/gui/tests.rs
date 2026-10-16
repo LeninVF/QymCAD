@@ -83,6 +83,9 @@ mod a_figure_opens_its_size;
 mod a_figure_shows_no_badge_of_its_own;
 
 #[cfg(test)]
+mod a_projected_ellipse_follows_its_body;
+
+#[cfg(test)]
 mod a_circle_shows_its_centre_lines;
 
 #[cfg(test)]

@@ -110,9 +110,9 @@ fn written(name: &str) -> String {
 /// SPLINES, ELLIPSES AND BLOCKS ARE READ, and what is not read is named. A drawing from another CAD - the kind a DWG
 /// converts into - holds a full ellipse about (50, 0) of half-axes 20 and 10, a cubic spline with the control points of
 /// a Bezier from (0, 0) to (40, 0), a block of one line from (0, 0) to (10, 0) inserted at (100, 100) turned 90 deg and
-/// scaled twice, and a text. The ellipse and the spline come in as runs of segments whose corners lie on the curves -
-/// the spline through its middle at (20, 0) - the line of the block from (100, 100) to (100, 120), and the text is
-/// named as not read rather than silently lost.
+/// scaled twice, and a text. The ellipse comes in as that ellipse and the spline as that cubic - through its middle at
+/// (20, 0) - the line of the block from (100, 100) to (100, 120), and the text is named as not read rather than silently
+/// lost.
 #[test]
 fn splines_ellipses_and_blocks_are_read() {
     use dxf::entities::{Ellipse, Entity, EntityType, Insert, Line, Spline, Text};
@@ -139,18 +139,15 @@ fn splines_ellipses_and_blocks_are_read() {
     d.save_file(&p).expect("written");
 
     let got = import_dxf(&p).expect("read");
-    let corners: Vec<(f64, f64)> = got
-        .curves
-        .iter()
-        .flat_map(|c| match c {
-            qymcad_core::geom::ProfEdge::Line { a, b } => vec![(a.x, a.y), (b.x, b.y)],
-            _ => Vec::new(),
-        })
-        .collect();
-    let on_ellipse: Vec<&(f64, f64)> = corners.iter().filter(|(x, y)| (((x - 50.0) / 20.0).powi(2) + (y / 10.0).powi(2) - 1.0).abs() < 1e-9).collect();
-    assert!(on_ellipse.len() >= 32, "the ellipse did not come in as a run of corners on it: {} of {}", on_ellipse.len(), corners.len());
-    assert!(corners.iter().any(|c| (c.0 - 20.0).abs() < 1e-9 && c.1.abs() < 1e-9), "the spline does not run through its middle at (20, 0)");
-    assert!(corners.iter().any(|c| c.0.abs() < 1e-12 && c.1.abs() < 1e-12) && corners.iter().any(|c| (c.0 - 40.0).abs() < 1e-12 && c.1.abs() < 1e-12), "the spline does not end at its end points");
+    use qymcad_core::geom::ProfEdge;
+    let ellipse = got.curves.iter().find(|c| matches!(c, ProfEdge::Oval { .. }));
+    let on_ellipse = ellipse.is_some_and(|e| (0..=64).filter_map(|k| e.curve_at(k as f64 / 64.0)).all(|q| (((q.x - 50.0) / 20.0).powi(2) + (q.y / 10.0).powi(2) - 1.0).abs() < 1e-9));
+    assert!(on_ellipse && ellipse.is_some_and(|e| e.ends().is_none()), "the ellipse did not come in as the whole ellipse about (50, 0) of 20 and 10: {ellipse:?}");
+    let spline = got.curves.iter().find(|c| matches!(c, ProfEdge::Cubic { .. }));
+    let middle = spline.and_then(|s| s.curve_at(0.5));
+    assert!(middle.is_some_and(|m| (m.x - 20.0).abs() < 1e-9 && m.y.abs() < 1e-9), "the spline does not run through its middle at (20, 0): {spline:?}");
+    let ends = spline.and_then(|s| s.ends());
+    assert!(ends.is_some_and(|[a, b]| a.x.abs() < 1e-12 && a.y.abs() < 1e-12 && (b.x - 40.0).abs() < 1e-12 && b.y.abs() < 1e-12), "the spline does not end at its end points: {ends:?}");
     let inserted = got
         .curves
         .iter()

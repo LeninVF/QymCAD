@@ -29,19 +29,26 @@ enum Curve2 {
         to: [f64; 2],
         ccw: bool,
     },
-    /// A polyline: everything that is neither a straight line nor a circle — elliptical arcs, splines,
-    /// intersection curves.
-    Poly(Vec<[f64; 2]>),
+    /// An ellipse, or an arc of one: a circle seen at an angle, an elliptical edge.
+    Oval {
+        centre: [f64; 2],
+        major_end: [f64; 2],
+        minor_end: [f64; 2],
+        arc: Option<OvalArc>,
+    },
+    /// A spline through the points an edge is laid out by: an edge of no kind the sketch has - a spline of the body, a
+    /// curve where two faces meet.
+    Spline {
+        nodes: Vec<[f64; 2]>,
+        ends: crate::feature::Ends,
+    },
 }
 
-impl Curve2 {
-    /// How many entities the curve yields: a polyline has one segment fewer than it has points.
-    fn entity_count(&self) -> usize {
-        match self {
-            Curve2::Line(..) | Curve2::Circle(..) | Curve2::Arc { .. } => 1,
-            Curve2::Poly(p) => p.len().saturating_sub(1),
-        }
-    }
+/// THE ENDS OF AN ARC OF AN ELLIPSE, and the way it runs from the first to the second.
+struct OvalArc {
+    from: [f64; 2],
+    to: [f64; 2],
+    winding: crate::feature::Winding,
 }
 
 /// WHAT THE BODY SAYS OF THE SOURCE OF A PROJECTION: its curves, that it is gone, or nothing yet - the body is not live
@@ -317,8 +324,9 @@ impl Project {
         }
     }
 
-    /// An edge becomes a sketch curve. A circle stays a circle and a straight edge stays a line; everything
-    /// else becomes a polyline.
+    /// An edge becomes a sketch curve. A circle seen square stays a circle, a straight edge a line, a flat circle or
+    /// ellipse seen from any side an ellipse (`Curve::oval_through`); any other edge becomes a spline through its
+    /// points.
     fn curve_to_2d(poly: &[[f64; 3]], circ: Option<([f64; 3], [f64; 3], f64)>, frame: &PlaneFrame) -> Curve2 {
         let to2 = |p: &[f64; 3]| {
             let q = frame.project(Point3::new(p[0], p[1], p[2]));
@@ -359,7 +367,17 @@ impl Project {
                 return Curve2::Line(a, b);
             }
         }
-        Curve2::Poly(pts)
+        let at = |p: crate::geom::Point2| [p.x, p.y];
+        let laid: Vec<crate::geom::Point2> = pts.iter().map(|p| crate::geom::Point2::new(p[0], p[1])).collect();
+        if let Some(oval @ crate::model::curve::Curve::Oval { centre, major, minor, sweep, .. }) = crate::model::curve::Curve::oval_through(&laid) {
+            let arc = (!oval.closed()).then(|| OvalArc { from: at(oval.at(0.0)), to: at(oval.at(1.0)), winding: if sweep > 0.0 { crate::feature::Winding::Ccw } else { crate::feature::Winding::Cw } });
+            return Curve2::Oval { centre: at(centre), major_end: at(centre + major), minor_end: at(centre + minor), arc };
+        }
+        // a closed edge comes back to its first point: the spline is a loop through the others
+        let closed = (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-6;
+        let mut nodes = if closed { pts[..pts.len() - 1].to_vec() } else { pts };
+        nodes.dedup_by(|p, q| (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-9);
+        Curve2::Spline { nodes, ends: if closed { crate::feature::Ends::Closed } else { crate::feature::Ends::Open } }
     }
 
     /// PLACE THE CURVES INTO THE SKETCH, each matched to the curve its edge gave before. A curve of an edge still there keeps
@@ -374,7 +392,7 @@ impl Project {
         let (old_ents, old_edges) = {
             let p = &self.sketches[si].projections[k];
             // a projection made before the edges were kept: taken in the order the edges come, as it was laid
-            let edges = if p.edges.len() == p.entities.len() { p.edges.clone() } else { curves.iter().flat_map(|(e, c)| std::iter::repeat_n(*e, c.entity_count())).collect() };
+            let edges = if p.edges.len() == p.entities.len() { p.edges.clone() } else { curves.iter().map(|(e, _)| *e).collect() };
             (p.entities.clone(), edges)
         };
         let mut by_edge: std::collections::HashMap<u32, Vec<Id>> = std::collections::HashMap::new();
@@ -428,32 +446,47 @@ impl Project {
                     edges.push(*edge);
                     pts.extend([pc, pa, pb]);
                 }
-                Curve2::Poly(p) => {
-                    // the chain of points the old segments ran through, when they were as many lines as the new
-                    let chain: Option<Vec<Id>> = (kinds.len() + 1 == p.len() && kinds.iter().all(|k| k.as_line().is_some())).then(|| {
-                        kinds
-                            .iter()
-                            .enumerate()
-                            .flat_map(|(n, k)| {
-                                if let Some(crate::model::LineParts { a, b }) = k.as_line() {
-                                    if n == 0 {
-                                        vec![a, b]
-                                    } else {
-                                        vec![b]
-                                    }
-                                } else {
-                                    Vec::new()
-                                }
-                            })
-                            .collect()
+                Curve2::Oval { centre, major_end, minor_end, arc } => {
+                    let old = match kinds.as_slice() {
+                        [k] => k.as_ellipse().map(|e| (olds[0], e)),
+                        _ => None,
+                    };
+                    // the centre and the ends of the axes are shared with nobody
+                    let pc = self.proj_centre(si, &mut placing, old.map(|o| o.1.c), *centre);
+                    let pa = self.proj_centre(si, &mut placing, old.map(|o| o.1.ma), *major_end);
+                    let pi = self.proj_centre(si, &mut placing, old.map(|o| o.1.mi), *minor_end);
+                    let was = old.and_then(|o| o.1.span);
+                    let span = arc.as_ref().map(|arc| crate::model::EllipseSpan {
+                        from: self.proj_point(si, &mut placing, was.map(|s| s.from), arc.from),
+                        to: self.proj_point(si, &mut placing, was.map(|s| s.to), arc.to),
+                        winding: arc.winding,
                     });
-                    let ids: Vec<Id> = p.iter().enumerate().map(|(n, q)| self.proj_point(si, &mut placing, chain.as_ref().map(|c| c[n]), *q)).collect();
-                    for (n, w) in ids.windows(2).filter(|w| w[0] != w[1]).enumerate() {
-                        let old = chain.as_ref().and(olds.get(n).copied());
-                        let e = self.proj_entity(si, old, crate::model::LineParts { a: w[0], b: w[1] }.into());
-                        ents.push(e);
-                        edges.push(*edge);
+                    let e = self.proj_entity(si, old.map(|o| o.0), crate::model::EllipseParts { c: pc, ma: pa, mi: pi, span }.into());
+                    ents.push(e);
+                    edges.push(*edge);
+                    pts.extend([pc, pa, pi]);
+                    pts.extend(span.iter().flat_map(|s| [s.from, s.to]));
+                }
+                Curve2::Spline { nodes, ends } => {
+                    if nodes.len() < 2 {
+                        continue;
                     }
+                    let old = match kinds.as_slice() {
+                        [k] => k.as_spline().filter(|s| s.nodes.len() == nodes.len()).map(|s| (olds[0], s.nodes.to_vec())),
+                        _ => None,
+                    };
+                    // the ends of an open spline are corners it shares with the curves it meets; its other nodes are its own
+                    let last = nodes.len() - 1;
+                    let open = *ends == crate::feature::Ends::Open;
+                    let mut ids = Vec::new();
+                    for (n, q) in nodes.iter().enumerate() {
+                        let was = old.as_ref().map(|o| o.1[n]);
+                        ids.push(if open && (n == 0 || n == last) { self.proj_point(si, &mut placing, was, *q) } else { self.proj_centre(si, &mut placing, was, *q) });
+                    }
+                    let handles = vec![crate::model::Handle::default(); ids.len()];
+                    let e = self.proj_entity(si, old.map(|o| o.0), EntityKind::spline(ids.clone(), handles, *ends));
+                    ents.push(e);
+                    edges.push(*edge);
                     pts.extend(ids);
                 }
             }

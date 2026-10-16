@@ -79,10 +79,26 @@ pub fn export_svg(edges: &[ProfEdge], path: &str) -> Result<(), String> {
             ProfEdge::Cubic { a, c1, c2, b } => {
                 s.push_str(&format!("    <path d=\"M {:.4} {:.4} C {:.4} {:.4} {:.4} {:.4} {:.4} {:.4}\"/>\n", sx(a.x), sy(a.y), sx(c1.x), sy(c1.y), sx(c2.x), sy(c2.y), sx(b.x), sy(b.y)));
             }
-            // an ellipse as the polyline of its points
-            ProfEdge::Oval { .. } => {
-                let pts: Vec<String> = (0..=96).filter_map(|k| e.curve_at(k as f64 / 96.0)).map(|p| format!("{:.4} {:.4}", sx(p.x), sy(p.y))).collect();
-                s.push_str(&format!("    <path d=\"M {}\"/>\n", pts.join(" L ")));
+            // an ellipse as the elliptical arcs of SVG itself, a whole one as two halves: an arc of SVG from a point to the
+            // same point draws nothing
+            ProfEdge::Oval { centre, major, minor, from, sweep } => {
+                let (rx, ry) = (major.x.hypot(major.y), minor.x.hypot(minor.y));
+                // inverting Y turns the axis the other way round
+                let tilt = -major.y.atan2(major.x).to_degrees();
+                // the angle runs counter-clockwise when the minor axis is a quarter counter-clockwise of the major and the
+                // sweep positive, or both the other way; counter-clockwise in CAD is clockwise on screen, sweep flag 1
+                let ccw = (major.x * minor.y - major.y * minor.x > 0.0) == (sweep > 0.0);
+                let at = |t: f64| (centre.x + major.x * t.cos() + minor.x * t.sin(), centre.y + major.y * t.cos() + minor.y * t.sin());
+                let halves = if sweep.abs() >= std::f64::consts::TAU - 1e-12 { 2 } else { 1 };
+                let (x0, y0) = at(from);
+                let mut d = format!("M {:.4} {:.4}", sx(x0), sy(y0));
+                for k in 1..=halves {
+                    let part = sweep / halves as f64;
+                    let (x, y) = at(from + part * k as f64);
+                    let large = if part.abs() > std::f64::consts::PI { 1 } else { 0 };
+                    d.push_str(&format!(" A {rx:.4} {ry:.4} {tilt:.4} {large} {} {:.4} {:.4}", if ccw { 1 } else { 0 }, sx(x), sy(y)));
+                }
+                s.push_str(&format!("    <path d=\"{d}\"/>\n"));
             }
         }
     }

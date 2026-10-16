@@ -162,21 +162,6 @@ fn same_rect_constraint(own: &Constraint, c: &Constraint) -> bool {
     }
 }
 
-/// A PLACE A LINE CAN BE EXTENDED TO along its axis: `t` along it from its start (0) to its end (1), and the curve met
-/// there.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ExtendStop {
-    pub t: f64,
-    pub by: Id,
-}
-
-/// THE PLACES BEYOND EACH END OF A LINE, nearest first: before its start, past its end.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ExtendStops {
-    pub before_a: Vec<ExtendStop>,
-    pub past_b: Vec<ExtendStop>,
-}
-
 /// WHICH ENDS THE EXTEND TOOL TAKES: the nearer one, or both ("Both sides" in its bar).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ExtendSides {
@@ -192,12 +177,12 @@ pub struct ExtendAsk {
     pub sides: ExtendSides,
 }
 
-/// WHERE EACH END OF A LINE GOES along its axis (`ExtendStop::t`), or `None` where it stays, and whether an end that
-/// had somewhere to go was kept because it is joined to other geometry.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct LineExtension {
-    pub a: Option<f64>,
-    pub b: Option<f64>,
+/// HOW A CURVE GOES UNDER EXTEND: the curve as it will run, the ends of it that go, and whether an end asked for stayed
+/// because it is joined to other geometry.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CurveExtension {
+    pub curve: crate::model::curve::Curve,
+    pub goes: Vec<crate::model::curve::End>,
     pub kept: EndKept,
 }
 
@@ -225,7 +210,7 @@ pub struct LinesCrossing {
     pub at: Point2,
 }
 
-/// WHY AN END OF A LINE STAYS WHERE IT IS under Extend.
+/// WHY AN END OF A CURVE STAYS WHERE IT IS under Extend.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum EndKept {
     /// nothing kept it: an end with nowhere to go stays, and so does the end the tool did not ask for
