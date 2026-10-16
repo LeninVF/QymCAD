@@ -193,11 +193,13 @@ impl Sketch {
     /// One source of truth on purpose: spelled out by hand in six places the set drifts apart, some copies
     /// forgetting the origin and others the axes.
     /// THE CONSTRAINTS THE SHAPES OF THE SKETCH HOLD THEMSELVES BY, by their index: those of a cut corner
-    /// (`corner_holders`) and those of a figure (`SketchFigure::own`). Neither is listed nor badged.
+    /// (`corner_holders`), of a rectangle (`SketchRect::holds`: its turns or its parallel and square sides, and its
+    /// centre) and of a polygon or a slot (`SketchFigure::own`). One rule for every figure: none is listed nor badged.
     pub fn held_by_shapes(&self) -> std::collections::HashSet<usize> {
         let mut out = self.corner_holders();
-        if !self.figures.is_empty() {
-            out.extend(self.constraints.iter().enumerate().filter(|(_, c)| self.figures.iter().any(|f| f.holds(c))).map(|(ci, _)| ci));
+        if !self.figures.is_empty() || !self.rects.is_empty() {
+            let held = |c: &Constraint| self.rects.iter().any(|r| r.holds(c)) || self.figures.iter().any(|f| f.holds(c));
+            out.extend(self.constraints.iter().enumerate().filter(|(_, c)| held(c)).map(|(ci, _)| ci));
         }
         out
     }

@@ -146,6 +146,8 @@ pub struct GeomClip {
     /// Reference point, given at copy time.
     pub ref_x: f64,
     pub ref_y: f64,
+    /// The rectangles and the figures taken whole, laid again as figures on paste.
+    pub(crate) whole: crate::model::sketch::Whole,
 }
 
 impl GeomClip {

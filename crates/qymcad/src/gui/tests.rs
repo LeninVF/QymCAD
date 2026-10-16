@@ -80,6 +80,9 @@ mod a_figure_is_carried_whole;
 mod a_figure_opens_its_size;
 
 #[cfg(test)]
+mod a_figure_shows_no_badge_of_its_own;
+
+#[cfg(test)]
 mod a_circle_shows_its_centre_lines;
 
 #[cfg(test)]

@@ -5,6 +5,7 @@
 use super::*;
 
 /// THE SHAPES A COPY TAKES WHOLE: the rectangles and the figures all of whose curves it takes.
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Whole {
     rects: Vec<SketchRect>,
     figures: Vec<SketchFigure>,
@@ -51,11 +52,7 @@ impl Project {
     /// set (a mirror, a pattern) still carries these, or it is no figure.
     pub(crate) fn copied_own_constraints(&self, si: usize, whole: &Whole, maps: &CopyMaps) -> Vec<Constraint> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        let rects = whole.rects.iter().flat_map(|r| {
-            let [c0, c1, c2, c3] = r.corners;
-            let own = rect_own_constraints(c0, c1, c2, c3, r.centre, 0.0);
-            s.constraints.iter().filter(move |c| own.iter().any(|o| same_rect_constraint(o, c)))
-        });
+        let rects = whole.rects.iter().flat_map(|r| s.constraints.iter().filter(move |c| r.holds(c)));
         rects.chain(whole.figures.iter().flat_map(|f| f.own.iter())).map(|c| copied_constraint(c, maps)).collect()
     }
 

@@ -1,13 +1,14 @@
-//! A FIGURE COPIED IS A FIGURE: Copy, Mirror, a mirror about a point and a pattern of a rectangle, a polygon or a slot
-//! lay rectangles, polygons and slots - each with a record of its own on its own curves, a rectangle with its centre and
-//! its diagonals, each held by its own constraints, which the copy satisfies where it stands: a solve after the copy
-//! moves no point of it.
+//! A FIGURE COPIED IS A FIGURE: Copy, Mirror, a mirror about a point, a pattern and a paste from the clipboard of a
+//! rectangle, a polygon or a slot lay rectangles, polygons and slots - each with a record of its own on its own curves, a
+//! rectangle with its centre and its diagonals, each held by as many constraints of its own as the figure copied (a
+//! rectangle whose turn an angle dimension took, by its parallel and square sides), which the copy satisfies where it
+//! stands: a solve after the copy moves no point of it.
 //!
 //! Reported behaviour: the copies were plain curves - a mirrored rectangle fell apart under a dragged corner, a copied
-//! polygon had no circle of its own to hold its corners.
+//! polygon had no circle of its own to hold its corners; a paste from the clipboard laid plain curves still.
 use qymcad_core::feature::Purpose;
 use qymcad_core::geom::Point2;
-use qymcad_core::model::{PatternKind, Project};
+use qymcad_core::model::{Constraint, PatternKind, Project};
 
 /// A SHAPE TO COPY: its name and how it is drawn into a sketch, answering the curves a person takes it by.
 struct Shape {
@@ -15,9 +16,24 @@ struct Shape {
     draw: fn(&mut Project, usize) -> Vec<u64>,
 }
 
-const SHAPES: [Shape; 4] = [
+const SHAPES: [Shape; 5] = [
     // turned 30 deg, so a turn of its sides that the copy gets wrong shows as a move under the solve
     Shape { name: "turned rectangle", draw: |p, si| p.add_rect3_entity(si, Point2::new(10.0, 5.0), Point2::new(18.66, 10.0), Point2::new(15.66, 15.2), Purpose::Real) },
+    // its turn taken by an angle dimension to a fixed line: held by parallel and square sides, not by turns
+    Shape {
+        name: "rectangle turned by an angle",
+        draw: |p, si| {
+            let sides = p.add_rect_entity(si, 10.0, 5.0, 20.0, 12.0, Purpose::Real);
+            let l = p.add_line_entity(si, 10.0, -10.0, 20.0, -14.0, Purpose::Real);
+            let ends = p.sketches[si].entities.iter().find(|e| e.id == l).and_then(|e| e.kind.as_line()).expect("the line");
+            let r = p.sketches[si].rects[0].clone();
+            let dim = Constraint::AngleLines { a: ends.a, b: ends.b, c: r.corners[0], d: r.corners[1], deg: 20.0, expr: String::new(), driven: false, off: 0.0, at: None };
+            p.give_rect_turn_to(si, &dim);
+            p.sketches[si].constraints.extend([Constraint::Fixed { p: ends.a }, Constraint::Fixed { p: ends.b }, dim]);
+            p.solve_sketch(si);
+            sides
+        },
+    },
     Shape { name: "rectangle from its centre", draw: |p, si| p.add_rect_from_centre(si, Point2::new(14.0, 8.0), Point2::new(20.0, 12.0), Purpose::Real) },
     Shape {
         name: "polygon",
@@ -41,7 +57,7 @@ struct Tool {
     apply: fn(&mut Project, usize, &[u64]),
 }
 
-const TOOLS: [Tool; 4] = [
+const TOOLS: [Tool; 5] = [
     Tool {
         name: "Copy",
         apply: |p, si, eids| {
@@ -54,6 +70,13 @@ const TOOLS: [Tool; 4] = [
         name: "Circular pattern",
         apply: |p, si, eids| {
             p.add_pattern(si, eids, PatternKind::Circular { cx: 0.0, cy: 0.0, count: 3, total_deg: 360.0 });
+        },
+    },
+    Tool {
+        name: "Paste",
+        apply: |p, si, eids| {
+            let clip = p.copy_sketch_geometry(si, eids, 0.0, 0.0);
+            p.paste_sketch_geometry(si, &clip, 30.0, 40.0);
         },
     },
 ];
@@ -69,6 +92,7 @@ fn check(shape: &Shape, tool: &Tool) -> Result<(), String> {
     let si = p.new_sketch("figures");
     let eids = (shape.draw)(&mut p, si);
     let before = records(&p, si);
+    let held = p.sketches[si].held_by_shapes().len();
     let old: Vec<u64> = p.sketches[si].entities.iter().map(|e| e.id).collect();
     (tool.apply)(&mut p, si, &eids);
     let copies = if tool.name == "Circular pattern" { 2 } else { 1 };
@@ -83,6 +107,10 @@ fn check(shape: &Shape, tool: &Tool) -> Result<(), String> {
         if r.iter().any(|id| p.sketches[si].entity(*id).is_none()) {
             return Err(format!("a record of a copy names a curve the sketch has not: {r:?}"));
         }
+    }
+    let held_after = p.sketches[si].held_by_shapes().len();
+    if held_after != held * (1 + copies) {
+        return Err(format!("{held_after} constraints the figures hold themselves by, not {}: a copy is not held as the figure is", held * (1 + copies)));
     }
     let centres: Vec<u64> = p.sketches[si].rects.iter().map(|r| r.centre).collect();
     if centres.iter().enumerate().any(|(k, c)| centres[..k].contains(c)) {
@@ -100,5 +128,5 @@ fn check(shape: &Shape, tool: &Tool) -> Result<(), String> {
 #[test]
 fn every_figure_copied_by_every_tool_is_a_figure() {
     let failures: Vec<String> = SHAPES.iter().flat_map(|s| TOOLS.iter().map(move |t| (s, t))).filter_map(|(s, t)| check(s, t).err().map(|why| format!("{} of a {}: {why}", t.name, s.name))).collect();
-    assert!(failures.is_empty(), "{} of 16 failed:\n  {}", failures.len(), failures.join("\n  "));
+    assert!(failures.is_empty(), "{} of {} failed:\n  {}", failures.len(), SHAPES.len() * TOOLS.len(), failures.join("\n  "));
 }

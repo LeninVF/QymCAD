@@ -275,7 +275,7 @@ pub fn constraint_glyphs(pick: &PickCtx, rect: Rect, si: usize) -> Vec<(usize, P
         }
     };
     let mut push = |out: &mut Vec<(usize, Pos2, Gly)>, ci: usize, p: Option<Pos2>, g: Gly| place(out, &mut seen, ci, p, g);
-    let holders = s.held_by_shapes(); // the own constraints of a cut corner or a figure show no badge: the shape holds itself by them
+    let holders = s.held_by_shapes(); // the own constraints of a cut corner or a figure show no badge: the shape holds itself by them; the centre of a rectangle among them, whose glyph beside the point took the click meant for the point
     for (ci, c) in s.constraints.iter().enumerate().filter(|(ci, _)| !holders.contains(ci)) {
         match *c {
             Constraint::Horizontal { a, b } => push(&mut out, ci, mid(a, b), Gly::Horiz),
@@ -305,10 +305,6 @@ pub fn constraint_glyphs(pick: &PickCtx, rect: Rect, si: usize) -> Vec<(usize, P
             // as if it were breeding extra constraints).
             Constraint::Fixed { p } if !s.system_ids().contains(&p) => push(&mut out, ci, pt(p).map(|q| sh.at(q) + egui::vec2(8.0, 8.0)), Gly::Fix),
             Constraint::PointOnLine { p, .. } => push(&mut out, ci, pt(p).map(|q| sh.at(q) + egui::vec2(8.0, 8.0)), Gly::PointOnLine),
-            // THE CENTRE OF A RECTANGLE SHOWS NO MIDPOINT GLYPH: the rectangle holds it there itself, as it holds its
-            // turn, and the glyph beside the point took the click meant for the point - a constraint on the centre was
-            // refused, the centre never picked
-            Constraint::Midpoint { p, .. } if s.rects.iter().any(|r| r.centre == p) => {}
             Constraint::Midpoint { p, .. } => push(&mut out, ci, pt(p).map(|q| sh.at(q) + egui::vec2(8.0, 8.0)), Gly::Midpoint),
             Constraint::EqualRadius { c1, c2 } => {
                 push(&mut out, ci, pt(c1).map(|q| sh.at(q) + egui::vec2(8.0, 8.0)), Gly::Equal);

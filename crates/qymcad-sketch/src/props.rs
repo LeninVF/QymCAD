@@ -102,8 +102,8 @@ pub fn sketch_props(pr: &mut qymcad_ui_state::PropsCtx, ui: &mut egui::Ui, si: u
                 if is_sys(c) {
                     continue; // a system `Fixed` on the origin or an axis is not shown
                 }
-                if matches!(c, Constraint::Orientation { .. }) || holders.contains(&ci) {
-                    continue; // the turn of a rectangle is the rectangle's own, a cut corner's holders the corner's, a figure's the figure's
+                if holders.contains(&ci) {
+                    continue; // a cut corner's holders are the corner's, a figure's own constraints the figure's
                 }
                 let is_sel = cur_sel == Some(ci);
                 // is it a dimension? (consistent redundancy among dimensions is harmless and gets no warning)

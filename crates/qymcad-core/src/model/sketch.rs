@@ -143,10 +143,12 @@ pub(crate) fn rect_free_constraints(c0: Id, c1: Id, c2: Id, c3: Id) -> [Constrai
     ]
 }
 
-/// Is `c` one of the constraints rectangle `r` holds itself by, held by its turns or by its shape alone?
-fn is_rect_own(r: &crate::model::SketchRect, c: &Constraint) -> bool {
-    let [c0, c1, c2, c3] = r.corners;
-    rect_own_constraints(c0, c1, c2, c3, r.centre, 0.0).iter().chain(rect_free_constraints(c0, c1, c2, c3).iter()).any(|o| same_rect_constraint(o, c))
+impl crate::model::SketchRect {
+    /// Is `c` one of the constraints the rectangle holds itself by, held by its turns or by its shape alone?
+    pub fn holds(&self, c: &Constraint) -> bool {
+        let [c0, c1, c2, c3] = self.corners;
+        rect_own_constraints(c0, c1, c2, c3, self.centre, 0.0).iter().chain(rect_free_constraints(c0, c1, c2, c3).iter()).any(|o| same_rect_constraint(o, c))
+    }
 }
 
 /// Is `c` the constraint `own` a rectangle holds itself by - the same kind on the same points, whatever the turn held?
@@ -1033,6 +1035,6 @@ mod crossings;
 mod blends;
 mod touch;
 mod copies;
-pub(crate) use copies::{copied_constraint, CopyMaps};
+pub(crate) use copies::{copied_constraint, CopyMaps, Whole};
 pub use crossings::Crossing;
 pub use pieces::LayAs;

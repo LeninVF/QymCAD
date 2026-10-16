@@ -93,7 +93,7 @@ impl Project {
             if !held_by_turns {
                 continue;
             }
-            s.constraints.retain(|k| !(matches!(k, Constraint::Orientation { .. }) && is_rect_own(&r, k)));
+            s.constraints.retain(|k| !(matches!(k, Constraint::Orientation { .. }) && r.holds(k)));
             let [c0, c1, c2, c3] = r.corners;
             s.constraints.extend(rect_free_constraints(c0, c1, c2, c3));
             // the dimensions of its sides go round with the sides the angle is about to turn
@@ -107,10 +107,10 @@ impl Project {
     /// at, so a dragged corner does not turn it.
     pub(crate) fn settle_rects_after(&mut self, si: usize, removed: &Constraint) {
         let Some(s) = self.sketches.get_mut(si) else { return };
-        let broken: Vec<crate::model::SketchRect> = s.rects.iter().filter(|r| is_rect_own(r, removed)).cloned().collect();
+        let broken: Vec<crate::model::SketchRect> = s.rects.iter().filter(|r| r.holds(removed)).cloned().collect();
         for r in &broken {
             s.rects.retain(|k| k.id != r.id);
-            s.constraints.retain(|k| !is_rect_own(r, k));
+            s.constraints.retain(|k| !r.holds(k));
         }
         let diagonals: Vec<Id> = broken.iter().flat_map(|r| r.diagonals.into_iter().flatten()).collect();
         let free: Vec<crate::model::SketchRect> = s
@@ -125,7 +125,7 @@ impl Project {
             let (Some(p0), Some(p1)) = (at(r.corners[0]), at(r.corners[1])) else { continue };
             let deg = (p1.1 - p0.1).atan2(p1.0 - p0.0).to_degrees();
             let [c0, c1, c2, c3] = r.corners;
-            s.constraints.retain(|k| !(matches!(k, Constraint::Parallel { .. } | Constraint::Perpendicular { .. }) && is_rect_own(&r, k)));
+            s.constraints.retain(|k| !(matches!(k, Constraint::Parallel { .. } | Constraint::Perpendicular { .. }) && r.holds(k)));
             s.constraints.extend(rect_own_constraints(c0, c1, c2, c3, r.centre, deg).into_iter().filter(|k| matches!(k, Constraint::Orientation { .. })));
         }
         let centres: Vec<Id> = broken.iter().map(|r| r.centre).collect();
@@ -518,14 +518,17 @@ impl Project {
     /// another one. `eids` are the selected entities; the snapshot holds them and all their points (centres,
     /// endpoints). `(rx, ry)` is the reference point given at copy time. Does not mutate.
     pub fn copy_sketch_geometry(&self, si: usize, eids: &[Id], rx: f64, ry: f64) -> GeomClip {
-        let pids = self.entity_point_ids(si, eids);
+        // a rectangle, a polygon, a slot taken whole goes as one, a rectangle with its diagonals and its centre
+        let whole = self.wholes_among(si, eids);
+        let taken: Vec<Id> = eids.iter().copied().chain(whole.carried().filter(|id| !eids.contains(id))).collect();
+        let pids = self.entity_point_ids(si, &taken);
         let Some(s) = self.sketches.get(si) else { return GeomClip::default() };
         let points: Vec<(Id, f64, f64)> = s.points.iter().filter(|p| pids.contains(&p.id)).map(|p| (p.id, p.x, p.y)).collect();
-        let entities: Vec<SketchEntity> = s.entities.iter().filter(|e| eids.contains(&e.id)).cloned().collect();
+        let entities: Vec<SketchEntity> = s.entities.iter().filter(|e| taken.contains(&e.id)).cloned().collect();
         let inside: std::collections::HashSet<Id> = pids.iter().copied().collect();
         let constraints = self.internal_constraints(si, &inside); // Internal constraints and dimensions, without
                                                                   // `Fixed` or axis references.
-        GeomClip { points, entities, constraints, ref_x: rx, ref_y: ry }
+        GeomClip { points, entities, constraints, ref_x: rx, ref_y: ry, whole }
     }
     /// Paste snapshot `clip` into sketch `si` so that its reference point lands at `(tx, ty)`.
     ///
@@ -546,12 +549,14 @@ impl Project {
         }
         let m = |id: Id| map.get(&id).copied().unwrap_or(id);
         let mut new_ids = Vec::new();
+        let mut curves: std::collections::HashMap<Id, Id> = std::collections::HashMap::new();
         // the clipboard is only shifted: the tangents of a spline stay as they are
         let kind_map = KindMap { point: &m, turn: &|v| v, facing: Facing::Kept };
         for e in &clip.entities {
             let nk = e.kind.copied(&kind_map);
             let id = self.alloc_id();
             self.sketches[si].entities.push(SketchEntity { id, kind: nk, construction: e.construction });
+            curves.insert(e.id, id);
             new_ids.push(id);
         }
         // The internal constraints and dimensions of the copy are re-pointed at the new points; every
@@ -560,6 +565,7 @@ impl Project {
             let nc = remap_constraint_via(c, &map);
             self.sketches[si].constraints.push(nc);
         }
+        self.lay_copied_records(si, &clip.whole, &CopyMaps { points: &map, curves: &curves, turn: &|v| v });
         self.regen_sketch(si);
         new_ids
     }
