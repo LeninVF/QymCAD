@@ -86,6 +86,9 @@ mod a_figure_shows_no_badge_of_its_own;
 mod a_projected_ellipse_follows_its_body;
 
 #[cfg(test)]
+mod a_spline_survives_a_circle_deleted_by_hand;
+
+#[cfg(test)]
 mod a_circle_shows_its_centre_lines;
 
 #[cfg(test)]

@@ -661,7 +661,6 @@ crates/qymcad/src/gui/gizmo_math.rs 2 3 1
 crates/qymcad/src/gui/gizmo_mouse.rs 0 1 1
 crates/qymcad/src/gui/grab_tests.rs 0 1 0
 crates/qymcad/src/gui/hand.rs 14 11 1
-crates/qymcad/src/gui/hand/sketch_text.rs 0 1 0
 crates/qymcad/src/gui/help_flow.rs 0 2 0
 crates/qymcad/src/gui/help_general.rs 1 0 0
 crates/qymcad/src/gui/help_images.rs 6 11 0
@@ -799,7 +798,8 @@ crates/qymcad/src/gui/ui_sweep.rs 1 1 0
 crates/qymcad/src/gui/unsaved_prompt.rs 0 1 0
 crates/qymcad/src/gui/update_notice.rs 0 3 0
 crates/qymcad/src/gui/update_ui.rs 0 1 0
-crates/qymcad/src/gui/user_case.rs 0 27 0
+crates/qymcad/src/gui/user_case.rs 0 26 0
+crates/qymcad/src/gui/user_case/tests/sketch_steps.rs 0 1 0
 crates/qymcad/src/gui/view_anim.rs 1 6 0
 crates/qymcad/src/gui/view_cache_sweep.rs 0 1 0
 crates/qymcad/src/gui/view_state.rs 0 1 0

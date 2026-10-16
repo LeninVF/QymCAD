@@ -14,6 +14,7 @@ mod tests {
     mod check_all;
     mod drawing;
     mod save_and_reopen;
+    mod sketch_steps;
     mod the_faults;
     mod the_layout;
     mod the_view;
@@ -1296,57 +1297,7 @@ mod tests {
                 check_all(&mut app, &format!("sketch: {name}"), &mut problems);
             }
 
-            // A SIZE ONLY WHEN TYPED: the circles and the arc above were drawn without a value typed and carry no size of
-            // their own; a circle drawn with 12 typed carries one diameter of 12.
-            {
-                // the sizes on the rims of the circles and arcs drawn as shapes; the construction circle of the polygon keeps
-                // the radius that holds the polygon
-                let sizes = |a: &App| {
-                    let sk = &a.project.sketches[si];
-                    let shapes: Vec<u64> = sk.entities.iter().filter(|e| !e.construction).filter_map(|e| e.kind.round_centre()).collect();
-                    sk.constraints
-                        .iter()
-                        .filter_map(|c| match c {
-                            qymcad_core::model::Constraint::Diameter { c, d, diam, .. } if shapes.contains(c) => Some((*diam, *d)),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                };
-                if !sizes(&app).is_empty() {
-                    problems.push(format!("sketch: circles and an arc drawn without a value typed carry sizes {:?}", sizes(&app)));
-                }
-                let mut hand = Hand::new(&mut app);
-                hand.sk_tool(3).click2d(100.0, 10.0).click2d(106.0, 10.0).type_text("12").key(egui::Key::Enter);
-                hand.key(egui::Key::Escape).key(egui::Key::Escape);
-                if sizes(&app) != vec![(true, 12.0)] {
-                    problems.push(format!("sketch: a circle drawn with 12 typed carries sizes {:?}", sizes(&app)));
-                }
-                check_all(&mut app, "sketch: a circle sized by a value typed", &mut problems);
-            }
-
-            // A RECTANGLE WITH ITS CENTRE FIXED: drawn from a corner, the centre picked and fixed, a corner dragged by the
-            // mouse - it resizes about the centre, which stays
-            {
-                let mut hand = Hand::new(&mut app);
-                hand.sk_tool(2).click2d(110.0, 30.0).click2d(130.0, 50.0).key(egui::Key::Escape).key(egui::Key::Escape);
-                hand.sk_tool(0);
-                let centre = hand.app.project.sketches[si].rects.last().map(|r| r.centre);
-                match centre {
-                    Some(c) if hand.select2d(&[(0, c)]) => {
-                        hand.constraint(6);
-                        hand.key(egui::Key::Escape);
-                        hand.drag2d((130.0, 50.0), (134.0, 53.0));
-                        let sk = &hand.app.project.sketches[si];
-                        let stays = sk.points.iter().find(|q| q.id == c).is_some_and(|q| (q.x - 120.0).abs() < 0.6 && (q.y - 40.0).abs() < 0.6);
-                        let moved = sk.points.iter().any(|q| (q.x - 134.0).abs() < 0.6 && (q.y - 53.0).abs() < 0.6);
-                        if !stays || !moved {
-                            problems.push(format!("sketch: a corner of a rectangle with its centre fixed dragged to (134, 53): the centre stays {stays}, the corner went there {moved}"));
-                        }
-                    }
-                    _ => problems.push("sketch: the centre of a rectangle drawn from a corner could not be picked".into()),
-                }
-                check_all(&mut app, "sketch: a rectangle with its centre fixed resized by a corner", &mut problems);
-            }
+            sketch_steps::sizes(&mut app, si, &mut problems);
 
             // CONSTRAINTS: each is placed on a suitable selection. One that did not take must say so through
             // the status line rather than silently doing nothing.
@@ -3075,6 +3026,7 @@ mod tests {
         }
 
         the_view::framed_wheeled_to_a_hole_and_turned(&mut app, &mut problems);
+        sketch_steps::every_kind_of_curve_cut_extended_and_copied(&mut app, &mut problems);
         // ── THE FINAL DOCUMENT TO LOOK AT: it stays in target ───────────────────────────
         let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target").join("user-case.qcad").to_string_lossy().into_owned();
         crate::gui::set_project_path(&mut app.disk.project_path, &mut app.set, out.clone());
