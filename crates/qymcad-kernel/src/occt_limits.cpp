@@ -140,18 +140,6 @@ TopoDS_Shape prism_of(const Corner& c, const Section& sec, double past, TopoDS_F
     return prism.Shape();
 }
 
-/// WHAT A COPY MADE OF THE BODY: the copy of each element of the body, and nothing of any other shape - the copying
-/// algorithm, asked of a shape it never copied (a face of a prism), throws.
-struct CopyHistory : QymHistory {
-    CopyHistory(BRepBuilderAPI_Copy& c, const TopoDS_Shape& of) : copier(c) { TopExp::MapShapes(of, own); }
-    const TopTools_ListOfShape& Modified(const TopoDS_Shape& s) override { return own.Contains(s) ? copier.Modified(s) : none; }
-    const TopTools_ListOfShape& Generated(const TopoDS_Shape&) override { return none; }
-    bool Removed(const TopoDS_Shape&) override { return false; }
-    BRepBuilderAPI_Copy& copier;
-    TopTools_IndexedMapOfShape own;
-    TopTools_ListOfShape none;
-};
-
 } // namespace
 
 /// WHAT BLEND THE PRISMS MAKE: a fillet (`kind` 0) of radius `a`, or a chamfer (`kind` 1) of legs `a` on the first face
@@ -179,20 +167,8 @@ extern "C" QymShape* qym_shape_blend_limit(const QymShape* s, const QymBlendLimi
         // with the body the door built stepped back - cut on the body itself, the strips of a rim that body leaves
         // were no longer told apart, and a pinched rim landed as one face (measured on the frame of
         // `face_is_one_island`)
-        BRepBuilderAPI_Copy copier(s->shape);
-        QymShape body{copier.Shape(), {}, {}, {}, {}, {}, {}};
-        // the names of the copy, asked of what the body holds: the record of names may keep shapes the body no longer
-        // has, and the copy is asked only of its own
-        auto name_copy = [&](TopAbs_ShapeEnum ty, const TopTools_DataMapOfShapeInteger& ids, TopTools_DataMapOfShapeInteger& out) {
-            TopTools_IndexedMapOfShape own;
-            TopExp::MapShapes(s->shape, ty, own);
-            for (int i = 1; i <= own.Extent(); ++i) {
-                if (!ids.IsBound(own(i))) continue;
-                for (TopTools_ListIteratorOfListOfShape c(copier.Modified(own(i))); c.More(); c.Next()) out.Bind(c.Value(), ids.Find(own(i)));
-            }
-        };
-        name_copy(TopAbs_FACE, s->fids, body.fids);
-        name_copy(TopAbs_EDGE, s->eids, body.eids);
+        QYM_OWN_COPY(s);
+        const QymShape& body = *s;
         TopTools_IndexedDataMapOfShapeListOfShape faces_of;
         TopExp::MapShapesAndAncestors(body.shape, TopAbs_EDGE, TopAbs_FACE, faces_of);
         TopTools_ListOfShape tools;
@@ -287,11 +263,9 @@ extern "C" QymShape* qym_shape_blend_limit(const QymShape* s, const QymBlendLimi
         if (res.IsNull() || !BRepCheck_Analyzer(res).IsValid()) return why("blend/limit", "the body with the prisms cut is not sound"), nullptr;
         // the surface of each blend named by its edge, as the blend names it; nothing else of a prism is left
         const QymShape cut{all, tool_ids, {}, {}, {}, {}, {}};
-        CopyHistory copied(copier, s->shape);
         QymBuilderHistory cutting(algo);
         QymToolsHistory merging(unify.History());
-        QymChainHistory copied_and_cut(copied, cutting);
-        QymChainHistory history(copied_and_cut, merging);
+        QymChainHistory history(cutting, merging);
         return qym_result(history, res, QymResultSpec{{QymOperand{s, QymCarry::Everything, "blend/limit"}, QymOperand{&cut, QymCarry::RecipeOnly, "blend/limit/tool"}}});
     } QYM_WHY_CATCH("edge operation")
     return nullptr;

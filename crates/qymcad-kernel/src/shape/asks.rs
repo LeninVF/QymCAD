@@ -100,9 +100,10 @@ impl Shape {
     pub fn shell_count(&self) -> u32 {
         unsafe { qym_shape_shell_count(self.ptr) as u32 }
     }
-    /// Whether this shape and `other` share a face or an edge - the same kernel sub-shape, not merely an equal one.
-    /// Two bodies that share one must not be meshed or healed on two threads at once, so the rebuild keeps them on
-    /// one thread (see `qymcad_core`'s `Kernel::shares` and the batch dispatch in `model/regen.rs`).
+    /// Whether this shape and `other` share an element - a face, an edge or a vertex that is one kernel sub-shape in
+    /// both, wherever each places it, not merely an equal one. Two bodies that share one must not be worked on two
+    /// threads at once, so the rebuild keeps them on one thread (see `qymcad_core`'s `Kernel::shares` and the batch
+    /// dispatch in `model/regen.rs`).
     pub fn shares_geometry(&self, other: &Shape) -> bool {
         unsafe { qym_shapes_share(self.ptr, other.ptr) != 0 }
     }

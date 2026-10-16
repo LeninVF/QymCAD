@@ -245,6 +245,24 @@ pub fn determinism(doc: &Doc) -> Vec<String> {
     faults
 }
 
+/// ONE THREAD AND MANY GIVE THE SAME NAMES: `doc` opened as the window opens it, the nodes of a wave on threads of their
+/// own, then rebuilt whole on one thread. The kernel is left as it was found, on every core but one.
+pub fn one_thread_and_many(doc: &Doc) -> Vec<String> {
+    let mut o = open(doc);
+    let many = o.marks.clone();
+    step(format!("rebuild {} whole on one thread", doc.name));
+    qymcad_kernel::set_parallel(false, 1);
+    let shapes = crate::restore_import_shapes(&o.project);
+    let _ = crate::regenerate_with_shapes(&mut o.project, shapes);
+    qymcad_kernel::set_parallel(true, 0);
+    let one = Marks::of(&o.project);
+    let faults: Vec<String> = renamed(Change { was: &many, now: &one }, &o.project).into_iter().map(|r| format!("{}: one thread renamed what many named: {r}", doc.name)).collect();
+    if !faults.is_empty() {
+        trap(&o, &faults);
+    }
+    faults
+}
+
 /// THE STEPS OF THIS PROCESS, in order, since it started: every document opened, rebuilt, edited and undone. A rename
 /// of the same document comes with the state of the process as well as with the document: measured, the
 /// chamfer 11963 of the case of the examples was stepped back in 3 of 20 rebuilds with the filter rebuilt before it

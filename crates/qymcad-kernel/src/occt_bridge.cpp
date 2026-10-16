@@ -969,7 +969,7 @@ TopoDS_Shape unify_monolithic(const TopoDS_Shape& in,
 extern "C" QymDoc* qym_occt_step_read(const char* path, double defl) {
     try {
         QYM_SIGNALS;
-        std::lock_guard<std::mutex> one_at_a_time(xstep_lock());
+        const std::unique_lock<std::recursive_mutex> one_at_a_time = qym_alone(QymShared::Exchange);
         STEPControl_Reader reader;
         if (reader.ReadFile(path) != IFSelect_RetDone) return nullptr;
         reader.TransferRoots();
@@ -991,14 +991,15 @@ extern "C" QymDoc* qym_occt_step_read(const char* path, double defl) {
 // ONE IGES AT A TIME, reading or writing. The IGES side of OCCT keeps its state in process-wide statics - the
 // unit it converts to, the controller the writer registers - and two files at once crash the process
 // (measured: four checks reading and writing in parallel died with SIGSEGV; one at a time they passed). An
-// import runs on a worker thread, so two can meet; they queue here instead.
-std::mutex& xstep_lock() {
-    static std::mutex m;
-    return m;
+// import runs on a worker thread, so two can meet; they queue here instead (`QymShared::Exchange`).
+std::unique_lock<std::recursive_mutex> qym_alone(QymShared what) {
+    static std::recursive_mutex exchange;
+    static std::recursive_mutex blend;
+    return std::unique_lock<std::recursive_mutex>(what == QymShared::Exchange ? exchange : blend);
 }
 
 static TopoDS_Shape iges_shape(const char* path) {
-    std::lock_guard<std::mutex> one_at_a_time(xstep_lock());
+    const std::unique_lock<std::recursive_mutex> one_at_a_time = qym_alone(QymShared::Exchange);
     Interface_Static::SetCVal("xstep.cascade.unit", "MM");
     IGESControl_Reader reader;
     if (reader.ReadFile(path) != IFSelect_RetDone) return TopoDS_Shape();
@@ -1458,7 +1459,7 @@ static bool iges_flat(IGESControl_Reader& reader, const Handle(IGESData_IGESMode
 // (408) the occurrences. Measured on the print head of the report: 79 definitions, 110 instances, 70 solids - the
 // tree its STEP holds. A file with no instance standing on its own is read flat (`iges_flat`), or as before.
 bool iges_tree(const char* path, QymTree& tree, std::vector<TopoDS_Shape>& solids) {
-    std::lock_guard<std::mutex> one_at_a_time(xstep_lock());
+    const std::unique_lock<std::recursive_mutex> one_at_a_time = qym_alone(QymShared::Exchange);
     Interface_Static::SetCVal("xstep.cascade.unit", "MM");
     IGESControl_Reader reader;
     if (reader.ReadFile(path) != IFSelect_RetDone) return false;
@@ -1501,9 +1502,10 @@ extern "C" QymShapeList* qym_iges_solids(const char* path) {
 // file in `unit` ("MM" or "IN"; the coordinates are converted, the model itself is in millimetres). Faces mode:
 // trimmed surfaces, the writer's default and the kind every IGES reader handles. 0 means success.
 extern "C" int qym_iges_write(const QymShape** shapes, const double* mats, size_t n, const char* path, const char* unit) {
+    QYM_AS_HANDED(shapes, "it only reads the bodies, one file at a time (QymShared::Exchange)");
     try {
         QYM_SIGNALS;
-        std::lock_guard<std::mutex> one_at_a_time(xstep_lock());
+        const std::unique_lock<std::recursive_mutex> one_at_a_time = qym_alone(QymShared::Exchange);
         IGESControl_Controller::Init();
         IGESControl_Writer writer(unit, 0);
         for (size_t i = 0; i < n; ++i) {
@@ -1542,7 +1544,7 @@ extern "C" int qym_iges_write(const QymShape** shapes, const double* mats, size_
 // on down; a part puts its solids into the list, moved to where the file places them. The solids therefore come in
 // the order the tree meets them, and the reopening of a document reads them the same way (`qym_step_solids`), so a
 // body's number in its source stays right. The document machinery keeps state of its own, so one file at a time.
-// (one file at a time under `xstep_lock`, the lock IGES holds too)
+// (one file at a time under `QymShared::Exchange`, the lock IGES holds too)
 
 // What the kernel's own writer calls a product it was given no name for: "... STEP translator 7.9 1". That is no
 // name of the author's, so it reads as none and the part is named after its file, as a part of an unnamed file is.
@@ -1672,7 +1674,7 @@ static void walk(const Handle(XCAFDoc_ColorTool)& ct, const TDF_Label& label, in
 }
 
 bool step_tree(const char* path, QymTree& tree, std::vector<TopoDS_Shape>& solids) {
-    std::lock_guard<std::mutex> one_at_a_time(xstep_lock());
+    const std::unique_lock<std::recursive_mutex> one_at_a_time = qym_alone(QymShared::Exchange);
     Interface_Static::SetCVal("xstep.cascade.unit", "MM");
     Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
     Handle(TDocStd_Document) doc;
@@ -1697,8 +1699,9 @@ bool step_tree(const char* path, QymTree& tree, std::vector<TopoDS_Shape>& solid
 // repeats an earlier one (`same_as`) places that one's product again, so the file holds a clone's product once.
 // The nodes come parents first; the arrays are parallel, one entry per node.
 extern "C" int qym_step_write_tree(size_t n, const int64_t* parents, const char* const* names, const double* places, const QymShape* const* shapes, const int64_t* same_as, const float* rgb, const int* has_rgb, const size_t* face_starts, const uint32_t* face_ids, const float* face_rgb, const char* path) {
+    QYM_AS_HANDED(shapes, "it only reads the bodies, one file at a time (QymShared::Exchange)");
     if (n == 0 || !parents || !names || !places || !shapes || !same_as || !rgb || !has_rgb || !face_starts || !path) return 4;
-    std::lock_guard<std::mutex> one_at_a_time(xstep_lock());
+    const std::unique_lock<std::recursive_mutex> one_at_a_time = qym_alone(QymShared::Exchange);
     try {
         QYM_SIGNALS;
         Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
@@ -2490,6 +2493,7 @@ extern "C" QymShape* qym_shape_sew(const QymShape* s, double tol) {
     if (!s) return nullptr;
     try {
         QYM_SIGNALS;
+        QYM_OWN_COPY(s);
         BRepBuilderAPI_Sewing sew(tol, Standard_True, Standard_True, Standard_True);
         for (TopExp_Explorer ex(s->shape, TopAbs_FACE); ex.More(); ex.Next()) sew.Add(ex.Current());
         sew.Perform();
@@ -2515,6 +2519,7 @@ extern "C" QymShape* qym_shape_fix_shell(const QymShape* s) {
     if (!s) return nullptr;
     try {
         QYM_SIGNALS;
+        QYM_OWN_COPY(s);
         ShapeFix_Shape fix(s->shape);
         fix.Perform();
         TopoDS_Shape res = fix.Shape();
@@ -3188,6 +3193,7 @@ extern "C" QymShape* qym_shape_bezier_shell(const double* pts, size_t patches, d
 // measurement caught this in a live scenario: the body came out with 26 faces instead of 56, and pushing a
 // face stopped building.
 extern "C" void qym_shape_clear_face_splits(QymShape* s) {
+    QYM_AS_HANDED(s, "it changes the record of names the body holds, not its shape");
     try {
         QYM_SIGNALS;
         if (!s) return;
@@ -3197,6 +3203,7 @@ extern "C" void qym_shape_clear_face_splits(QymShape* s) {
 }
 
 extern "C" size_t qym_shape_face_splits(const QymShape* s, unsigned* out, size_t cap) {
+    QYM_AS_HANDED(s, "it only reads the body");
     try {
         QYM_SIGNALS;
         if (!s) return 0;
@@ -3218,6 +3225,7 @@ extern "C" size_t qym_shape_face_splits(const QymShape* s, unsigned* out, size_t
 
 // Rewrite face names, given pairs of "was -> became".
 extern "C" void qym_shape_rename_faces(QymShape* s, const unsigned* from, const unsigned* to, size_t n) {
+    QYM_AS_HANDED(s, "it changes the record of names the body holds, not its shape");
     try {
         QYM_SIGNALS;
         if (!s || !from || !to || n == 0) return;
@@ -3250,6 +3258,7 @@ extern "C" void qym_shape_rename_faces(QymShape* s, const unsigned* from, const 
 // and none of it depends on numbering. The two SMALLEST such names are returned (0 when there are none), in
 // rows of [the edge's id, name 1, name 2].
 extern "C" size_t qym_shape_edge_end_faces(const QymShape* s, unsigned* out, size_t cap) {
+    QYM_AS_HANDED(s, "it only reads the body");
     try {
         QYM_SIGNALS;
         if (!s) return 0;
@@ -3289,6 +3298,7 @@ extern "C" size_t qym_shape_edge_end_faces(const QymShape* s, unsigned* out, siz
 }
 
 extern "C" size_t qym_shape_edge_face_pairs(const QymShape* s, unsigned* out, size_t cap) {
+    QYM_AS_HANDED(s, "it only reads the body");
     try {
         QYM_SIGNALS;
         if (!s) return 0;
@@ -3342,6 +3352,7 @@ extern "C" size_t qym_shape_edge_face_pairs(const QymShape* s, unsigned* out, si
 // the centre of mass either: integrated exactly over a fitted wall it took 1.4 s of an 11.6 s node for 162 faces,
 // and a body brought in from a file asks it of every face. Calling with null outputs returns the count.
 extern "C" size_t qym_shape_face_places(const QymShape* s, unsigned* ids, double* out, size_t cap) {
+    QYM_AS_HANDED(s, "it only reads the body");
     try {
         QYM_SIGNALS;
         if (!s || s->shape.IsNull()) return 0;
@@ -3374,6 +3385,7 @@ extern "C" size_t qym_shape_face_places(const QymShape* s, unsigned* ids, double
 // Rewrite edge names, given pairs of "was -> became". Called right after the body is assembled, before
 // anything refers to its edges.
 extern "C" void qym_shape_rename_edges(QymShape* s, const unsigned* from, const unsigned* to, size_t n) {
+    QYM_AS_HANDED(s, "it changes the record of names the body holds, not its shape");
     try {
         QYM_SIGNALS;
         if (!s || !from || !to || n == 0) return;
@@ -3401,6 +3413,7 @@ extern "C" QymShape* qym_shape_fuse_many(const QymShape* const* parts, int n) {
     try {
         QYM_SIGNALS;
         if (!parts || n <= 0 || !parts[0]) return nullptr;
+        QYM_OWN_COPIES(parts, n);
         TopTools_ListOfShape args, tools;
         args.Append(parts[0]->shape);
         for (int i = 1; i < n; ++i) {
@@ -3435,6 +3448,8 @@ extern "C" QymShape* qym_shape_fuse_many(const QymShape* const* parts, int n) {
 extern "C" QymShape* qym_shape_boolean(const QymShape* a, const QymShape* b, int op) {
     try {
         QYM_SIGNALS;
+        QYM_OWN_COPY(a);
+        QYM_OWN_COPY(b);
         if (!a || !b) return why("boolean/asked", a ? "there is no tool body" : "there is no base body"), nullptr;
         // TWO NAME SPACES MERGE rather than being renumbered. Only the BASE's names used to be carried
         // through the history, and everything arriving from the tool got fresh positional numbers — so the
