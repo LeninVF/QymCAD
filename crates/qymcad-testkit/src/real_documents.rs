@@ -30,8 +30,9 @@ pub fn documents() -> Vec<Doc> {
     let root = format!("{}/../..", env!("CARGO_MANIFEST_DIR"));
     let mut docs: Vec<Doc> = ["Filter-v2.qcad", "QymBoxPc-Case.qcad"].iter().map(|n| Doc { name: n.to_string(), path: format!("{root}/examples/{n}") }).collect();
     for name in ["vacuumCleaner.qcad", "test_bridge_resize_body.qcad", "bugs_fillet_again.qcad", "pref_sketch.qcad", "sketch_line_test.qcad", "issue-4/project/project.qcad"] {
-        let path = format!("{root}/samples/{name}");
-        if std::path::Path::new(&path).exists() {
+        // a sample saved with the edge names of today sits beside the one it was saved from, as `<name>.topo.qcad`
+        let path = [format!("{root}/samples/{}", name.replace(".qcad", ".topo.qcad")), format!("{root}/samples/{name}")].into_iter().find(|p| std::path::Path::new(p).exists()).unwrap_or_default();
+        if !path.is_empty() {
             docs.push(Doc { name: name.to_string(), path });
         } else {
             eprintln!("PASSED OVER: the private sample {name} is not in this tree - the check on it runs only where the samples are");
