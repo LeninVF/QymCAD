@@ -9,6 +9,7 @@ use qymcad_core::feature::{Ends, Purpose};
 use qymcad_core::geom::Point2;
 use qymcad_core::model::curve::Curve;
 use qymcad_core::model::{CornerAt, CornerCut, FilletSize, Id, Project};
+use qymcad_core::time_budget::{cost_of, over, Doer};
 
 /// The blob of the report: seven nodes, a notch between the second and the fourth.
 const BLOB: [[f64; 2]; 7] = [[-22.0, 6.0], [-14.0, 14.0], [-3.0, 7.0], [7.0, 25.0], [21.0, 9.0], [10.0, -9.0], [-17.0, -14.0]];
@@ -71,18 +72,20 @@ fn a_fillet_where_a_spline_crosses_a_copy_is_done_in_a_moment() {
     // a spline from outside across the copy and the blob
     let across = p.add_spline(si, vec![Point2::new(-40.0, 0.0), Point2::new(-30.0, 2.0), Point2::new(-15.0, -1.0)], Ends::Open, Purpose::Real).expect("the spline across");
     let copy = p.sketches[si].entities.iter().find(|e| e.id != blob && e.id != across && e.kind.as_spline().is_some()).map(|e| e.id).expect("the copy");
-    let started = std::time::Instant::now();
-    let crossing = p.crossing_of(si, [copy, across], Point2::new(-27.0, 1.0)).expect("the spline crosses the copy");
-    let point = p.cut_at_crossing(si, crossing).expect("the crossing cut");
-    // the corner of the piece of the spline outside and the piece of the copy going up
-    let s = &p.sketches[si];
-    let at = |e: &qymcad_core::model::SketchEntity| Curve::of(s, e).map(|c| c.at(0.5));
-    let ends_there: Vec<&qymcad_core::model::SketchEntity> = s.entities.iter().filter(|e| qymcad_core::model::entity_ends(e).is_some_and(|ends| ends.contains(&point))).collect();
-    let outside = ends_there.iter().filter(|e| at(e).is_some_and(|m| m.x < -28.0)).map(|e| e.id).next();
-    let up = ends_there.iter().filter(|e| at(e).is_some_and(|m| m.y > 1.0 && m.x > -28.0)).map(|e| e.id).next();
-    let (Some(outside), Some(up)) = (outside, up) else { panic!("no corner of the crossing: the curves ending there are {:?}", ends_there.iter().map(|e| e.id).collect::<Vec<_>>()) };
-    let made = p.cut_corner_set(si, &[CornerAt::of(point, [outside, up])], CornerCut::Fillet(FilletSize::radius(2.0)), None);
-    let took = started.elapsed();
-    assert!(took < std::time::Duration::from_secs(2), "the fillet at the crossing of a spline and a copy took {took:?}");
+    let done = cost_of(Doer::Thread, || {
+        let crossing = p.crossing_of(si, [copy, across], Point2::new(-27.0, 1.0)).expect("the spline crosses the copy");
+        let point = p.cut_at_crossing(si, crossing).expect("the crossing cut");
+        // the corner of the piece of the spline outside and the piece of the copy going up
+        let s = &p.sketches[si];
+        let at = |e: &qymcad_core::model::SketchEntity| Curve::of(s, e).map(|c| c.at(0.5));
+        let ends_there: Vec<&qymcad_core::model::SketchEntity> = s.entities.iter().filter(|e| qymcad_core::model::entity_ends(e).is_some_and(|ends| ends.contains(&point))).collect();
+        let outside = ends_there.iter().filter(|e| at(e).is_some_and(|m| m.x < -28.0)).map(|e| e.id).next();
+        let up = ends_there.iter().filter(|e| at(e).is_some_and(|m| m.y > 1.0 && m.x > -28.0)).map(|e| e.id).next();
+        let (Some(outside), Some(up)) = (outside, up) else { panic!("no corner of the crossing: the curves ending there are {:?}", ends_there.iter().map(|e| e.id).collect::<Vec<_>>()) };
+        p.cut_corner_set(si, &[CornerAt::of(point, [outside, up])], CornerCut::Fillet(FilletSize::radius(2.0)), None)
+    });
+    let budget = std::time::Duration::from_secs(2);
+    assert!(done.cost.work < budget, "{}", over("the fillet at the crossing of a spline and a copy", done.cost, budget));
+    let made = done.out;
     assert_eq!(made, 1, "the fillet at the crossing of a spline and a copy was not laid");
 }

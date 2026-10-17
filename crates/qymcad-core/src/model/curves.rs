@@ -2,24 +2,6 @@
 
 use super::*;
 
-/// Whether point `p` lies inside polygon `poly` (ray casting).
-pub(crate) fn point_in_poly(poly: &[Point2], p: Point2) -> bool {
-    let n = poly.len();
-    if n < 3 {
-        return false;
-    }
-    let mut inside = false;
-    let mut j = n - 1;
-    for i in 0..n {
-        let (a, b) = (poly[i], poly[j]);
-        if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside
-}
-
 /// Whether the contours touch: the inner one reached the boundary of the outer one.
 ///
 /// Such a contour is not a hole. An inner loop that touches the outer loop forms no face, and the whole
@@ -30,28 +12,78 @@ pub(crate) fn polys_touch(outer: &[Point2], inner: &[Point2]) -> bool {
     if outer.len() < 3 || inner.len() < 3 {
         return false;
     }
-    let (mut lo, mut hi) = (Point2::new(f64::MAX, f64::MAX), Point2::new(f64::MIN, f64::MIN));
-    for p in outer {
-        lo = Point2::new(lo.x.min(p.x), lo.y.min(p.y));
-        hi = Point2::new(hi.x.max(p.x), hi.y.max(p.y));
-    }
-    let tol = ((hi.x - lo.x).hypot(hi.y - lo.y) * 1e-6).max(1e-9);
-    for a in inner {
-        for i in 0..outer.len() {
+    let bands = Bands::of(outer);
+    let tol = bands.tol;
+    inner.iter().any(|a| {
+        bands.near(a.y).iter().any(|&i| {
             let (b, c) = (outer[i], outer[(i + 1) % outer.len()]);
             let (vx, vy) = (c.x - b.x, c.y - b.y);
             let l2 = vx * vx + vy * vy;
             let t = if l2 > 1e-18 { (((a.x - b.x) * vx + (a.y - b.y) * vy) / l2).clamp(0.0, 1.0) } else { 0.0 };
-            if (a.x - (b.x + t * vx)).hypot(a.y - (b.y + t * vy)) <= tol {
-                return true;
-            }
-        }
-    }
-    false
+            (a.x - (b.x + t * vx)).hypot(a.y - (b.y + t * vy)) <= tol
+        })
+    })
 }
 
+/// Whether every point of `inner` lies inside `outer`, by casting a ray from it along X and counting the edges it crosses.
 pub(crate) fn poly_contains(outer: &[Point2], inner: &[Point2]) -> bool {
-    !inner.is_empty() && inner.iter().all(|p| point_in_poly(outer, *p))
+    if inner.is_empty() || outer.len() < 3 {
+        return false;
+    }
+    let bands = Bands::of(outer);
+    let n = outer.len();
+    inner.iter().all(|p| {
+        let mut inside = false;
+        for &i in bands.near(p.y) {
+            let (a, b) = (outer[(i + 1) % n], outer[i]);
+            if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+                inside = !inside;
+            }
+        }
+        inside
+    })
+}
+
+/// THE EDGES OF A POLYGON SORTED INTO BANDS ACROSS IT, by the height they span widened by the tolerance of a touch: a
+/// point is tried against the edges of its band alone. Tried against every edge, a loop of a spline nested in another,
+/// 5 000 points each, took 140 ms to place at every rebuild.
+struct Bands {
+    lo: f64,
+    step: f64,
+    tol: f64,
+    edges: Vec<Vec<usize>>,
+}
+
+impl Bands {
+    fn of(poly: &[Point2]) -> Bands {
+        let n = poly.len();
+        let (mut lo, mut hi) = (Point2::new(f64::MAX, f64::MAX), Point2::new(f64::MIN, f64::MIN));
+        for p in poly {
+            lo = Point2::new(lo.x.min(p.x), lo.y.min(p.y));
+            hi = Point2::new(hi.x.max(p.x), hi.y.max(p.y));
+        }
+        let tol = ((hi.x - lo.x).hypot(hi.y - lo.y) * 1e-6).max(1e-9);
+        let count = ((n as f64).sqrt().ceil() as usize).max(1);
+        let step = ((hi.y - lo.y) / count as f64).max(1e-12);
+        let mut edges = vec![Vec::new(); count];
+        let band = |y: f64| (((y - lo.y) / step).floor().max(0.0) as usize).min(count - 1);
+        for i in 0..n {
+            let (a, b) = (poly[i], poly[(i + 1) % n]);
+            for band_edges in &mut edges[band(a.y.min(b.y) - tol)..=band(a.y.max(b.y) + tol)] {
+                band_edges.push(i);
+            }
+        }
+        Bands { lo: lo.y, step, tol, edges }
+    }
+
+    /// The edges of the band height `y` falls in; none for a height outside the polygon.
+    fn near(&self, y: f64) -> &[usize] {
+        let top = self.lo + self.step * self.edges.len() as f64;
+        if y < self.lo - self.tol || y > top + self.tol {
+            return &[];
+        }
+        &self.edges[(((y - self.lo) / self.step).floor().max(0.0) as usize).min(self.edges.len() - 1)]
+    }
 }
 
 /// Orient `axis` from `center` towards the material: the side of the plane through `center` perpendicular

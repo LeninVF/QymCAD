@@ -615,12 +615,18 @@ fn exact_runs(c: &mut Contour, exact: &std::collections::HashMap<Id, Curve>) {
     // and a lobe of a figure of eight, all of one spline, is a run from the crossing round to it.
     // the place of the middle of every edge along its curve, found once: asked for each edge by itself and by the one
     // after it, the search ran four times an edge
-    let middles: Vec<Option<f64>> = (0..n)
-        .map(|k| {
-            let ([a, b], curve) = (c.edges[k].ends()?, exact.get(&c.edge_src[k])?);
-            Some(curve.nearest(Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)).t)
-        })
-        .collect();
+    // EACH FROM THE PLACE OF THE EDGE BEFORE IT, where that is of the same curve: the edges of a run follow one another
+    // along it, and the middle of a segment stands within 0.005 mm of the curve. Sought along the whole curve for each,
+    // a loop of a spline of 276 nodes, 5 437 segments, took 1.2 s to rebuild, every frame of a drag.
+    let mut middles: Vec<Option<f64>> = Vec::with_capacity(n);
+    for k in 0..n {
+        let found = c.edges[k].ends().zip(exact.get(&c.edge_src[k])).map(|([a, b], curve)| {
+            let m = Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+            let before = k.checked_sub(1).filter(|p| c.edge_src[*p] == c.edge_src[k]).and_then(|p| middles[p]);
+            before.map(|t| curve.polish(m, t)).filter(|t| curve.at(*t).dist(m) < 0.02).unwrap_or_else(|| curve.nearest(m).t)
+        });
+        middles.push(found);
+    }
     let joined = |k: usize| -> bool {
         let p = (k + n - 1) % n;
         if c.edge_src[p] != c.edge_src[k] {
@@ -1091,8 +1097,10 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
         let mut cont = Contour::closed(cpts);
         cont.edges = cedges;
         cont.edge_src = csrc;
-        exact_runs(&mut cont, &exact);
         if cont.signed_area() > 1e-3 {
+            // the runs along one curve as that curve, for a region alone: a walk round the outside of a piece is read by
+            // the ends of its segments (`round`), and laid as curves it cost a loop of a spline 25 ms a rebuild
+            exact_runs(&mut cont, &exact);
             // provenance of a face: the set of entities whose pieces form its boundary, sorted and without
             // repeats
             let prov: std::collections::BTreeSet<Id> = face.iter().map(|&ei| curve_eid[edges[ei].ci]).collect();

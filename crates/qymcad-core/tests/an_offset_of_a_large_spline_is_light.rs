@@ -7,6 +7,7 @@
 use qymcad_core::feature::Ends;
 use qymcad_core::geom::Point2;
 use qymcad_core::model::curve::{Curve, OFFSET_TOLERANCE};
+use qymcad_core::time_budget::{cost_of, Doer};
 
 const NODES: [[f64; 2]; 39] = [
     [-62.0, 202.0],
@@ -55,14 +56,13 @@ fn an_offset_of_a_large_spline_is_laid_light_and_true() {
     let spline = Curve::spline(NODES.iter().map(|q| Point2::new(q[0], q[1])).collect(), &[], Ends::Closed);
     let mut failures = Vec::new();
     for d in [3.0, -3.0] {
-        let started = std::time::Instant::now();
-        let pieces = spline.offset(d);
-        let took = started.elapsed();
+        let laid = cost_of(Doer::Thread, || spline.offset(d));
+        let (pieces, took) = (laid.out, laid.cost);
         let nodes: usize = pieces.iter().filter_map(|p| p.handles()).map(|h| h.len()).sum();
         // a place of a piece off the distance by more than the tolerance, the worst of 2 000 along each
         let worst = pieces.iter().flat_map(|p| (0..=2000).map(move |k| p.at(k as f64 / 2000.0))).map(|q| (spline.nearest(q).off - 3.0).abs()).fold(0.0, f64::max);
-        if pieces.is_empty() || nodes > 1000 || took > std::time::Duration::from_secs(1) || worst > OFFSET_TOLERANCE * 1.1 {
-            failures.push(format!("offset by {d}: {} pieces of {nodes} nodes in all, laid in {took:?}, standing up to {worst:.4} off the distance", pieces.len()));
+        if pieces.is_empty() || nodes > 1000 || took.work > std::time::Duration::from_secs(1) || worst > OFFSET_TOLERANCE * 1.1 {
+            failures.push(format!("offset by {d}: {} pieces of {nodes} nodes in all, laid in {took}, standing up to {worst:.4} off the distance", pieces.len()));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

@@ -41,8 +41,9 @@ fn a_node_of_a_spline_rounded_to_a_circle_drags_lightly() {
         .map(|q| (q.x, q.y))
         .expect("a node of the spline");
     hand.sk_tool(0);
-    let t = std::time::Instant::now();
-    hand.drag2d(node, (node.0 + 6.0, node.1 - 6.0));
-    let whole = t.elapsed();
-    assert!(whole < std::time::Duration::from_millis(2000), "the drag of a node of a filleted spline took {whole:?}, budget 2 s (6.3 s before)");
+    let drag = qymcad_core::time_budget::cost_of(qymcad_core::time_budget::Doer::Thread, || {
+        hand.drag2d(node, (node.0 + 6.0, node.1 - 6.0));
+    });
+    let budget = std::time::Duration::from_millis(2000);
+    assert!(drag.cost.work < budget, "{}", qymcad_core::time_budget::over("the drag of a node of a filleted spline (6.3 s before)", drag.cost, budget));
 }

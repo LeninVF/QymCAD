@@ -47,11 +47,7 @@ struct Boxes {
 
 impl Boxes {
     fn span(&self, b: &[f64; 4]) -> Option<[i64; 4]> {
-        if !b.iter().all(|v| v.is_finite()) {
-            return None;
-        }
-        let s = [(b[0] / self.cell).floor() as i64, (b[1] / self.cell).floor() as i64, (b[2] / self.cell).floor() as i64, (b[3] / self.cell).floor() as i64];
-        ((s[2] - s[0] + 1) * (s[3] - s[1] + 1) <= 64).then_some(s)
+        cells_of(self.cell, b)
     }
 
     fn put(&mut self, k: usize) {
@@ -76,6 +72,19 @@ impl Boxes {
     }
 }
 
+/// THE CELLS OF SIDE `cell` A BOX COVERS, as the first and the last column and row; `None` for a box over more than 64 of
+/// them, at no number, or of no area - the box of a loop with no point is laid out inverted, and its count of cells ran
+/// past what a number holds.
+fn cells_of(cell: f64, b: &[f64; 4]) -> Option<[i64; 4]> {
+    if !b.iter().all(|v| v.is_finite()) || b[0] > b[2] || b[1] > b[3] {
+        return None;
+    }
+    let s = b.map(|v| (v / cell).floor() as i64);
+    let across = s[2].saturating_sub(s[0]).saturating_add(1);
+    let up = s[3].saturating_sub(s[1]).saturating_add(1);
+    (across.saturating_mul(up) <= 64).then_some(s)
+}
+
 /// THE BOXES OF THE LOOPS OF A SKETCH on a grid, by loop id: which loops may meet a box, without a look at every loop.
 #[derive(Clone, Debug, Default)]
 struct LoopGrid {
@@ -87,11 +96,7 @@ struct LoopGrid {
 
 impl LoopGrid {
     fn span(&self, b: &[f64; 4]) -> Option<[i64; 4]> {
-        if !b.iter().all(|v| v.is_finite()) {
-            return None;
-        }
-        let s = [(b[0] / self.cell).floor() as i64, (b[1] / self.cell).floor() as i64, (b[2] / self.cell).floor() as i64, (b[3] / self.cell).floor() as i64];
-        ((s[2] - s[0] + 1) * (s[3] - s[1] + 1) <= 64).then_some(s)
+        cells_of(self.cell, b)
     }
 
     fn put(&mut self, id: Id, b: &[f64; 4]) {
@@ -274,7 +279,14 @@ impl Project {
         let radii_was: Vec<f64> = own_radii.iter().map(|r| r.value).collect();
         // a rectangle changes its size from where it was drawn (`held_for_size`)
         let anchors = sess.rects.iter().filter_map(|r| held_for_size(&s.rects[r.index], Some(d), r.centre)).filter(|p| sess.place.contains_key(p)).map(|p| Constraint::Fixed { p });
-        let constraints: Vec<Constraint> = sess.constraints.iter().cloned().chain(anchors).collect();
+        let mut constraints: Vec<Constraint> = sess.constraints.iter().cloned().chain(anchors).collect();
+        // WHERE CURVES MADE TO TOUCH TOUCH NOW, read before each frame as a full solve reads it (`touchings_follow`): kept
+        // from the first frame, a circle made to touch an ellipse came away 10 deg off
+        for c in constraints.iter_mut() {
+            if let Constraint::TangentCurves { one, other, near, end: None } = c {
+                *near = crate::solver::touching_places(&own_points, &own_radii, [&*one, &*other], *near).or(*near);
+            }
+        }
         let outcome = crate::solver::solve_part_within(&mut own_points, &mut own_radii, &constraints, Some(drag), crate::solver::Budget::FRAME, &s.points);
         s.left_unsolved = outcome.left;
         // a move below rounding is not written (`solve_sketch_inner`)
@@ -335,10 +347,9 @@ impl Project {
         let s = self.sketches.get(si)?;
         let origin_drawn = s.origin != 0 && s.entities.iter().any(|e| entity_points(e).contains(&s.origin));
         let frame_missing = (s.origin != 0 || s.axis_pts.iter().any(|g| *g != 0)) && s.frame == 0;
-        // a constraint on a curve of any kind reads where it touches anew before every solve, which a session holding its
-        // constraints from the first frame would not: dragged so, a circle made to touch an ellipse came away 10 deg off
-        let on_curves = s.constraints.iter().any(|c| matches!(c, Constraint::PointOnCurve { .. } | Constraint::TangentCurves { .. }));
-        if s.entities.iter().any(|e| e.kind.as_spline().is_some()) || !s.texts.is_empty() || origin_drawn || frame_missing || on_curves {
+        // a sketch with an offset laid again from its source has its copies laid anew in a frame, and the points the
+        // session keeps would not be theirs; text is made whole
+        if !s.offsets.is_empty() || !s.texts.is_empty() || origin_drawn || frame_missing {
             return None;
         }
         let place: HashMap<Id, usize> = s.points.iter().enumerate().map(|(i, p)| (p.id, i)).collect();

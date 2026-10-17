@@ -529,8 +529,12 @@ impl Project {
         let Some(s) = self.sketches.get_mut(si) else { return };
         s.drag_session = None; // its loops are made anew: what a drag kept of them goes
         let s = &self.sketches[si];
-        // a frame of reference to be made first (`ensure_frame` in `regen_sketch`), splines, text: rebuilt whole
-        if s.entities.iter().any(|e| e.kind.as_spline().is_some()) || !s.texts.is_empty() || (s.origin != 0 || s.axis_pts.iter().any(|g| *g != 0)) && s.frame == 0 {
+        // A SKETCH WITH A SPLINE has the loops round what moved made again, as any: the regions inside the window of the
+        // change are laid with the spline in them, so the fill follows the drag. Made whole every frame, a closed spline of
+        // 39 nodes and its offset took 60 ms a frame; the release solves and rebuilds the sketch whole (`finish_point_drag`),
+        // and the open chain of a spline, which the loops round a change do not make, comes back with it.
+        // a frame of reference to be made first (`ensure_frame` in `regen_sketch`), text: rebuilt whole
+        if !s.texts.is_empty() || (s.origin != 0 || s.axis_pts.iter().any(|g| *g != 0)) && s.frame == 0 {
             return self.regen_sketch(si);
         }
         if self.detach_geometry_from_origin(si) || self.sketches[si].pin_frame() {
