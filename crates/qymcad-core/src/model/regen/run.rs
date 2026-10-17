@@ -374,10 +374,13 @@ impl Project {
             // falls through to the heuristic (the nearest co-directed face) and the feature may land on the
             // wrong one. The node is warned about without failing the build, so the reason a rebuild came out
             // differently is visible.
+            let mut face_lost: Option<crate::errors::CoreError> = None;
             if needs && kind.body().is_some() {
                 for inp in kind.inputs() {
                     if let Some(pb) = self.sketch_face_ref_lost(inp) {
-                        report.errors.push((node_id, crate::errors::CoreError::SketchFaceRefLost { sketch: inp, body: pb }));
+                        let e = crate::errors::CoreError::SketchFaceRefLost { sketch: inp, body: pb };
+                        face_lost = Some(e.clone());
+                        report.errors.push((node_id, e));
                     }
                 }
             }
@@ -640,6 +643,15 @@ impl Project {
                         report.errors.push((node_id, crate::errors::CoreError::BodyInPieces));
                         clear = false;
                     }
+                }
+            }
+
+            // A NODE WHOSE SKETCH LOST THE FACE IT STOOD ON AND THEN REFUSED says the cause, not what followed from it.
+            // Measured on the case example: an edit took away the wall the sketch of a cut stood on, and the cut, drawn
+            // where the wall was, said that it removed nothing.
+            if !clear {
+                if let Some(e) = face_lost {
+                    self.regen_errors.insert(node_id, e);
                 }
             }
 
