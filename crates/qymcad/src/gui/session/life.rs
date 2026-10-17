@@ -136,7 +136,7 @@ impl Session {
             false
         });
         if let Err(late) = came {
-            panic!("{what} {} within {deadline:?}: {late}", qymcad_core::time_budget::SAID_NOT_IN_TIME);
+            panic!("{what} {}, {deadline:?} given: {late}", qymcad_core::time_budget::SAID_NOT_IN_TIME);
         }
         self.settle()
     }

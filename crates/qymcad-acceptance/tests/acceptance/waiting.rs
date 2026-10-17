@@ -97,19 +97,29 @@ probe! {
 
 probe! {
     /// REAL TIME PASSES WHILE A PERSON WAITS: the autosave, timed by the wall clock, writes its copy.
+    ///
+    /// The copy is looked for too early under a period of an hour, where no load of the machine can bring it: the
+    /// autosave writes at a tick of its period after an edit, and the ticks run from when the program started, not
+    /// from the edit - so right after an edit under a period of 1 s the copy may be there already, and under a load of
+    /// 25-28 it was, two runs of four. An autosave that writes at once is still caught: the extrude's Enter waits for
+    /// the program to come to rest, a write in the background included.
     fn the_wall_clock_moves_while_a_person_waits() {
         let path = scratch("the_wall_clock.qcad");
         let copy = std::path::Path::new(&path).with_extension("autosave.qcad");
         let mut s = Session::start();
         build::block(&mut s);
         build::save_as(&mut s, &path);
-        let (windows, settings, every) = (s.word("menu-windows"), s.word("menu-settings"), s.word("settings-autosave"));
-        s.menu(&[&windows, &settings]);
-        s.fill(&every, "1").key(Key::Enter);
-        let title = s.word("win-settings");
-        s.close_window(&title);
+        let autosave_every = |s: &mut Session, seconds: &str| {
+            let (windows, settings, every) = (s.word("menu-windows"), s.word("menu-settings"), s.word("settings-autosave"));
+            s.menu(&[&windows, &settings]);
+            s.fill(&every, seconds).key(Key::Enter);
+            let title = s.word("win-settings");
+            s.close_window(&title);
+        };
+        autosave_every(&mut s, "3600");
         extrude_to(&mut s, "20");
-        assert!(!copy.exists(), "the autosave copy was written before any time passed");
+        assert!(!copy.exists(), "the autosave copy was written right after an edit, with a period of an hour");
+        autosave_every(&mut s, "1");
         let what = format!("the autosave of 1 s to write {} beside unsaved work", copy.display());
         s.wait_for(&what, Duration::from_secs(30), |_| copy.exists());
     }
