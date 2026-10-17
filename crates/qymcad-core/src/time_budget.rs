@@ -54,7 +54,8 @@ pub struct Cost {
     pub work: Duration,
     /// The clock on the wall, from start to end.
     pub wall: Duration,
-    /// The time on a processor: of the thread, or of every thread of the process.
+    /// The time on a processor: of the thread - read to a tick of the scheduler, a few milliseconds, as the system
+    /// counts a running thread's time at its ticks - or of every thread of the process, to 10 ms.
     pub cpu: Duration,
     /// How long the threads stood ready to run with no processor free for them: the share the machine gave to others.
     pub waited: Duration,
