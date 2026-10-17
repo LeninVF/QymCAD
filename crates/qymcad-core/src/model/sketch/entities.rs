@@ -1123,13 +1123,12 @@ impl Project {
         // equal end radii plus tangency of both side lines to both ends (i1 to i4 are the tangency points).
         // That keeps the sides parallel to the centreline and tangentially smooth, so the slot holds its shape
         // under the solver.
-        let cs = &mut self.sketches[si].constraints;
-        cs.push(Constraint::EqualRadius { c1, c2 });
-        cs.push(Constraint::Tangent { a: i1, b: i2, c: c1, r });
-        cs.push(Constraint::Tangent { a: i1, b: i2, c: c2, r });
-        cs.push(Constraint::Tangent { a: i4, b: i3, c: c1, r });
-        cs.push(Constraint::Tangent { a: i4, b: i3, c: c2, r });
-        let own: Vec<Constraint> = cs[cs.len() - 5..].to_vec();
+        let mut own = vec![Constraint::EqualRadius { c1, c2 }];
+        // each side touches each end, by the touching their kinds take (`tangency`)
+        for pair in [[curves[0], curves[3]], [curves[0], curves[1]], [curves[2], curves[3]], [curves[2], curves[1]]] {
+            own.extend(self.tangency(si, pair));
+        }
+        self.sketches[si].constraints.extend(own.iter().cloned());
         let id = self.alloc_id();
         self.sketches[si].figures.push(SketchFigure { id, shape: FigureShape::Slot, curves, own });
         self.regen_sketch(si);

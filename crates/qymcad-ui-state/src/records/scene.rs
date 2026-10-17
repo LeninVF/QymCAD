@@ -339,14 +339,6 @@ pub enum DimRef {
     Curve(Id),
 }
 
-/// A base edge for building tangents (a tangent arc or a tangent circle): either a straight line (with ends a
-/// and b) or a circle or arc (a centre plus a radius).
-#[derive(Clone, Copy, PartialEq)]
-pub enum EdgeRef {
-    Line { a: Id, b: Id },
-    Circle { center: Id, r: f64 },
-}
-
 /// The sketch's diagnostics in one piece: the degrees of freedom and the redundancy, the free points, THE ARGUING
 /// SET of constraints and the redundant ones. Computed in a single pass in `sketch_diag`.
 /// The diagnostics of one sketch and what they were computed for.

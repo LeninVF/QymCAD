@@ -36,34 +36,6 @@ impl Project {
         Some(eid)
     }
 
-    /// THE CONSTRAINTS THAT MAKE CURVES `one` AND `other` OF SKETCH `si` TOUCH: the touching itself, with the place it
-    /// stands at now, and an end of either put on the other where the place is past that end. Empty where either is no
-    /// curve of the sketch.
-    pub fn tangency(&self, si: usize, [one, other]: [Id; 2]) -> Vec<Constraint> {
-        let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        let (Some(e1), Some(e2)) = (s.entity(one), s.entity(other)) else { return Vec::new() };
-        let (r1, r2) = (curve_ref_of(e1), curve_ref_of(e2));
-        let near = crate::solver::touching_places(&s.points, &self.entity_radii(si), [&r1, &r2], None);
-        // the end the touching comes past, of the first of the two it comes past: one end held on the other curve is the
-        // whole of a touching at an end, and both held were one more than the two can meet
-        let past = |e: &SketchEntity, place: f64| {
-            let [start, finish] = entity_ends(e)?;
-            if place < 0.0 {
-                Some(start)
-            } else if place > 1.0 {
-                Some(finish)
-            } else {
-                None
-            }
-        };
-        let end = near.and_then(|[t1, t2]| past(e1, t1).map(|p| Constraint::PointOnCurve { p, on: r2.clone() }).or_else(|| past(e2, t2).map(|p| Constraint::PointOnCurve { p, on: r1.clone() })));
-        let end_id = match &end {
-            Some(Constraint::PointOnCurve { p, .. }) => Some(*p),
-            _ => None,
-        };
-        std::iter::once(Constraint::TangentCurves { one: r1, other: r2, near, end: end_id }).chain(end).collect()
-    }
-
     /// WHERE DIMENSION `c` OF SKETCH `si`, A DISTANCE TO A CURVE, IS MEASURED: its two ends, the first on what it is
     /// measured from. `None` for any other constraint.
     pub fn curve_distance_ends(&self, si: usize, c: &Constraint) -> Option<[Point2; 2]> {

@@ -1,5 +1,6 @@
 //! THE CONSTRAINTS of a sketch: laid, refused, offered on the bar.
 
+use qymcad_core::model::curve::kinds::CurveClass;
 use qymcad_ui_state::Notice;
 use super::*;
 
@@ -99,21 +100,18 @@ pub fn try_constraint_inner(
             }
         }
         9 => {
-            // tangency: a line plus a circle, the line touching it at a point of its own (`touch_point`)
-            let rounds = qymcad_ui_state::sel_circle_centers(project, sel_sk, si);
-            if let (Some((la, lb)), Some((cc, rr))) = (lines.first().copied(), qymcad_ui_state::sel_circle_cr(project, sel_sk, si)) {
-                new.push(Constraint::Tangent { a: la, b: lb, c: cc, r: rr });
-                let toward = qymcad_ui_state::sketch_pt(project, si, cc);
-                if let Some(p) = toward.and_then(|at| touch_point(project, si, sel_sk, (la, lb), at)) {
-                    new.push(Constraint::PointOnCircle { p, c: cc });
+            // tangency: two curves of any kind, the touching their kinds take (`tangency`) - a line and a circle, two round
+            // curves, an ellipse, a spline - an end put on the other curve where the touching would come past it
+            if let [one, other, ..] = &picked[..] {
+                let pair = [one.id, other.id];
+                let mut touch = project.tangency(si, pair);
+                // a line picked at its middle is carried onto the other by its middle, not by an end - where the two touch
+                // at all
+                if let Some(middle) = (!touch.is_empty()).then(|| middle_touch(project, si, sel_sk, pair)).flatten() {
+                    touch.retain(|c| !matches!(c, Constraint::PointOnCircle { .. } | Constraint::PointOnCurve { .. }));
+                    touch.push(middle);
                 }
-            } else if let [c1, c2, ..] = rounds[..] {
-                // two circles or arcs touch from outside or from inside, whichever they stand nearer to
-                new.push(Constraint::CircleTangent { c1, c2, external: touches_outside(project, si, [c1, c2]) });
-            } else if let [one, other, ..] = &picked[..] {
-                // any other two curves: an ellipse, a spline, with a line or a circle or one another - touching on
-                // themselves, an end put on the other curve where the touching would come past it
-                new.extend(project.tangency(si, [one.id, other.id]));
+                new.extend(touch);
             }
         }
         10 => {
@@ -238,24 +236,6 @@ pub fn try_constraint_inner(
     true
 }
 
-/// WHETHER TWO CIRCLES OR ARCS, by their centres, stand nearer to touching from outside than from inside.
-fn touches_outside(project: &Project, si: usize, centres: [Id; 2]) -> bool {
-    let s = &project.sketches[si];
-    let at = |id: Id| s.point(id).map(|q| Point2::new(q.x, q.y));
-    let radius = |c: Id| {
-        s.entities
-            .iter()
-            .filter(|e| qymcad_core::model::entity_centre(e) == Some(c))
-            .find_map(|e| qymcad_core::model::curve::Curve::of(s, e))
-            .map(|k| k.at(0.0).dist(at(c).unwrap_or(k.at(0.0))))
-            .unwrap_or(0.0)
-    };
-    let [c1, c2] = centres;
-    let (Some(p1), Some(p2)) = (at(c1), at(c2)) else { return true };
-    let (d, r1, r2) = (p1.dist(p2), radius(c1), radius(c2));
-    ((r1 + r2) - d).abs() <= ((r1 - r2).abs() - d).abs()
-}
-
 /// TURN ELLIPSE `e` WHOLE ABOUT ITS CENTRE until its major axis lies `level`, the nearer way round.
 fn turn_ellipse_to_level(project: &mut Project, si: usize, e: &qymcad_core::model::SketchEntity, level: Level) {
     let Some([c, ma, _]) = qymcad_core::model::ellipse_frame(e) else { return };
@@ -341,10 +321,10 @@ pub fn pick_could_take(project: &Project, si: usize, sel_sk: &qymcad_ui_state::S
         .map(|&(k, id)| match k {
             0 => PickedAs::Point,
             3 => PickedAs::Straight,
-            _ => match s.entity(id).map(|e| &e.kind) {
-                Some(kind) if kind.as_line().is_some() => PickedAs::Straight,
-                Some(kind) if kind.as_circle().is_some() || kind.as_arc().is_some() => PickedAs::Round,
-                Some(kind) if kind.as_ellipse().is_some() => PickedAs::Oval,
+            _ => match s.entity(id).map(|e| e.kind.class()) {
+                Some(CurveClass::Straight) => PickedAs::Straight,
+                Some(CurveClass::Round) => PickedAs::Round,
+                Some(CurveClass::Oval) => PickedAs::Oval,
                 _ => PickedAs::Other,
             },
         })
@@ -360,7 +340,8 @@ pub fn pick_could_take(project: &Project, si: usize, sel_sk: &qymcad_ui_state::S
         6 => all(&[PickedAs::Point]),
         7 => all(&[PickedAs::Straight]),
         8 => all(&[PickedAs::Point, PickedAs::Round, PickedAs::Oval]),
-        9 => all(&[PickedAs::Straight, PickedAs::Round, PickedAs::Oval, PickedAs::Other]),
+        // two straights do not touch
+        9 => all(&[PickedAs::Straight, PickedAs::Round, PickedAs::Oval, PickedAs::Other]) && kinds.iter().filter(|k| **k == PickedAs::Straight).count() < 2,
         10 => all(&[PickedAs::Point, PickedAs::Straight]),
         _ => true,
     }

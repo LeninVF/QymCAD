@@ -162,6 +162,15 @@ impl From<SplineParts<'_>> for EntityKind {
     }
 }
 
+/// THE CLASS OF A CURVE A CONSTRAINT TAKES IT AS: a straight, a round curve, an ellipse, or a curve of no class of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CurveClass {
+    Straight,
+    Round,
+    Oval,
+    Free,
+}
+
 impl EntityKind {
     /// THE LINE IT IS, by its ends; `None` for any other kind.
     pub fn as_line(&self) -> Option<LineParts> {
@@ -213,6 +222,17 @@ impl EntityKind {
         match self {
             EntityKind::Spline { nodes, handles, ends } => Some(SplineMut { nodes, handles, ends }),
             _ => None,
+        }
+    }
+
+    /// HOW A CONSTRAINT TAKES A CURVE OF THIS KIND: as a straight, a round curve, an ellipse or an arc of one, or a curve
+    /// of no class of its own - a spline.
+    pub fn class(&self) -> CurveClass {
+        match self {
+            EntityKind::Line { .. } => CurveClass::Straight,
+            EntityKind::Circle { .. } | EntityKind::Arc { .. } => CurveClass::Round,
+            EntityKind::Ellipse { .. } => CurveClass::Oval,
+            EntityKind::Spline { .. } => CurveClass::Free,
         }
     }
 

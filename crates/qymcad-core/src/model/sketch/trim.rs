@@ -40,56 +40,10 @@ impl Project {
     /// two by chance: the list lets a person name the one meant.
     pub fn overlapping_curves(&self, si: usize, eid: Id) -> Vec<Id> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        let at = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-        let Some(me) = s.entities.iter().find(|e| e.id == eid) else { return Vec::new() };
-        const TOL: f64 = 1e-6;
-        // a stretch along the straight through `a` and `b` that `p` and `q` span, when both stand on it
-        let line_span = |a: (f64, f64), b: (f64, f64), p: (f64, f64), q: (f64, f64)| -> Option<Stretch> {
-            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-            let l = dx.hypot(dy);
-            let off = |r: (f64, f64)| ((r.0 - a.0) * dy - (r.1 - a.1) * dx).abs() / l;
-            if l < TOL || off(p) > TOL || off(q) > TOL {
-                return None;
-            }
-            let t = |r: (f64, f64)| ((r.0 - a.0) * dx + (r.1 - a.1) * dy) / l;
-            Some(Stretch { from: t(p).min(t(q)), to: t(p).max(t(q)) })
-        };
-        let round = |e: &super::SketchEntity| -> Option<OnCircle> {
-            let circle = e.kind.circle_by(&|id| at(id).map(|(x, y)| Point2::new(x, y)))?;
-            let c = at(circle.center)?;
-            let ang = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
-            let span = match e.kind.as_arc() {
-                Some(arc) => {
-                    let (pa, pb) = (at(arc.a)?, at(arc.b)?);
-                    let (from, to) = if arc.ccw { (ang(pa), ang(pb)) } else { (ang(pb), ang(pa)) };
-                    Some(Stretch { from, to })
-                }
-                None => None,
-            };
-            Some(OnCircle { centre: c, r: circle.r, span })
-        };
-        // whether an angle stands on a counter-clockwise stretch of a circle (none: the whole of it)
-        let inside = |span: Option<Stretch>, t: f64| match span {
-            None => true,
-            Some(Stretch { from, to }) => (t - from).rem_euclid(std::f64::consts::TAU) <= (to - from).rem_euclid(std::f64::consts::TAU),
-        };
-        // whether two stretches of one circle share more than a point: sampled along the circle
-        let share = |x: Option<Stretch>, y: Option<Stretch>| -> bool {
-            (0..64).map(|k| f64::from(k) / 64.0 * std::f64::consts::TAU).any(|t| inside(x, t) && inside(y, t) && inside(x, t + 0.01) && inside(y, t + 0.01))
-        };
-        let over = |e: &super::SketchEntity| -> bool {
-            match (me.kind.as_line(), e.kind.as_line()) {
-                (Some(mine), Some(other)) => {
-                    let (Some(a), Some(b), Some(c), Some(d)) = (at(mine.a), at(mine.b), at(other.a), at(other.b)) else { return false };
-                    let Some(mine) = line_span(a, b, a, b) else { return false };
-                    line_span(a, b, c, d).is_some_and(|other| other.to.min(mine.to) - other.from.max(mine.from) > TOL)
-                }
-                _ => match (round(me), round(e)) {
-                    (Some(x), Some(y)) => (x.centre.0 - y.centre.0).hypot(x.centre.1 - y.centre.1) < TOL && (x.r - y.r).abs() < TOL && share(x.span, y.span),
-                    _ => false,
-                },
-            }
-        };
+        let Some(me) = s.entity(eid).and_then(|e| Curve::of(s, e)) else { return Vec::new() };
+        // the curves of any kind lying along this one over more than a point (`Curve::lies_along`), either way round: a
+        // short line on a long one lies along it, and the long one along the short one only where they overlap
+        let over = |e: &SketchEntity| Curve::of(s, e).is_some_and(|c| me.lies_along(&c) || c.lies_along(&me));
         std::iter::once(eid).chain(s.entities.iter().filter(|e| e.id != eid && over(e)).map(|e| e.id)).collect()
     }
 

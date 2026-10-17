@@ -1,6 +1,9 @@
 //! THE MARKED PLACES OF A CURVE a person snaps to: its quadrants, and the point half way along it.
 use super::*;
 
+/// How far a curve may stand off another and still lie along it, in mm.
+const ALONG: f64 = 1e-6;
+
 impl Curve {
     /// THE QUADRANTS OF THE CURVE that lie on it: the four points of a circle or an arc at 0, 90, 180 and 270 deg, the
     /// four ends of the axes of an ellipse or an arc of one; none for a line or a spline.
@@ -50,6 +53,25 @@ impl Curve {
         };
         // a place on the circle or the ellipse past the ends of an arc of it is no place the curve is met
         ts.into_iter().filter(|t| self.straight() || self.nearest(Point2::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)).off < 1e-6).collect()
+    }
+
+    /// WHETHER THE CURVE LIES ALONG `other` OVER MORE THAN A POINT, of whatever kinds the two are: a stretch of it - between
+    /// the places it is laid out at and the places nearest the ends of the other - stands on the other at both its ends and
+    /// its middle, within 1e-6 mm. Two lines along one straight that overlap, two arcs of one circle that share a stretch,
+    /// a spline drawn twice.
+    pub fn lies_along(&self, other: &Curve) -> bool {
+        let on = |p: Point2| other.nearest(p).off < ALONG;
+        let mut places = self.places();
+        places.extend(other.ends().map(|e| self.nearest(e).t));
+        places.sort_by(f64::total_cmp);
+        places.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        places.windows(2).any(|w| on(self.at(w[0])) && on(self.at(w[1])) && on(self.at(0.5 * (w[0] + w[1]))))
+    }
+
+    /// THE POINTS WHERE THE CURVE MEETS THE SEGMENT FROM `a` TO `b`, of whatever kind the curve is - a spline as well as a
+    /// line, a circle or an ellipse - within both.
+    pub fn meets_segment(&self, [a, b]: [Point2; 2]) -> Vec<Point2> {
+        self.meet(&Curve::Line { a, b }).into_iter().map(|m| m.at).collect()
     }
 
     /// Whether the curve is a straight line.

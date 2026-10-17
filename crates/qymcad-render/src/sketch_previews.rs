@@ -110,9 +110,7 @@ pub fn draw_sketch_preview(pn: &Painting, painter: &egui::Painter, rect: Rect) {
             // a tangent arc: once started (at the end of a curve), an arc from s to the cursor, smooth into the base
             if pn.tool.pts.len() == 1 {
                 let s = pn.tool.pts[0];
-                if let Some((t, _)) = qymcad_ui_state::edit_si(pn.project, &pn.sketch_ses)
-                    .and_then(|si| qymcad_pick::arc_tangent_ref(&DrawCtx { cam: &pn.cam, set: pn.set, scheme: pn.scheme, project: pn.project, active_path: pn.active_path }, si, s))
-                {
+                if let Some(t) = qymcad_ui_state::edit_si(pn.project, &pn.sketch_ses).and_then(|si| pn.project.way_on_from_end(si, s)).map(|on| (on.way.x, on.way.y)) {
                     if let Some((cx, cy, r, ccw)) = qymcad_ui_state::tangent_arc(s, t, cur) {
                         let a0 = (s.y - cy).atan2(s.x - cx);
                         let mut a1 = (cur.y - cy).atan2(cur.x - cx);

@@ -129,3 +129,12 @@ mod a_spline_closes_on_its_first_node;
 
 #[cfg(test)]
 mod a_filleted_spline_drags_lightly;
+
+#[cfg(test)]
+mod a_line_drawn_by_a_curve_touches_it;
+
+#[cfg(test)]
+mod a_tangent_arc_goes_on_from_any_curve;
+
+#[cfg(test)]
+mod a_crossing_of_any_curve_is_snapped_to;

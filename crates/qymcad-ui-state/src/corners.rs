@@ -48,14 +48,15 @@ pub(crate) fn try_modify_in(ed: Editing, sel_sk: &mut SketchSelection, sk_pat: S
             ed.project.array_circular(si, &eids, cx, cy, sk_pat.count, sk_pat.angle);
             true
         }
-        EditTool::Fillet => {
-            eids.len() >= 2 && ed.project.fillet_lines_by(si, eids[0], eids[1], fillet_size(tool_prefs)) && {
-                sel_sk.clear(); // the selection and whatever was waiting for it
-                true
-            }
-        }
-        EditTool::Chamfer => {
-            eids.len() >= 2 && ed.project.chamfer_lines(si, eids[0], eids[1], chamfer_legs(tool_prefs)) && {
+        // the corner the first two chosen curves make, cut by the one way every corner is (`cut_corner_set`)
+        EditTool::Fillet | EditTool::Chamfer => {
+            let corner = (eids.len() >= 2).then(|| ed.project.corner_of_pair(si, eids[0], eids[1]).map(|p| CornerAt::of(p, [eids[0], eids[1]]))).flatten();
+            let cut = if op == EditTool::Fillet {
+                qymcad_core::model::CornerCut::Fillet(fillet_size(tool_prefs))
+            } else {
+                qymcad_core::model::CornerCut::Chamfer(chamfer_legs(tool_prefs))
+            };
+            corner.is_some_and(|c| ed.project.cut_corner_set(si, &[c], cut, None) == 1) && {
                 sel_sk.clear(); // the selection and whatever was waiting for it
                 true
             }

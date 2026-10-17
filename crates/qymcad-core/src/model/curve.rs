@@ -22,6 +22,7 @@ mod meet;
 pub mod refs;
 mod shift;
 mod stretch;
+mod touch;
 pub(in crate::model) use arrange::Arranged;
 pub(crate) use cut::Trimmed;
 pub use blend::{centres_touching, chamfer, radius_in, rounding, Arm, Half, Rounding};
@@ -29,6 +30,7 @@ pub use marks::OvalAxes;
 pub use meet::Meet;
 pub use shift::{Map, OFFSET_TOLERANCE};
 pub use stretch::End;
+pub use touch::WayOn;
 
 /// How many even places of each span of a spline the search for the nearest place starts from.
 const NEAR_LOOKS: usize = 8;

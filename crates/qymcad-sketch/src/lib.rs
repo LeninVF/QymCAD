@@ -302,20 +302,11 @@ fn angle_of(project: &Project, text: &str) -> Result<f64, String> {
     }
 }
 
-/// The size of every line and circle of sketch `si`, in the order of its entities: a line's length, a circle's
-/// radius. Nothing for an arc or an ellipse, whose size its points hold.
+/// The size of every curve of sketch `si`, in the order of its entities: its length, of whatever kind it is - what a
+/// constraint must not take down to nothing.
 fn shape_sizes(project: &Project, si: usize) -> Vec<f64> {
     let Some(s) = project.sketches.get(si) else { return Vec::new() };
-    let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
-    let at = |id: Id| points_by_id.get(&id).copied().map(|p| (p.x, p.y));
-    s.entities
-        .iter()
-        .filter_map(|e| match (e.kind.as_line(), e.kind.as_circle()) {
-            (Some(l), _) => Some(at(l.a).zip(at(l.b)).map_or(0.0, |(a, b)| (a.0 - b.0).hypot(a.1 - b.1))),
-            (_, Some(c)) => Some(c.r),
-            _ => None,
-        })
-        .collect()
+    s.entities.iter().map(|e| qymcad_core::model::curve::Curve::of(s, e).map_or(0.0, |c| c.length())).collect()
 }
 
 /// Which way a line is turned to lie: level, or upright.
@@ -380,30 +371,19 @@ fn middles_for(project: &mut Project, si: usize, sel_sk: &mut qymcad_ui_state::S
     }
 }
 
-/// WHERE A LINE MADE TANGENT TOUCHES THE CIRCLE, when that is a point of the line and not only of the straight line it
-/// lies on: the middle of a line picked at its middle (`at_middle`), held there so the line is carried onto the circle by
-/// it; or, where the foot of the centre falls off the line, the end nearer to it, so the line runs on to the circle.
-/// Tangency alone touches the circle with the straight line the segment lies on: a line apart from the circle turned to
-/// it and stayed apart. Reported behaviour: "the line is not lengthened; with the centre of the line picked, the line is
-/// not carried onto the circle by its middle". None where the foot already falls on the line.
-fn touch_point(project: &mut Project, si: usize, sel_sk: &qymcad_ui_state::SketchSelection, (a, b): (Id, Id), toward: Point2) -> Option<Id> {
-    if sel_sk.at_middle.iter().any(|&e| line_ends_of(project, si, e) == Some((a, b))) {
-        return Some(qymcad_ui_state::materialize_ref(project, si, qymcad_ui_state::SketchRef::Midpoint(a, b)));
-    }
-    let (pa, pb, c) = (qymcad_ui_state::sketch_pt(project, si, a)?, qymcad_ui_state::sketch_pt(project, si, b)?, toward);
-    let (dx, dy) = (pb.x - pa.x, pb.y - pa.y);
-    let len2 = dx * dx + dy * dy;
-    if len2 < 1e-18 {
-        return None;
-    }
-    let t = ((c.x - pa.x) * dx + (c.y - pa.y) * dy) / len2;
-    if t < 0.0 {
-        Some(a)
-    } else if t > 1.0 {
-        Some(b)
-    } else {
-        None
-    }
+/// THE MIDDLE OF A CURVE PICKED AT ITS MIDDLE (`at_middle`) for a tangency, and the other curve picked: the middle is
+/// held on the other, so the curve is carried onto it by its middle. Tangency alone touches the other with the straight
+/// line a segment lies on: a line apart from a circle turned to it and stayed apart. Reported behaviour: "with the centre
+/// of the line picked, the line is not carried onto the circle by its middle". `None` where no curve was picked at its
+/// middle.
+fn middle_touch(project: &mut Project, si: usize, sel_sk: &qymcad_ui_state::SketchSelection, picked: [Id; 2]) -> Option<qymcad_core::model::Constraint> {
+    let (mid, other) = picked.iter().enumerate().find_map(|(k, &eid)| {
+        let (a, b) = line_ends_of(project, si, eid)?;
+        sel_sk.at_middle.contains(&eid).then_some(((a, b), picked[1 - k]))
+    })?;
+    let p = qymcad_ui_state::materialize_ref(project, si, qymcad_ui_state::SketchRef::Midpoint(mid.0, mid.1));
+    let on = project.sketches[si].entity(other).map(qymcad_core::model::curve_ref_of)?;
+    Some(qymcad_core::model::Constraint::PointOnCurve { p, on })
 }
 
 /// Every point belonging to the current sketch selection: the points themselves plus the ends and

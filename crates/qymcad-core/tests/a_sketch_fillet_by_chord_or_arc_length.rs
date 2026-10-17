@@ -97,7 +97,8 @@ fn a_fillet_by_its_radius_its_chord_or_its_arc_length() {
     // two picked lines rounded by an arc of 5, as the editing tool does it
     let (mut p, si, _) = corner();
     let lines: Vec<u64> = p.sketches[si].entities.iter().map(|e| e.id).collect();
-    if !p.fillet_lines_by(si, lines[0], lines[1], FilletSize { by: FilletBy::ArcLength, value: 5.0 }) {
+    let picked = p.corner_of_pair(si, lines[0], lines[1]).map(|pc| qymcad_core::model::CornerAt::of(pc, [lines[0], lines[1]]));
+    if !picked.is_some_and(|c| p.cut_corner_set(si, &[c], qymcad_core::model::CornerCut::Fillet(FilletSize { by: FilletBy::ArcLength, value: 5.0 }), None) == 1) {
         sins.push("two picked lines by an arc of 5 refused".to_string());
     } else if !measure(&p, si).is_some_and(|m| near(m.arc, 5.0) && near(m.radius, 10.0 / pi)) {
         sins.push(format!("two picked lines by an arc of 5: radius / chord / arc {:?}", measure(&p, si).map(|m| (m.radius, m.chord, m.arc))));

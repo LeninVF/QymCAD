@@ -194,22 +194,6 @@ pub struct CurveExtension {
     pub kept: EndKept,
 }
 
-/// A STRETCH OF A STRAIGHT OR OF A CIRCLE, from one parameter to the other: a length along a line, or angles taken
-/// counter-clockwise round a circle.
-#[derive(Clone, Copy)]
-pub(crate) struct Stretch {
-    from: f64,
-    to: f64,
-}
-
-/// A ROUND CURVE BY ITS CIRCLE: the centre, the radius, and the stretch of it an arc takes (none for a whole circle).
-#[derive(Clone, Copy)]
-pub(crate) struct OnCircle {
-    centre: (f64, f64),
-    r: f64,
-    span: Option<Stretch>,
-}
-
 /// WHERE TWO LINES CROSS: the two lines and the point of their crossing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LinesCrossing {

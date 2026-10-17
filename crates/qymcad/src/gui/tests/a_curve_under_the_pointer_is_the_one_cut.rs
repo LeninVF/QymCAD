@@ -16,10 +16,13 @@ fn trim_takes_the_spline_under_the_pointer_and_not_the_line_beside_it() {
     let si = app.create_sketch_on(SketchPlane::default());
     app.enter_sketch_edit(si);
     let mut hand = Hand::new(&mut app);
-    // a spline over (30, 31), and a line along y = 30 a millimetre - 6 px - below it, within the grab of a curve (8 px)
+    // a spline over (30, 31), and a line along y = 30 a millimetre - 6 px - below it, within the grab of a curve (8 px),
+    // drawn with no ties, so it is not made to touch the spline it runs along
     hand.sk_tool(9).click2d(20.0, 32.0).click2d(30.0, 31.0).double_click2d(40.0, 32.0);
     hand.key(egui::Key::Escape).key(egui::Key::Escape);
-    hand.sk_tool(1).click2d(10.0, 30.0).double_click2d(50.0, 30.0);
+    hand.sk_tool(1);
+    assert!(hand.press_word(&qymcad_i18n::tr("opt-no-ties-short"), egui::pos2(400.0, 0.0)), "no box of no ties on the bar of the line");
+    hand.click2d(10.0, 30.0).double_click2d(50.0, 30.0);
     hand.key(egui::Key::Escape).key(egui::Key::Escape);
     assert!(hand.press_hint(&qymcad_i18n::tr("tb-trim-hint")), "no trim button");
     hand.close_window();

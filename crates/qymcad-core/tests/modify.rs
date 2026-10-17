@@ -98,7 +98,7 @@ fn circular_array_makes_copies() {
 fn fillet_rounds_corner() {
     let (mut p, si, eids) = rect_sketch();
     // Two adjacent sides of the rectangle, sharing a vertex.
-    let ok = p.fillet_lines(si, eids[0], eids[1], 2.0);
+    let ok = p.fillet_at_pair(si, (eids[0], eids[1]), 2.0);
     assert!(ok, "the fillet must apply");
     // The contour stays closed and grows more complex: an arc appears, so there are more points.
     let c = &p.contours[p.contour_index(p.sketches[si].contour_ids[0]).unwrap()];
@@ -108,7 +108,7 @@ fn fillet_rounds_corner() {
 #[test]
 fn chamfer_cuts_corner() {
     let (mut p, si, eids) = rect_sketch();
-    let ok = p.chamfer_lines(si, eids[0], eids[1], qymcad_core::model::ChamferLegs::equal(2.0));
+    let ok = p.chamfer_lines_of_pair(si, (eids[0], eids[1]), qymcad_core::model::ChamferLegs::equal(2.0), None);
     assert!(ok, "the chamfer must apply");
     let c = &p.contours[p.contour_index(p.sketches[si].contour_ids[0]).unwrap()];
     assert!(c.closed && c.points.len() == 5, "five corners after a chamfer: {}", c.points.len());
@@ -144,7 +144,7 @@ fn trim_removes_middle_segment() {
 #[test]
 fn fillet_radius_change_keeps_shape() {
     let (mut p, si, eids) = rect_sketch(); // A rectangle from 0 to 10.
-    p.fillet_lines(si, eids[0], eids[1], 2.0);
+    p.fillet_at_pair(si, (eids[0], eids[1]), 2.0);
     // Find the arc.
     let arc = p.sketches[si]
         .entities
@@ -167,7 +167,7 @@ fn fillet_radius_change_keeps_shape() {
 fn fillet_stays_tangent_after_dimensioning() {
     use qymcad_core::model::Constraint;
     let (mut p, si, eids) = rect_sketch(); // From 0 to 10.
-    p.fillet_lines(si, eids[0], eids[1], 2.0);
+    p.fillet_at_pair(si, (eids[0], eids[1]), 2.0);
     // Stretch the left side to 20 mm; its corners are intact, since the filleted corner is at (10,0).
     let pts: Vec<(u64, f64, f64)> = p.sketches[si].points.iter().map(|q| (q.id, q.x, q.y)).collect();
     let bl = pts.iter().find(|(_, x, y)| x.abs() < 0.1 && y.abs() < 0.1).unwrap().0;
@@ -359,7 +359,7 @@ fn parametric_fillet_is_tangent_and_resizes_via_solver() {
     p.add_line_entity(si, 0.0, 0.0, 0.0, 12.0, qymcad_core::feature::Purpose::Real); // Vertical, sharing the corner at (0,0).
     let e1 = p.sketches[si].entities[0].id;
     let e2 = p.sketches[si].entities[1].id;
-    assert!(p.fillet_lines(si, e1, e2, 2.0), "the fillet must apply");
+    assert!(p.fillet_at_pair(si, (e1, e2), 2.0), "the fillet must apply");
 
     // For every tangency constraint, check that the distance from the centre to the line equals the arc radius.
     fn check_tangent(p: &Project, si: usize, want_r: f64) {
@@ -489,7 +489,7 @@ fn offset_loop_with_arc_keeps_arcs() {
 
     let (mut p, si, eids) = rect_sketch(); // From 0 to 10.
                                            // Round one corner, which puts an arc into the loop.
-    p.fillet_lines(si, eids[0], eids[1], 2.0);
+    p.fillet_at_pair(si, (eids[0], eids[1]), 2.0);
     let loop_eids: Vec<u64> = p.sketches[si].entities.iter().filter(|e| !e.construction).map(|e| e.id).collect();
     let arcs_before_offset = p.sketches[si].entities.iter().filter(|e| e.kind.as_arc().is_some()).count();
     assert_eq!(arcs_before_offset, 1, "one fillet arc in the loop");
@@ -549,7 +549,7 @@ fn fillet_has_single_radius_dim_no_linear() {
     // for the distance to the centre; a `Distance` used to be added as well.
     use qymcad_core::model::Constraint;
     let (mut p, si, eids) = rect_sketch();
-    p.fillet_lines(si, eids[0], eids[1], 3.0);
+    p.fillet_at_pair(si, (eids[0], eids[1]), 3.0);
     let rdims = p.sketches[si].constraints.iter().filter(|c| matches!(c, Constraint::Diameter { diam: false, .. })).count();
     let dists = p.sketches[si].constraints.iter().filter(|c| matches!(c, Constraint::Distance { .. })).count();
     assert_eq!(rdims, 1, "exactly one radius dimension");
@@ -788,7 +788,7 @@ fn fillet_curves_line_line() {
     p.add_line_entity(si, 0.0, 0.0, 0.0, 10.0, qymcad_core::feature::Purpose::Real);
     let e1 = p.sketches[si].entities[0].id;
     let e2 = p.sketches[si].entities[1].id;
-    assert!(p.fillet_curves(si, e1, e2, 2.0, 1.0, 1.0), "a line-to-line fillet must be built");
+    assert!(p.fillet_at_pair(si, (e1, e2), 2.0), "a line-to-line fillet must be built");
     let (center, a) = p.sketches[si]
         .entities
         .iter()
@@ -814,7 +814,7 @@ fn fillet_curves_line_arc_tangent() {
     let e1 = p.sketches[si].entities.iter().find(|e| e.kind.as_line().is_some()).unwrap().id;
     let e2 = p.sketches[si].entities.iter().find(|e| e.kind.as_arc().is_some()).unwrap().id;
     let r = 1.5;
-    assert!(p.fillet_curves(si, e1, e2, r, 1.0, 1.0), "a line-to-arc fillet must be built");
+    assert!(p.fillet_at_pair(si, (e1, e2), r), "a line-to-arc fillet must be built");
     // The new fillet is the arc whose centre is not (5,5).
     let rad_big = (50.0_f64).sqrt();
     let fillet_cen = p.sketches[si]

@@ -170,9 +170,15 @@ pub fn infer_on_segment(project: &mut Project, view: qymcad_ui_state::View2d, si
             project.add_constraint_if_independent(si, Constraint::Parallel { a: la, b: lb, c: a, d: b });
         }
     }
-    // 2c) TANGENT to the nearest circle or arc that is almost tangent already
-    if let Some((cen, r)) = qymcad_pick::nearest_tangent_circle(project, si, p1, p2) {
-        project.add_constraint_if_independent(si, Constraint::Tangent { a, b, c: cen, r });
+    // 2c) TANGENT to the curve of any kind it nearly touches already, by the touching their kinds take (`tangency`) - where
+    // it touches on the line itself: an end the touching would come past is not pulled onto the curve, as the line drawn
+    // by hand did not ask for it; a line started at the crossing of two circles was carried 0.26 mm off it
+    let line = project.sketches[si].entities.iter().find(|e| e.kind.as_line().is_some_and(|l| (l.a == a && l.b == b) || (l.a == b && l.b == a))).map(|e| e.id);
+    if let Some(touch) = line.and_then(|l| project.nearly_touching(si, [p1, p2], l).map(|c| project.tangency(si, [l, c]))) {
+        let on_the_line = !touch.iter().any(|c| matches!(c, Constraint::PointOnCircle { .. } | Constraint::PointOnCurve { .. }));
+        for tie in touch.into_iter().filter(|_| on_the_line) {
+            project.add_constraint_if_independent(si, tie);
+        }
     }
     // 2d) EQUAL LENGTH to the nearest line of the same length
     if let Some((la, lb)) = qymcad_pick::nearest_equal_line(project, si, p1, p2, a, b) {

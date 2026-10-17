@@ -379,11 +379,15 @@ pub fn sketch_tool_click_inner(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, 
             sk.tool.pts.push(w);
             if sk.tool.pts.len() == 2 {
                 let (s, e) = (sk.tool.pts[0], sk.tool.pts[1]);
-                if let Some((t, eref)) = qymcad_pick::arc_tangent_ref(&sk.draw(), si, s) {
-                    if let Some((cx, cy, r, ccw)) = qymcad_ui_state::tangent_arc(s, t, e) {
+                // the end of a curve of any kind the arc goes on from, smooth into it, held by the touching their kinds take
+                if let Some(on) = sk.project.way_on_from_end(si, s) {
+                    if let Some((cx, cy, _r, ccw)) = qymcad_ui_state::tangent_arc(s, (on.way.x, on.way.y), e) {
                         sk.project.add_arc_entity(si, Point2::new(cx, cy), Point2::new(s.x, s.y), Point2::new(e.x, e.y), winding(ccw), qymcad_core::feature::Purpose::of(con));
-                        let cen = sk.project.sketch_point_at(si, cx, cy, 1e-6);
-                        qymcad_ui_state::add_tangent_to_edge(&mut *sk.project, si, eref, cen, cx, cy, r);
+                        if let Some(arc) = sk.project.sketches[si].entities.last().map(|x| x.id) {
+                            for tie in sk.project.tangency(si, [arc, on.eid]) {
+                                sk.project.add_constraint_if_independent(si, tie);
+                            }
+                        }
                         sk.project.solve_sketch(si);
                         qymcad_ui_state::invalidate(&mut *sk.regen);
                         open_the_size_of_the_new_arc(sk, si, qymcad_core::feature::Purpose::of(con));

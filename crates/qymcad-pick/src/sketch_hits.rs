@@ -192,43 +192,6 @@ pub fn edit_target(pick: &PickCtx, rect: Rect, pos: Pos2, si: usize) -> Option<I
     curves_under(pick, rect, pos, si).first().copied()
 }
 
-/// The circle or arc that the segment p1-p2 is ALMOST TANGENT to (the distance from the centre to the
-/// line is about the radius, and the point of tangency lies inside the segment). Returns (the Id of the
-/// centre, the radius). For the automatic tangency.
-pub fn nearest_tangent_circle(project: &Project, si: usize, p1: Point2, p2: Point2) -> Option<(Id, f64)> {
-    let s = project.sketches.get(si)?;
-    let points_by_id: std::collections::HashMap<Id, &qymcad_core::model::SketchPoint> = s.points.iter().map(|p| (p.id, p)).collect(); // a table: these are looked up for every entity or constraint
-    let pt = |id: Id| points_by_id.get(&id).copied().map(|q| (q.x, q.y));
-    let (dx, dy) = (p2.x - p1.x, p2.y - p1.y);
-    let len = (dx * dx + dy * dy).sqrt();
-    if len < 1e-6 {
-        return None;
-    }
-    let mut best: Option<(f64, (Id, f64))> = None;
-    for e in &s.entities {
-        let (center, r) = if let Some(c) = e.kind.as_circle() {
-            (c.center, c.r)
-        } else if let Some(arc) = e.kind.as_arc() {
-            match (pt(arc.center), pt(arc.a)) {
-                (Some((cx, cy)), Some((ax, ay))) => (arc.center, ((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt()),
-                _ => continue,
-            }
-        } else {
-            continue;
-        };
-        let Some((cx, cy)) = pt(center) else { continue };
-        // the signed perpendicular distance from the centre to the line, plus where the projection
-        // falls on the segment
-        let dist = ((dx * (cy - p1.y) - dy * (cx - p1.x)) / len).abs();
-        let t = ((cx - p1.x) * dx + (cy - p1.y) * dy) / (len * len);
-        let err = (dist - r).abs();
-        if err < 0.06 * r && t > -0.1 && t < 1.1 && best.is_none_or(|(be, _)| err < be) {
-            best = Some((err, (center, r)));
-        }
-    }
-    best.map(|(_, v)| v)
-}
-
 /// The ends of an ADJACENT line (sharing an end with p1 or p2) whose length is about the length of the
 /// segment p1-p2 — for the automatic equal-length constraint. The requirement of adjacency plus a hard
 /// tolerance of 2% guard against false matches of length with distant unrelated geometry. The line's
@@ -388,38 +351,4 @@ pub fn sketch_at_3d(pn: &Painting, rect: Rect, screen: Pos2) -> Option<usize> {
         }
     }
     best.map(|(si, _)| si)
-}
-
-/// The tangent direction at the point `p` (the end of an existing line or arc), plus the base edge.
-/// For a tangent arc: the new arc starts off smoothly from the end of the previous curve.
-pub fn arc_tangent_ref(dc: &DrawCtx, si: usize, p: Point2) -> Option<((f64, f64), EdgeRef)> {
-    let s = dc.project.sketches.get(si)?;
-    let near = |q: Point2| (q.x - p.x).abs() < 1e-6 && (q.y - p.y).abs() < 1e-6;
-    let norm = |x: f64, y: f64| {
-        let l = (x * x + y * y).sqrt().max(1e-9);
-        (x / l, y / l)
-    };
-    for e in &s.entities {
-        if let Some(qymcad_core::model::LineParts { a, b }) = e.kind.as_line() {
-            if let (Some(pa), Some(pb)) = (sketch_pt(dc.project, si, a), sketch_pt(dc.project, si, b)) {
-                if near(pa) {
-                    return Some((norm(pa.x - pb.x, pa.y - pb.y), EdgeRef::Line { a, b }));
-                }
-                if near(pb) {
-                    return Some((norm(pb.x - pa.x, pb.y - pa.y), EdgeRef::Line { a, b }));
-                }
-            }
-        } else if let Some(qymcad_core::model::ArcParts { center, a, b, .. }) = e.kind.as_arc() {
-            if let (Some(pc), Some(pa), Some(pb)) = (sketch_pt(dc.project, si, center), sketch_pt(dc.project, si, a), sketch_pt(dc.project, si, b)) {
-                let r = ((pa.x - pc.x).powi(2) + (pa.y - pc.y).powi(2)).sqrt();
-                if near(pa) {
-                    return Some((norm(-(pa.y - pc.y), pa.x - pc.x), EdgeRef::Circle { center, r }));
-                }
-                if near(pb) {
-                    return Some((norm(-(pb.y - pc.y), pb.x - pc.x), EdgeRef::Circle { center, r }));
-                }
-            }
-        }
-    }
-    None
 }

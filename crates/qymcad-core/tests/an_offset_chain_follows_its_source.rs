@@ -90,7 +90,7 @@ fn an_offset_rounded_rectangle_follows_its_source() {
     for dist in [3.0, -3.0] {
         let mut p = Project::default();
         let (si, lines, width) = a_dimensioned_rectangle(&mut p);
-        assert!(p.fillet_lines(si, lines[2], lines[3], 4.0), "setup: the top left corner rounded");
+        assert!(p.fillet_at_pair(si, (lines[2], lines[3]), 4.0), "setup: the top left corner rounded");
         p.solve_sketch(si);
         let chain: Vec<u64> = p.sketches[si].entities.iter().filter(|e| !e.construction).map(|e| e.id).collect();
         assert_eq!(p.offset_entities(si, &chain, dist), 1, "one copy at {dist}");

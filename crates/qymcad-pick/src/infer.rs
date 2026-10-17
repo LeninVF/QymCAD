@@ -32,8 +32,8 @@ pub fn infer_hints(dc: &DrawCtx, si: usize, prev: Option<Point2>, p1: Point2, p2
             out.push((Gly::Parallel, mid));
         }
     }
-    // tangent to a circle or an arc
-    if nearest_tangent_circle(dc.project, si, p1, p2).is_some() {
+    // tangent to the curve of any kind the line nearly touches, as the automatic tangency makes it
+    if dc.project.nearly_touching(si, [p1, p2], Id::MAX).is_some() {
         out.push((Gly::Tangent, mid));
     }
     // equal in length to the nearest line
@@ -103,7 +103,7 @@ pub fn snap_infer_glyph(pn: &Painting) -> Option<(Gly, Point2)> {
         5 if curves_through(pn, p).total() >= 2 => Gly::Coincident,
         // a point of an ellipse or a spline: no tie is laid there, and none is promised
         5 | 6 if curves_through(pn, p).total() == 0 => return None,
-        5 | 6 if curves_through(pn, p).rims > 0 => Gly::PointOnCircle,
+        5 | 6 if curves_through(pn, p).curves > 0 => Gly::PointOnCircle,
         5 | 6 => Gly::PointOnLine,                        // on an edge
         2 if p.x == 0.0 && p.y == 0.0 => Gly::Coincident, // the origin, where the two axes meet
         2 => Gly::PointOnLine,                            // on an axis
@@ -112,29 +112,25 @@ pub fn snap_infer_glyph(pn: &Painting) -> Option<(Gly, Point2)> {
     Some((g, p))
 }
 
-/// HOW MANY CURVES OF THE SKETCH PASS A POINT a snap put on them: lines and the axes, and circles and arcs.
+/// HOW MANY CURVES OF THE SKETCH PASS A POINT a snap put on them: straights and the axes, and curves of any other kind.
 pub(crate) struct Through {
-    pub(crate) lines: usize,
-    pub(crate) rims: usize,
+    pub(crate) straights: usize,
+    pub(crate) curves: usize,
 }
 
 impl Through {
     pub(crate) fn total(&self) -> usize {
-        self.lines + self.rims
+        self.straights + self.curves
     }
 }
 
 /// The curves of the sketch being edited that `p` lies on, as a snap puts it on them - exactly, within 1e-6 mm.
 pub(crate) fn curves_through(pn: &Painting, p: Point2) -> Through {
-    let Some(si) = qymcad_ui_state::edit_si(pn.project, &pn.sketch_ses) else { return Through { lines: 0, rims: 0 } };
-    let dc = DrawCtx { cam: &pn.cam, set: pn.set, scheme: pn.scheme, project: pn.project, active_path: pn.active_path };
-    let qymcad_ui_state::ActiveEdges { lines, circles } = qymcad_ui_state::active_edges(&dc, si);
-    let on_line = |(a, b): &(Point2, Point2)| qymcad_ui_state::project_on_seg(p, *a, *b).is_some_and(|q| (q.x - p.x).hypot(q.y - p.y) < 1e-6);
+    let Some(s) = qymcad_ui_state::edit_si(pn.project, &pn.sketch_ses).and_then(|si| pn.project.sketches.get(si)) else { return Through { straights: 0, curves: 0 } };
+    let on: Vec<qymcad_core::model::curve::Curve> = s.entities.iter().filter_map(|e| qymcad_core::model::curve::Curve::of(s, e)).filter(|c| c.nearest(p).off < 1e-6).collect();
     let axes = usize::from(p.x.abs() < 1e-6) + usize::from(p.y.abs() < 1e-6);
-    Through {
-        lines: lines.iter().filter(|l| on_line(l)).count() + axes,
-        rims: circles.iter().filter(|rim| ((p.x - rim.centre.x).hypot(p.y - rim.centre.y) - rim.radius).abs() < 1e-6 && rim.holds(p)).count(),
-    }
+    let straights = on.iter().filter(|c| c.straight()).count();
+    Through { straights: straights + axes, curves: on.len() - straights }
 }
 
 /// The contours of sketches that do NOT belong to the active context (its subtree) — they are hidden

@@ -335,21 +335,9 @@ impl Project {
         self.fillet_corner(si, CornerAt::of(point, [e1, e2]), r)
     }
 
-    /// Fillet `corner` at its point. The arc goes on the side of the bisector of the ways the two edges leave the point -
-    /// along a line, along the tangent of an arc: taken along the chord to the far end, the halves of two circles cut
-    /// where they cross, whose far ends are one point, put the arc in the lens of the next quarter.
+    /// FILLET `corner` AT ITS POINT with an arc of radius `r`, by the one way every fillet is made (`round_any`).
     pub fn fillet_corner(&mut self, si: usize, corner: CornerAt, r: f64) -> bool {
-        let CornerAt { point, pair } = corner;
-        let (e1, e2) = pair;
-        if !self.corner_at(si, corner) {
-            return false;
-        }
-        let Some((pcx, pcy)) = self.point_xy(si, point) else { return false };
-        let (Some(d1), Some(d2)) = (self.leaving(si, EdgeAt { edge: e1, corner: point }), self.leaving(si, EdgeAt { edge: e2, corner: point })) else { return false };
-        let (bx, by) = (d1.x + d2.x, d1.y + d2.y);
-        let bl = (bx * bx + by * by).sqrt();
-        let near = if bl < 1e-6 { Point2::new(pcx, pcy) } else { Point2::new(pcx + bx / bl * r * 0.3, pcy + by / bl * r * 0.3) };
-        self.fillet_curves_at(si, corner, r, near)
+        self.corner_at(si, corner) && self.round_any(si, corner, r)
     }
 
     /// Fillet every corner (each vertex with exactly two edges) with radius `r`, returning how many

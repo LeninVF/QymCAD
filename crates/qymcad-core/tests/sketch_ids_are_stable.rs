@@ -95,7 +95,7 @@ fn a_sketch_fillet_keeps_the_two_lines_themselves() {
     assert!(lines.len() >= 2, "setup: a rectangle has to contain lines");
     let (e1, e2) = (lines[0], lines[1]);
     let before: Vec<u64> = p.sketches[si].entities.iter().map(|e| e.id).collect();
-    if !p.fillet_lines(si, e1, e2, 2.0) {
+    if !p.fillet_at_pair(si, (e1, e2), 2.0) {
         eprintln!("skipped: a fillet does not build on this pair");
         return;
     }

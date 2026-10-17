@@ -212,23 +212,6 @@ pub fn exit_draw_tools(t: &mut Tools) {
     annot.text = None;
 }
 
-/// Attach a tangency constraint between a new circle or arc (centre `cen`, radius `r`, at (cx, cy)) and the base edge.
-pub fn add_tangent_to_edge(project: &mut Project, si: usize, eref: EdgeRef, cen: Id, cx: f64, cy: f64, r: f64) {
-    use qymcad_core::model::Constraint;
-    match eref {
-        EdgeRef::Line { a, b } => {
-            project.add_constraint_if_independent(si, Constraint::Tangent { a, b, c: cen, r });
-        }
-        EdgeRef::Circle { center, r: rr } => {
-            if let Some(pc) = sketch_pt(project, si, center) {
-                let dist = ((cx - pc.x).powi(2) + (cy - pc.y).powi(2)).sqrt();
-                let external = (dist - (rr + r)).abs() <= (dist - (rr - r).abs()).abs();
-                project.add_constraint_if_independent(si, Constraint::CircleTangent { c1: center, c2: cen, external });
-            }
-        }
-    }
-}
-
 pub fn sketch_pt(project: &qymcad_core::model::Project, si: usize, id: Id) -> Option<Point2> {
     project.sketches.get(si)?.points.iter().find(|p| p.id == id).map(|p| Point2::new(p.x, p.y))
 }
