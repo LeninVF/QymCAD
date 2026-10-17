@@ -123,3 +123,6 @@ mod a_corner_of_two_crossing_curves_is_taken_like_one_of_lines;
 
 #[cfg(test)]
 mod a_circle_is_drawn_in_each_of_its_modes;
+
+#[cfg(test)]
+mod a_spline_closes_on_its_first_node;

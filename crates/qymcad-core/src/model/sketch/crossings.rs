@@ -22,6 +22,12 @@ struct Side {
     half: crate::model::curve::Half,
 }
 
+/// A HALF BEYOND A CORNER THAT GOES IN PART: the curve, and the place of the next crossing on it.
+struct Beyond {
+    eid: Id,
+    t: f64,
+}
+
 /// ONE CURVE OF A CROSSING TO CUT: the entity, its curve, the curve it crosses, and the crossing.
 struct CutThrough<'a> {
     eid: Id,
@@ -122,18 +128,56 @@ impl Project {
         blend_of_arms([first.half.arm(), second.half.arm()], cut)
     }
 
-    /// THE HALVES OF A CROSSING BEYOND ITS CORNER GO, once the corner at `point` is cut: the halves still ending at the
-    /// point the crossing was cut at are those of the other quarters - the two sides of the corner end at its arc or its
-    /// cut line now. As in the other CAD of the trade a corner of a crossing leaves its two sides alone; kept, the halves
-    /// stood joined at the corner point, held to it, and a drag of the corner pulled them round. Answers how many went.
-    pub fn drop_halves_beyond_corner(&mut self, si: usize, point: Id) -> usize {
+    /// THE HALVES OF A CROSSING BEYOND ITS CORNER GO, once `corner` is cut, as far as the next crossing: the halves still
+    /// ending at the point the crossing was cut at are those of the other quarters - the two sides of the corner end at
+    /// its arc or its cut line now. As in the other CAD of the trade a corner of a crossing leaves its two sides alone;
+    /// kept, the halves stood joined at the corner point, held to it, and a drag of the corner pulled them round.
+    ///
+    /// A HALF GOES AS FAR AS IT MEETS ANOTHER CURVE: a spline crossing a circle twice loses the run to the second crossing
+    /// and keeps its tail beyond it; a half ending at a crossing or at a free end goes whole. A half whose far end only
+    /// joins a side of the corner is the rest of a closed curve crossed once - a circle a spline ends inside - and stays.
+    /// Reported behaviour: a fillet at one crossing of a spline and a circle took the half of the spline beyond it with
+    /// the second crossing on it. Answers how many halves went, whole or in part.
+    pub fn drop_halves_beyond_corner(&mut self, si: usize, corner: CornerAt) -> usize {
         let Some(s) = self.sketches.get(si) else { return 0 };
-        let beyond: Vec<Id> = s.entities.iter().filter(|e| !e.construction && entity_ends(e).is_some_and(|ends| ends.contains(&point))).map(|e| e.id).collect();
-        if !beyond.is_empty() {
-            self.delete_entities(si, &beyond);
+        let Some(p) = s.point(corner.point).map(|q| Point2::new(q.x, q.y)) else { return 0 };
+        let halves: Vec<Id> = s.entities.iter().filter(|e| !e.construction && entity_ends(e).is_some_and(|ends| ends.contains(&corner.point))).map(|e| e.id).collect();
+        let mut whole: Vec<Id> = Vec::new();
+        let mut parts: Vec<Beyond> = Vec::new();
+        for eid in halves {
+            let s = &self.sketches[si];
+            let Some(c) = s.entity(eid).and_then(|e| Curve::of(s, e)) else { continue };
+            let from_start = c.at(0.0).dist(p) < 1e-6;
+            let inside: Vec<f64> = self.meetings(si, &c, eid).into_iter().map(|m| m.t).filter(|t| *t > 1e-6 && *t < 1.0 - 1e-6).collect();
+            let next = if from_start { inside.iter().copied().reduce(f64::min) } else { inside.iter().copied().reduce(f64::max) };
+            match next {
+                Some(t) => parts.push(Beyond { eid, t }),
+                None if self.joins_a_side_alone(si, eid, if from_start { c.at(1.0) } else { c.at(0.0) }, corner) => {}
+                None => whole.push(eid),
+            }
+        }
+        let went = whole.len() + parts.len();
+        for Beyond { eid, t } in parts {
+            let pieces = self.cut_curve(si, eid, &[t]);
+            let s = &self.sketches[si];
+            let near: Vec<Id> = pieces.into_iter().filter(|id| s.entity(*id).and_then(|e| Curve::of(s, e)).is_some_and(|c| c.ends().iter().any(|q| q.dist(p) < 1e-6))).collect();
+            whole.extend(near);
+        }
+        if went > 0 {
+            self.delete_entities(si, &whole);
             self.solve_sketch(si);
         }
-        beyond.len()
+        went
+    }
+
+    /// WHETHER THE FAR END `far` OF HALF `eid` ONLY JOINS A SIDE OF `corner`: one other curve stands there, ending there, and
+    /// it is a side - the half is the rest of the closed curve that side is a piece of.
+    fn joins_a_side_alone(&self, si: usize, eid: Id, far: Point2, corner: CornerAt) -> bool {
+        let Some(s) = self.sketches.get(si) else { return false };
+        let there: Vec<&SketchEntity> = s.entities.iter().filter(|e| e.id != eid && !e.construction).filter(|e| Curve::of(s, e).is_some_and(|c| c.nearest(far).off < 1e-6)).collect();
+        let ends_there = |e: &SketchEntity| Curve::of(s, e).is_some_and(|c| !c.closed() && c.ends().iter().any(|q| q.dist(far) < 1e-6));
+        let [one] = there.as_slice() else { return false };
+        ends_there(one) && (one.id == corner.pair.0 || one.id == corner.pair.1)
     }
 
     /// ONE CURVE OF A CROSSING CUT THERE, where it goes on past it: a line in two, any other open curve into its two
@@ -147,7 +191,12 @@ impl Project {
         if !me.closed() {
             return self.break_curve(si, eid, at.x, at.y);
         }
-        let places: Vec<f64> = me.meet(them).iter().map(|m| m.ta).collect();
+        // a closed curve met at one place alone is cut there and opposite, so the two halves at the crossing are curves with
+        // ends of their own
+        let mut places: Vec<f64> = me.meet(them).iter().map(|m| m.ta).collect();
+        if let [t] = places[..] {
+            places.push((t + 0.5).rem_euclid(1.0));
+        }
         if places.len() < 2 {
             return false;
         }

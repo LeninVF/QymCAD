@@ -69,7 +69,7 @@ fn the_halves_beyond_a_corner_of_a_crossing_go() {
     let half = |x: f64, y: f64| s.entities.iter().map(|e| e.id).find(|id| far_end(*id, x, y)).expect("a half");
     let pair = (half(-15.0, 10.0), half(5.0, -10.0));
     assert!(p.cut_corner_set(si, &[CornerAt { point: at, pair }], CornerCut::Fillet(FilletSize::radius(3.0)), None) == 1, "the corner was not rounded");
-    let dropped = p.drop_halves_beyond_corner(si, at);
+    let dropped = p.drop_halves_beyond_corner(si, CornerAt { point: at, pair });
     let s = &p.sketches[si];
     let curves: Vec<qymcad_core::model::curve::Curve> = s.entities.iter().filter_map(|e| qymcad_core::model::curve::Curve::of(s, e)).collect();
     let beyond = curves.iter().any(|c| (0..=40).map(|k| c.at(k as f64 / 40.0)).any(|q| q.x > 5.5 || q.y > 10.5));

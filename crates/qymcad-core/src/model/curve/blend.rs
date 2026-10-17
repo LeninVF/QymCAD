@@ -55,6 +55,11 @@ impl Curve {
         let mut places: Vec<f64> = self.meet(other).iter().map(|m| m.ta).collect();
         places.sort_by(f64::total_cmp);
         places.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        // met at one place alone, the curve is cut there and opposite (`cut_at_crossing`)
+        if let [p] = places[..] {
+            places.push((p + 0.5).rem_euclid(1.0));
+            places.sort_by(f64::total_cmp);
+        }
         let (Some(&first), Some(&last)) = (places.first(), places.last()) else { return Vec::new() };
         if places.len() < 2 {
             return Vec::new();

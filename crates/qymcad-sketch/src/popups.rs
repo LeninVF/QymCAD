@@ -214,7 +214,7 @@ pub fn corner_input_popup(cc: &mut qymcad_ui_state::CornerCtx, ctx: &egui::Conte
                 // a corner of a crossing leaves its two sides alone: the halves beyond it go
                 if done > 0 && joins {
                     for c in &corners {
-                        cc.project.drop_halves_beyond_corner(si, c.point);
+                        cc.project.drop_halves_beyond_corner(si, *c);
                     }
                 }
                 done

@@ -4,8 +4,13 @@
 //! the curves will be cut. A click there and the size of the bar typed with Enter cut that corner - the arc or the cut
 //! line stands in the quarter where the preview drew it - and nothing of the drawing ends on the crossing any more: the halves beyond it are gone.
 //!
+//! A spline crossing the circle twice keeps its tail past the second crossing; a spline ending inside the circle takes the
+//! corner as well.
+//!
 //! Reported behaviour: at the crossing of circles, arcs or splines the fillet showed no box, a strange preview, and the
-//! curves could not be chosen; with lines the same steps worked.
+//! curves could not be chosen; with lines the same steps worked. The fillet at one crossing of a spline and a circle took
+//! the half of the spline beyond it with the second crossing on it, and at a spline ending inside a circle it did
+//! nothing.
 use crate::gui::hand::Hand;
 use crate::gui::{App, Sel};
 use qymcad_core::geom::Point2;
@@ -18,6 +23,8 @@ enum Two {
     Circles,
     ArcAndCircle,
     SplineAndCircle,
+    /// A spline ending inside the circle, crossing it once.
+    SplineEndingInside,
     Lines,
 }
 
@@ -52,6 +59,12 @@ fn drawn(two: Two) -> App {
             circle(&mut hand);
             hand.sk_tool(9).click2d(8.0, 36.0).click2d(20.0, 24.0);
             hand.double_click2d(34.0, 36.0);
+            hand.key(egui::Key::Escape).key(egui::Key::Escape);
+        }
+        Two::SplineEndingInside => {
+            circle(&mut hand);
+            hand.sk_tool(9).click2d(4.0, 36.0).click2d(10.0, 29.0);
+            hand.double_click2d(16.0, 22.0);
             hand.key(egui::Key::Escape).key(egui::Key::Escape);
         }
         Two::Lines => {
@@ -147,9 +160,18 @@ fn cut(two: Two, tool: Tool) -> Result<(), String> {
     if !laid {
         return Err(format!("no {tool:?} of {v} in the quarter where the preview stood; the status line says {status:?}"));
     }
-    let on_crossing = after.iter().map(|d| &d.curve).filter(|c| !c.closed() && c.ends().iter().any(|p| p.dist(crossing) < 1e-6)).count();
+    // a circle crossed once keeps its rest round the long way, ending on the crossing; nothing else ends there
+    let rest_of_the_circle = |c: &Curve| matches!(two, Two::SplineEndingInside) && matches!(c, Curve::Round { r, .. } if (r - 10.0).abs() < 1e-3);
+    let on_crossing = after.iter().map(|d| &d.curve).filter(|c| !c.closed() && !rest_of_the_circle(c) && c.ends().iter().any(|p| p.dist(crossing) < 1e-6)).count();
+    if matches!(two, Two::SplineEndingInside) && after.iter().any(|d| d.curve.ends().iter().any(|q| q.dist(Point2::new(16.0, 22.0)) < 1e-6)) {
+        return Err("the piece of the spline inside the circle stayed".into());
+    }
     if on_crossing != 0 {
         return Err(format!("{on_crossing} curves still end on the crossing: the halves beyond the corner stayed"));
+    }
+    // the half of the spline beyond the corner goes as far as its second crossing: its tail past that stays
+    if matches!(two, Two::SplineAndCircle) && !after.iter().any(|d| d.curve.ends().iter().any(|q| q.dist(Point2::new(34.0, 36.0)) < 1e-6)) {
+        return Err("the tail of the spline past its second crossing went with the half beyond the corner".into());
     }
     Ok(())
 }
@@ -157,7 +179,7 @@ fn cut(two: Two, tool: Tool) -> Result<(), String> {
 #[test]
 fn a_corner_of_two_crossing_curves_is_cut_by_a_click_on_each_and_one_in_its_quarter() {
     let mut failures = Vec::new();
-    for two in [Two::Circles, Two::ArcAndCircle, Two::SplineAndCircle, Two::Lines] {
+    for two in [Two::Circles, Two::ArcAndCircle, Two::SplineAndCircle, Two::SplineEndingInside, Two::Lines] {
         for tool in [Tool::Fillet, Tool::Chamfer] {
             if let Err(why) = cut(two, tool) {
                 failures.push(format!("{two:?} {tool:?}: {why}"));

@@ -100,6 +100,18 @@ pub fn snap_world(sk: &mut qymcad_ui_state::SketchCtx, rect: Rect, screen: Pos2)
             }
         }
     }
+    // THE FIRST NODE OF A SPLINE BEING DRAWN is a vertex to snap to, from the third node on: a click there lands on it and
+    // closes the spline. It is no point of the sketch yet and was no target, and a click closed the spline only within
+    // 0.4 mm of it - 2.4 px at the 6 px to the millimetre of a new sketch. Reported behaviour: "the point on the mouse does
+    // not snap to the start of the spline, it is hard to hit".
+    if sk.armed.draw_kind() == 9 && sk.tool.pts.len() >= 3 {
+        if let Some(&first) = sk.tool.pts.first() {
+            let d = sd(first, &*sk.view);
+            if best.is_none_or(|(bd, _, _)| d < bd) {
+                best = Some((d, first, 0));
+            }
+        }
+    }
     // THE PLACE A LINE BEING DRAWN TOUCHES A CURVE, nearer the pointer than any vertex, before the vertex: on a closed
     // spline the place a line from above touched it stood 1.2 mm off a node, and the node 7 px off the pointer took the
     // end of the line
