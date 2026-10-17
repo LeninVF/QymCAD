@@ -32,9 +32,14 @@ mod tests {
             assert!(hand.type_after_word(&crate::i18n::tr("opt-count"), &n.to_string()), "the count of the pattern");
             assert!(hand.type_after_word(&crate::i18n::tr("opt-step-x"), step[0]), "the step X");
             assert!(hand.type_after_word(&crate::i18n::tr("opt-step-y"), step[1]), "the step Y");
-            let started = Instant::now();
-            hand.key(egui::Key::Enter);
-            laid.push(started.elapsed());
+            // the work of the pattern, not the share of the machine it was given (`time_budget::Cost`): the solve of the
+            // sketch runs on threads of its own
+            laid.push(
+                qymcad_core::time_budget::cost_of(qymcad_core::time_budget::Doer::Process, || {
+                    hand.key(egui::Key::Enter);
+                })
+                .cost,
+            );
             hand.key(egui::Key::Escape);
         }
         let s = &hand.app.project.sketches[si];
@@ -67,6 +72,8 @@ mod tests {
         let hover = started.elapsed();
         eprintln!("a grid of {n} by {n}: the patterns laid in {laid:?}, two frames with the pointer over it {hover:?}");
         // measured in a release build on 200 by 200: the second pattern 29 s rebuilt after each copy, 0.3 s rebuilt once
-        assert!(laid.iter().all(|t| *t < Duration::from_secs(2)), "a pattern of the grid took {laid:?}, budget 2 s");
+        let budget = Duration::from_secs(2);
+        let over: Vec<String> = laid.iter().filter(|c| c.work >= budget).map(|c| qymcad_core::time_budget::over("a pattern of the grid", *c, budget)).collect();
+        assert!(over.is_empty(), "{}", over.join("; "));
     }
 }
