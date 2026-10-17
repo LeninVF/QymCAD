@@ -132,6 +132,14 @@ REPORT_TIME = (
     {"QYMCAD_TIER": "time"},
 )
 
+# THE PROBES OF TIME OF THE KERNEL: the examples rebuilt whole, three roundings on three parts, what the threads buy the
+# filter - each a rebuild of seconds on every core, held to its budget at this level only, one at a time
+KERNEL_TIME = (
+    "the probes of time of the kernel, one at a time",
+    ["cargo", "test", "-p", "qymcad-testkit", "--test", "the_kernel_keeps_its_time", "--", "--test-threads=1"],
+    {"QYMCAD_TIER": "time"},
+)
+
 RELEASE_MARK = os.path.join(ROOT, "target", "gate-release.json")
 
 # THE CHECKS OF EVERY CRATE IN ONE POOL. `cargo test` runs the test programs of the workspace one after another, each
@@ -175,6 +183,7 @@ LEVELS = {
         GRID_TIME,
         BIG_SKETCH_TIME,
         REPORT_TIME,
+        KERNEL_TIME,
         # EVERY LANGUAGE WHOLE: a string missing in a language falls back to English, so the checks of every change pass
         # with English alone and a contributor is asked for no language they do not know; before a release each
         # language must hold every key of the reference
@@ -204,6 +213,7 @@ LEVELS = {
         GRID_TIME,
         BIG_SKETCH_TIME,
         REPORT_TIME,
+        KERNEL_TIME,
     ],
     "fast": [
         # THE LAYOUT IS RUSTFMT'S: the tree was formatted once, and a hand layout coming back would be the next

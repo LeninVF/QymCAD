@@ -1201,7 +1201,14 @@ mod tests {
     #[test]
     fn a_line_hanging_into_a_region_is_no_edge_of_it() {
         use crate::model::{EntityKind, SketchEntity, SketchPoint};
-        let pts: Vec<SketchPoint> = [(1, 0.0, 0.0), (2, 10.0, 0.0), (3, 10.0, 10.0), (4, 0.0, 10.0), (5, 5.0, 0.0), (6, 5.0, 4.0)].iter().map(|&(id, x, y)| SketchPoint { id, x, y }).collect();
+        let pts = vec![
+            SketchPoint { id: 1, x: 0.0, y: 0.0 },
+            SketchPoint { id: 2, x: 10.0, y: 0.0 },
+            SketchPoint { id: 3, x: 10.0, y: 10.0 },
+            SketchPoint { id: 4, x: 0.0, y: 10.0 },
+            SketchPoint { id: 5, x: 5.0, y: 0.0 },
+            SketchPoint { id: 6, x: 5.0, y: 4.0 },
+        ];
         let l = |id, a, b| SketchEntity { id, kind: EntityKind::Line { a, b }, construction: false };
         let ents = vec![l(10, 1, 2), l(11, 2, 3), l(12, 3, 4), l(13, 4, 1), l(14, 5, 6)];
         let regions = super::arrangement_regions_prov(&pts, &ents, &[]);
