@@ -56,4 +56,19 @@ impl Curve {
     pub fn straight(&self) -> bool {
         matches!(self, Curve::Line { .. })
     }
+
+    /// THE AXES OF AN ELLIPSE OR AN ARC OF ONE: its centre and its two semi-axes as vectors from it; `None` for a curve of
+    /// another kind.
+    pub fn oval_axes(&self) -> Option<OvalAxes> {
+        let Curve::Oval { centre, major, minor, .. } = *self else { return None };
+        Some(OvalAxes { centre, major, minor })
+    }
+}
+
+/// THE AXES OF AN ELLIPSE: its centre, and its major and minor semi-axes as vectors from the centre.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OvalAxes {
+    pub centre: Point2,
+    pub major: Point2,
+    pub minor: Point2,
 }

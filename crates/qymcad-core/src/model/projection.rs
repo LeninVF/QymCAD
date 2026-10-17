@@ -369,9 +369,12 @@ impl Project {
         }
         let at = |p: crate::geom::Point2| [p.x, p.y];
         let laid: Vec<crate::geom::Point2> = pts.iter().map(|p| crate::geom::Point2::new(p[0], p[1])).collect();
-        if let Some(oval @ crate::model::curve::Curve::Oval { centre, major, minor, sweep, .. }) = crate::model::curve::Curve::oval_through(&laid) {
-            let arc = (!oval.closed()).then(|| OvalArc { from: at(oval.at(0.0)), to: at(oval.at(1.0)), winding: if sweep > 0.0 { crate::feature::Winding::Ccw } else { crate::feature::Winding::Cw } });
-            return Curve2::Oval { centre: at(centre), major_end: at(centre + major), minor_end: at(centre + minor), arc };
+        if let Some((oval, axes)) = crate::model::curve::Curve::oval_through(&laid).and_then(|c| c.oval_axes().map(|a| (c, a))) {
+            // the way the arc runs: counter-clockwise where it leaves its start turning left of the centre
+            let (from, way) = (oval.at(0.0) - axes.centre, oval.velocity(0.0));
+            let winding = if from.x * way.y - from.y * way.x > 0.0 { crate::feature::Winding::Ccw } else { crate::feature::Winding::Cw };
+            let arc = (!oval.closed()).then(|| OvalArc { from: at(oval.at(0.0)), to: at(oval.at(1.0)), winding });
+            return Curve2::Oval { centre: at(axes.centre), major_end: at(axes.centre + axes.major), minor_end: at(axes.centre + axes.minor), arc };
         }
         // a closed edge comes back to its first point: the spline is a loop through the others
         let closed = (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-6;

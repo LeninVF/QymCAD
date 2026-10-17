@@ -144,24 +144,15 @@ impl Project {
         if !me.closed() && me.ends().iter().any(|p| p.dist(at) < 1e-9) {
             return true;
         }
-        if matches!(me, Curve::Line { .. }) {
-            self.break_curve(si, eid, at.x, at.y);
-        } else if me.closed() {
-            let places: Vec<f64> = me.meet(them).iter().map(|m| m.ta).collect();
-            if places.len() < 2 {
-                return false;
-            }
-            self.cut_curve(si, eid, &places);
-        } else {
-            self.cut_curve(si, eid, &[me.nearest(at).t]);
+        if !me.closed() {
+            return self.break_curve(si, eid, at.x, at.y);
         }
+        let places: Vec<f64> = me.meet(them).iter().map(|m| m.ta).collect();
+        if places.len() < 2 {
+            return false;
+        }
+        self.cut_curve(si, eid, &places);
         true
-    }
-
-    /// WHETHER CURVE `eid` OF SKETCH `si` IS A STRAIGHT LINE.
-    pub fn is_straight(&self, si: usize, eid: Id) -> bool {
-        let Some(s) = self.sketches.get(si) else { return false };
-        matches!(s.entities.iter().find(|e| e.id == eid).and_then(|e| Curve::of(s, e)), Some(Curve::Line { .. }))
     }
 
     /// THE PLACES ON CURVE `eid` OF SKETCH `si` WHERE ITS OTHER CURVES MEET IT, in order along it.
@@ -230,17 +221,17 @@ impl Project {
         s.entities.iter().all(|e| e.id == eid || off(e) >= mine)
     }
 
-    /// WHERE A BREAK AT THE CLICK CUTS CURVE `eid`: an open curve at the place nearest the click - a line no nearer its
-    /// ends than a twentieth of it - a closed one there and opposite it, into two halves. What the preview of the break
-    /// draws, and where the break cuts.
+    /// WHERE A BREAK AT THE CLICK CUTS CURVE `eid`: an open curve at the place nearest the click, no nearer its ends than a
+    /// twentieth of it, a closed one there and opposite it, into two halves. What the preview of the break draws, and
+    /// where the break cuts.
     pub fn break_at(&self, si: usize, eid: Id, click: Point2) -> Vec<f64> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let Some(c) = s.entities.iter().find(|e| e.id == eid).and_then(|e| Curve::of(s, e)) else { return Vec::new() };
         let t = c.nearest(click).t;
-        match c {
-            Curve::Line { .. } => vec![t.clamp(0.05, 0.95)],
-            _ if c.closed() => vec![t, (t + 0.5).rem_euclid(1.0)],
-            _ => vec![t],
+        if c.closed() {
+            vec![t, (t + 0.5).rem_euclid(1.0)]
+        } else {
+            vec![t.clamp(0.05, 0.95)]
         }
     }
 
@@ -328,7 +319,7 @@ impl Project {
         let spline = e.kind.as_spline().map(|sp| (sp.nodes.to_vec(), sp.ends));
         match spline {
             Some((mut nodes, ends)) => {
-                let Curve::Spline { tangents, .. } = &ext.curve else { return false };
+                let Some(handles) = ext.curve.handles() else { return false };
                 for &end in &ext.goes {
                     let at = reached(end);
                     let id = self.alloc_id();
@@ -339,7 +330,6 @@ impl Project {
                         nodes.push(id);
                     }
                 }
-                let handles = tangents.iter().map(|t| Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect();
                 if let Some(x) = self.sketches[si].entities.iter_mut().find(|x| x.id == eid) {
                     x.kind = EntityKind::spline(nodes, handles, ends);
                 }

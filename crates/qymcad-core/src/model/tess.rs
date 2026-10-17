@@ -774,42 +774,13 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
         }
         let placed = |id: Id| pt(id).map(|(x, y)| Point2::new(x, y));
         let Some(curve) = Curve::of_placed(&placed, e) else { continue };
-        let xy = |p: Point2| (p.x, p.y);
-        match curve {
-            Curve::Line { a, b } => {
-                if a.dist(b) > 1e-9 {
-                    curves.push(ArrCurve::Line { a: xy(a), b: xy(b) });
-                    curve_eid.push(e.id);
-                }
-            }
-            Curve::Round { centre, r, .. } if curve.closed() => {
-                curves.push(ArrCurve::Circle { c: xy(centre), r: r.max(1e-6) });
-                curve_eid.push(e.id);
-            }
-            Curve::Round { centre, r, sweep, .. } => {
-                if r > 1e-9 {
-                    let ([pa, pb], c) = (curve.ends(), xy(centre));
-                    curves.push(ArrCurve::Arc { c, r, a0: (pa.y - centre.y).atan2(pa.x - centre.x), a1: (pb.y - centre.y).atan2(pb.x - centre.x), ccw: sweep >= 0.0, pa: xy(pa), pb: xy(pb) });
-                    curve_eid.push(e.id);
-                }
+        match curve.arranged() {
+            crate::model::curve::Arranged::Pieces(pieces) => {
+                curve_eid.extend(std::iter::repeat_n(e.id, pieces.len()));
+                curves.extend(pieces);
             }
             // an ellipse is a closed region of its own; its intersections are not part of the arrangement yet
-            Curve::Oval { centre, major, minor, .. } if curve.closed() => {
-                let contour = ellipse_contour(centre, centre + major, centre + minor);
-                out_ellipse.push((with_exact_edges(contour, &placed, e), vec![e.id]));
-            }
-            // A SPLINE AND AN ARC OF AN ELLIPSE ENTER AS THE SEGMENTS OF THEIR POINTS, so they are cut by the lines and arcs
-            // and by themselves, and a region closed partly by them, or by a spline crossing itself, is a face like any
-            // other; their pieces carry their id
-            _ => {
-                let line = curve.polyline();
-                for w in line.windows(2) {
-                    if w[0].dist(w[1]) > 1e-9 {
-                        curves.push(ArrCurve::Line { a: xy(w[0]), b: xy(w[1]) });
-                        curve_eid.push(e.id);
-                    }
-                }
-            }
+            crate::model::curve::Arranged::Region(contour) => out_ellipse.push((with_exact_edges(contour, &placed, e), vec![e.id])),
         }
     }
     let nc = curves.len();

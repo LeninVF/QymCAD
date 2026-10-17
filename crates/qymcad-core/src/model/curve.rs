@@ -11,7 +11,9 @@
 //! second of `n` spans.
 use super::*;
 
+mod arrange;
 mod blend;
+mod cut;
 mod edges;
 mod fit;
 mod marks;
@@ -20,7 +22,10 @@ mod meet;
 pub mod refs;
 mod shift;
 mod stretch;
+pub(in crate::model) use arrange::Arranged;
+pub(crate) use cut::Trimmed;
 pub use blend::{centres_touching, chamfer, radius_in, rounding, Arm, Half, Rounding};
+pub use marks::OvalAxes;
 pub use meet::Meet;
 pub use shift::{Map, OFFSET_TOLERANCE};
 pub use stretch::End;
@@ -180,6 +185,13 @@ impl Curve {
         let x = t.clamp(0.0, 1.0) * n as f64;
         let k = (x.floor() as usize).min(n - 1);
         SpanAt { span: k, s: x - k as f64 }
+    }
+
+    /// THE HANDLES OF A SPLINE, the tangent each node is arrived at and left by, as a spline entity keeps them; `None`
+    /// for a curve of another kind.
+    pub fn handles(&self) -> Option<Vec<crate::model::Handle>> {
+        let Curve::Spline { tangents, .. } = self else { return None };
+        Some(tangents.iter().map(|t| crate::model::Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect())
     }
 
     /// The Hermite segment of span `k` of a spline.
