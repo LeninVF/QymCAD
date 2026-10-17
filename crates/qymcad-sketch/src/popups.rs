@@ -1187,11 +1187,11 @@ pub fn dim_editor(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Context, rect
         let old_pts: Vec<(f64, f64)> = sk.project.sketches[si].points.iter().map(|p| (p.x, p.y)).collect();
         let resid = sk.project.solve_sketch(si);
         // a large residual means the system is INCONSISTENT (the new dimension conflicts with a vertical,
-        // a fixed point or another constraint). The solver would converge to about 1e-6; a threshold of
-        // 1e-2 mm is above the noise and below any real conflict. The dimension and the positions are
+        // a fixed point or another constraint). The solver would converge to about 1e-6; the threshold
+        // (`SKETCH_FITS`) is above the noise and below any real conflict. The dimension and the positions are
         // rolled back and solved again, so the sketch returns to a consistent state instead of breaking
         // silently.
-        if resid > 1e-2 {
+        if resid > qymcad_core::model::SKETCH_FITS {
             if let (Some(oc), Some(c)) = (old_con.clone(), sk.project.sketches[si].constraints.get_mut(ci)) {
                 *c = oc;
             }

@@ -163,7 +163,7 @@ BATCH_S = 5.0
 # THE HEAVIEST MATRICES OF THE TESTKIT GO TO THE RELEASE: a bolt and its nut screwed through a whole turn (5 checks, 100 -
 # 400 s each among the others of the pool) and the names held through an edit above (3 checks, 145 - 240 s). They are
 # run before a release (`RELEASE_MATRICES`), not at every change; the pool of every crate leaves their programs out.
-RELEASE_ONLY = ["a_bolt_screws_into_its_nut", "matrix_names_survive_an_edit", "an_edit_undone_on_the_case_gives_the_same_names"]
+RELEASE_ONLY = ["a_bolt_screws_into_its_nut", "matrix_names_survive_an_edit", "an_edit_undone_on_the_case_gives_the_same_names", "matrix_names_on_real_documents"]
 RELEASE_MATRICES = (
     "the heaviest matrices of the testkit",
     ["cargo", "test", "-p", "qymcad-testkit", "--no-fail-fast"] + [a for t in RELEASE_ONLY for a in ("--test", t)],

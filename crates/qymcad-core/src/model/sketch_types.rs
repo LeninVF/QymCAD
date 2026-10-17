@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// THE RESIDUAL A SKETCH THAT FITS IS SOLVED UNDER, in mm: above the noise of the solver, which converges to about 1e-6,
+/// and below any real conflict. A dimension or a constraint leaving the sketch above it does not fit and is taken back
+/// (the dimension editor and the constraints of the sketch workbench).
+pub const SKETCH_FITS: f64 = 1e-2;
+
 /// A sketch: a named group of contours (a tree node). It may be the result of an import, in which case
 /// `source` references the embedded original.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

@@ -174,9 +174,9 @@ pub fn try_constraint_inner(
     qymcad_ui_state::invalidate(regen);
     // A CONSTRAINT THE SKETCH CANNOT MEET IS NOT KEPT, as a dimension that does not fit is not: parallel on two lines an
     // angle of 45 deg holds apart left both in the sketch, unsolved (residual 0.79), with nothing marked. It is taken
-    // back, the points return where they were, and the status line says why. 1e-2 mm is the threshold the dimension
-    // editor rolls back at: above the solver's noise, below any real conflict.
-    if resid > 1e-2 || shrunk {
+    // back, the points return where they were, and the status line says why, at the threshold the dimension editor rolls
+    // back at (`SKETCH_FITS`).
+    if resid > qymcad_core::model::SKETCH_FITS || shrunk {
         project.sketches[si].constraints.truncate(had);
         for &k in &referenced {
             if let Constraint::Diameter { driven, .. } = &mut project.sketches[si].constraints[k] {

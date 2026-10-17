@@ -63,3 +63,6 @@ mod a_cut_on_a_datum_follows_its_parameter_in_the_window;
 
 #[cfg(test)]
 mod a_reference_found_as_the_other_piece_is_shown;
+
+#[cfg(test)]
+mod a_reference_lost_by_an_edit_is_shown;
