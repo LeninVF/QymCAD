@@ -40,6 +40,7 @@ mod god_object_ratchet;
 mod named_groups_ratchet;
 #[cfg(test)]
 mod one_voice_guard;
+mod wall_clock_guard;
 // The macOS bundling script, run here with the mac-only tools stubbed out. Unix only: it is a shell script.
 #[cfg(all(test, unix))]
 mod packaging_macos;
