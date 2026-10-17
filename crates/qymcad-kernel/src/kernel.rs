@@ -80,21 +80,77 @@ fn placed(s: crate::Shape, place: [f64; 12]) -> Result<crate::Shape, qymcad_core
 ///
 /// The cost is nothing: the application rebuilds a document one at a time anyway — there is one background
 /// rebuild and its result is awaited. The lock merely makes that a rule rather than a coincidence.
-pub fn kernel_gate() -> std::sync::MutexGuard<'static, ()> {
-    GATE.lock().unwrap_or_else(|e| e.into_inner())
+pub fn kernel_gate() -> KernelHeld {
+    WAITING.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let held = GATE.lock().unwrap_or_else(|e| e.into_inner());
+    WAITING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    KernelHeld::taken(held)
 }
 
 /// The lock of the kernel if nobody holds it: a question the window asks every frame is not worth waiting minutes for
 /// a rebuild, and asked beside one it would race it inside OCCT. `None` while a rebuild runs.
-pub fn try_kernel_gate() -> Option<std::sync::MutexGuard<'static, ()>> {
+pub fn try_kernel_gate() -> Option<KernelHeld> {
     match GATE.try_lock() {
-        Ok(g) => Some(g),
-        Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner()),
+        Ok(g) => Some(KernelHeld::taken(g)),
+        Err(std::sync::TryLockError::Poisoned(e)) => Some(KernelHeld::taken(e.into_inner())),
         Err(std::sync::TryLockError::WouldBlock) => None,
     }
 }
 
 static GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// THE KERNEL HELD: the lock, and the record of who holds it, cleared when it is let go.
+pub struct KernelHeld {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl KernelHeld {
+    fn taken(lock: std::sync::MutexGuard<'static, ()>) -> Self {
+        let by = std::thread::current().name().unwrap_or("a thread with no name").to_string();
+        *HOLDER.lock().unwrap_or_else(|e| e.into_inner()) = Some(Holder { by, since: std::time::Instant::now() });
+        Self { _lock: lock }
+    }
+}
+
+impl Drop for KernelHeld {
+    fn drop(&mut self) {
+        *HOLDER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
+/// WHO HOLDS THE KERNEL AND SINCE WHEN, and how many threads wait for it: what a probe that waited too long says, so a
+/// rebuild that worked slowly is told from one that stood in the queue of the lock behind the checks beside it. A check
+/// of the window waits for its rebuild through the lock, and in a run of a whole crate more than a thousand checks share
+/// one process and one lock.
+#[derive(Clone, Debug)]
+pub struct Holder {
+    /// the name of the thread: a check is run on a thread named after it, and a worker is named after the thread that
+    /// started it (`worker`)
+    pub by: String,
+    pub since: std::time::Instant,
+}
+
+static HOLDER: std::sync::Mutex<Option<Holder>> = std::sync::Mutex::new(None);
+static WAITING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// THE KERNEL AT THIS INSTANT: who holds it, if anyone, and how many threads wait for it.
+pub struct GateNow {
+    pub holder: Option<Holder>,
+    pub waiting: usize,
+}
+
+pub fn gate_now() -> GateNow {
+    GateNow { holder: HOLDER.lock().unwrap_or_else(|e| e.into_inner()).clone(), waiting: WAITING.load(std::sync::atomic::Ordering::SeqCst) }
+}
+
+impl std::fmt::Display for GateNow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.holder {
+            Some(h) => write!(f, "the kernel held by {:?} for {:.1?}, {} more waiting for it", h.by, h.since.elapsed(), self.waiting),
+            None => write!(f, "the kernel free, {} waiting for it", self.waiting),
+        }
+    }
+}
 
 impl OcctKernel {
     /// The names of the faces of body `src`, none when it is not built.

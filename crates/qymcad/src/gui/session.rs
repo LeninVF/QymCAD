@@ -493,3 +493,5 @@ mod finding;
 mod space;
 mod reading;
 mod frames;
+/// A check waiting for an event of the window, not for a count of frames.
+pub(crate) mod waiting;

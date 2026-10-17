@@ -46,11 +46,13 @@ impl Hand<'_> {
         // THE LIST ARRIVES FROM A THREAD, so the hand waits for it exactly as a person waits for "Looking for
         // fonts..." to turn into the list. Measured: the walk takes about half a second on a machine with 232
         // faces, longer with a cold file cache.
-        let waiting = std::time::Instant::now();
-        while self.app.font_cache.picker.faces.is_empty() && waiting.elapsed() < std::time::Duration::from_secs(30) {
+        crate::gui::session::waiting::until("the list of the fonts of the system", || {
+            if !self.app.font_cache.picker.faces.is_empty() {
+                return true;
+            }
             self.frame(Vec::new());
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+            false
+        });
         if !self.press_word(&qymcad_i18n::tr("font-search"), egui::Pos2::ZERO) {
             return false; // no search field in sight: the window did not open
         }

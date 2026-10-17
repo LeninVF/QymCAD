@@ -220,11 +220,13 @@ impl<'a> Hand<'a> {
     /// Measured in a run of the whole crate, the kernel held by the checks beside it: the card stood over the window
     /// for the whole search of a button, 70 buttons rested over and none answered.
     fn rebuild_gone(&mut self) {
-        let waiting = std::time::Instant::now();
-        while self.app.regen.busy.is_some() && waiting.elapsed() < std::time::Duration::from_secs(60) {
-            std::thread::sleep(std::time::Duration::from_millis(20));
+        crate::gui::session::waiting::until("the card of the rebuild to go before a button is looked for", || {
+            if self.app.regen.busy.is_none() {
+                return true;
+            }
             self.frame(Vec::new());
-        }
+            false
+        });
     }
 
     /// The button of `hint` looked for down the panel, a notch of the wheel at a time; it is remembered where found.
@@ -422,18 +424,23 @@ impl<'a> Hand<'a> {
         self.status_painted().into_iter().find(|w| w.text.strip_prefix(icon).is_some_and(|n| n.trim().parse::<usize>().is_ok()))
     }
 
-    /// FRAMES UNTIL THE REBUILD A GESTURE STARTED HAS ENDED, a minute at most: a person waits for the card to go
+    /// FRAMES UNTIL THE REBUILD A GESTURE STARTED HAS ENDED (`session::waiting::until`): a person waits for the card to go
     /// before reading the line.
     pub fn settle(&mut self) -> &mut Self {
         self.frame(Vec::new()); // the frame that notices the document changed and starts its rebuild
-        for _ in 0..1200 {
+        self.rebuild_landed("the rebuild a gesture started to land");
+        self.frame(Vec::new())
+    }
+
+    /// Frames until no rebuild runs and none is asked for.
+    fn rebuild_landed(&mut self, what: &str) {
+        crate::gui::session::waiting::until(what, || {
             if self.app.regen.busy.is_none() && !self.app.regen.wanted {
-                break;
+                return true;
             }
             self.run(egui::Modifiers::default(), Vec::new());
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        self.frame(Vec::new())
+            false
+        });
     }
 
     /// WHERE THE PANEL `key` STANDS, the next frame drawn; `None` when that frame does not draw it.
@@ -503,14 +510,16 @@ impl<'a> Hand<'a> {
     /// kernel working while the process exits.
     pub fn trial_says(&mut self) -> Option<String> {
         let ctx = egui::Context::default();
-        for _ in 0..6000 {
-            match qymcad_part::trial_refusal(&mut self.app.part_ctx(), &ctx) {
-                qymcad_part::Trial::Checking => std::thread::sleep(std::time::Duration::from_millis(10)),
-                qymcad_part::Trial::Refused(_, words) => return Some(words),
-                qymcad_part::Trial::Clear => return None,
+        let mut said = None;
+        crate::gui::session::waiting::until("the trial build of the command to answer", || match qymcad_part::trial_refusal(&mut self.app.part_ctx(), &ctx) {
+            qymcad_part::Trial::Checking => false,
+            qymcad_part::Trial::Refused(_, words) => {
+                said = Some(words);
+                true
             }
-        }
-        panic!("the trial build of the command never answered");
+            qymcad_part::Trial::Clear => true,
+        });
+        said
     }
 
     /// DOUBLE-CLICK WHERE `word` IS WRITTEN - a row of the tree reopens its feature or enters its part this way. The
@@ -750,13 +759,7 @@ impl<'a> Hand<'a> {
     /// a rebuild asked for afterwards has to happen where it is asked. Measured on the end-to-end run with the
     /// mark left on: 101 problems further down, every one a body of a later step that never got built.
     pub fn close_window(&mut self) -> &mut Self {
-        for _ in 0..1200 {
-            if self.app.regen.busy.is_none() && !self.app.regen.wanted {
-                break;
-            }
-            self.run(egui::Modifiers::default(), Vec::new());
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
+        self.rebuild_landed("the rebuild the frames of the hand started to land before the window closes");
         self.app.drain_bg_for_test();
         self.app.regen.ui_running = false;
         self
