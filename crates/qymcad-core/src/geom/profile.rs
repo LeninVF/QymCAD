@@ -226,12 +226,8 @@ pub fn piece_of(e: &ProfEdge) -> ([i64; 2], f64) {
     match *e {
         ProfEdge::Line { a, b } => {
             let (mx, my) = ((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-            let (mut dx, mut dy) = (b.x - a.x, b.y - a.y);
-            let len = (dx * dx + dy * dy).sqrt().max(1e-12);
-            if dx < 0.0 || (dx == 0.0 && dy < 0.0) {
-                (dx, dy) = (-dx, -dy);
-            }
-            (key(mx, my), (mx * dx + my * dy) / len)
+            let [dx, dy] = along_a_line([a, b]);
+            (key(mx, my), mx * dx + my * dy)
         }
         ProfEdge::Arc { a, b, center, ccw } => {
             let tau = std::f64::consts::TAU;
@@ -242,6 +238,46 @@ pub fn piece_of(e: &ProfEdge) -> ([i64; 2], f64) {
             (key(center.x + r * mid.cos(), center.y + r * mid.sin()), mid.rem_euclid(tau))
         }
         ProfEdge::Circle { center, r } => (key(center.x + r, center.y), 0.0),
+    }
+}
+
+/// THE WAY ALONG A LINE, one way for both of its orientations: the unit direction pointing to growing X, or to growing Y
+/// where the line stands upright. Upright to a billionth of its length: a vertical line of a solved sketch comes with X
+/// differing by 2e-14 between its ends, and the sign of that difference turned the way along it with the orientation
+/// the contour gave the piece - one piece of a line of the vacuum cleaner began at its upper end in one rebuild and at its
+/// lower end in the next.
+fn along_a_line([a, b]: [Point2; 2]) -> [f64; 2] {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let len = (dx * dx + dy * dy).sqrt().max(1e-12);
+    let flip = if dx.abs() <= 1e-9 * len { dy < 0.0 } else { dx < 0.0 };
+    let s = if flip { -1.0 / len } else { 1.0 / len };
+    [dx * s, dy * s]
+}
+
+/// WHERE A PIECE BEGINS ALONG ITS ENTITY, as `piece_of` measures along: its end lower along the entity - or nothing where
+/// the piece holds the start of the curve itself, an arc running over the angle 0 of its circle, or a whole circle.
+pub fn piece_start(e: &ProfEdge) -> Option<Point2> {
+    match *e {
+        ProfEdge::Line { a, b } => {
+            let [dx, dy] = along_a_line([a, b]);
+            Some(if a.x * dx + a.y * dy <= b.x * dx + b.y * dy { a } else { b })
+        }
+        ProfEdge::Arc { a, b, center, ccw } => {
+            let tau = std::f64::consts::TAU;
+            let angle = |q: Point2| (q.y - center.y).atan2(q.x - center.x).rem_euclid(tau);
+            // counter-clockwise from its first end to its second
+            let (first, from, to) = if ccw { (a, angle(a), angle(b)) } else { (b, angle(b), angle(a)) };
+            (to >= from).then_some(first)
+        }
+        ProfEdge::Circle { .. } => None,
+    }
+}
+
+/// THE TWO ENDS OF A PIECE, or nothing for a whole circle.
+pub fn piece_ends(e: &ProfEdge) -> Option<[Point2; 2]> {
+    match *e {
+        ProfEdge::Line { a, b } | ProfEdge::Arc { a, b, .. } => Some([a, b]),
+        ProfEdge::Circle { .. } => None,
     }
 }
 

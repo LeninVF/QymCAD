@@ -149,10 +149,14 @@ extern "C" {
         nsides: usize,
     ) -> *mut QymShape;
     fn qym_shape_face_splits(s: *const QymShape, out: *mut u32, cap: usize) -> usize;
+    fn qym_shape_piece_sides(s: *const QymShape, pieces: *const u32, n_pieces: usize, out: *mut u32, cap: usize) -> usize;
+    fn qym_shape_faces_on_one_surface(s: *const QymShape, out: *mut u32, cap: usize) -> usize;
     fn qym_shape_clear_face_splits(s: *mut QymShape);
     fn qym_shape_absorbed(s: *const QymShape, out: *mut u32, max_pairs: usize) -> usize;
     fn qym_shape_rename_faces(s: *mut QymShape, from: *const u32, to: *const u32, n: usize);
     fn qym_shape_edge_face_pairs(s: *const QymShape, out: *mut u32, cap: usize) -> usize;
+    fn qym_shape_edges_on_their_face(s: *const QymShape, out: *mut u32, cap: usize) -> usize;
+    fn qym_shape_unshare_edge_ids(s: *mut QymShape) -> i32;
     fn qym_shape_face_places(s: *const QymShape, ids: *mut u32, out: *mut f64, cap: usize) -> usize;
     fn qym_shape_edge_end_faces(s: *const QymShape, out: *mut u32, cap: usize) -> usize;
     fn qym_shape_rename_edges(s: *mut QymShape, from: *const u32, to: *const u32, n: usize);

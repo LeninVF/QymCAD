@@ -236,6 +236,81 @@ impl Shape {
 
     /// Pairs of an edge and its two faces, by name: the id of the edge and the names of faces A and B. Only
     /// edges with exactly two adjacent faces appear, those being the ones an edge name is derived from.
+    /// THE FACES ON ONE SURFACE OF THE KERNEL (`qym_shape_faces_on_one_surface`).
+    pub(crate) fn faces_on_one_surface(&self) -> Vec<qymcad_core::feature::OnOneSurface> {
+        unsafe {
+            let n = qym_shape_faces_on_one_surface(self.ptr, std::ptr::null_mut(), 0);
+            if n == 0 {
+                return Vec::new();
+            }
+            let mut buf = vec![0u32; n * 2];
+            let got = qym_shape_faces_on_one_surface(self.ptr, buf.as_mut_ptr(), buf.len());
+            buf.truncate(got.min(n) * 2);
+            buf.as_chunks::<2>().0.iter().map(|[face, surface]| qymcad_core::feature::OnOneSurface { face: *face, surface: *surface }).collect()
+        }
+    }
+
+    /// WHICH SIDE OF EACH FACE BESIDE IT every piece in `pieces` lies on (`qym_shape_piece_sides`).
+    pub(crate) fn piece_sides(&self, pieces: &[u32]) -> Vec<qymcad_core::feature::PieceSide> {
+        use qymcad_core::names::Side;
+        unsafe {
+            let n = qym_shape_piece_sides(self.ptr, pieces.as_ptr(), pieces.len(), std::ptr::null_mut(), 0);
+            if n == 0 {
+                return Vec::new();
+            }
+            let mut buf = vec![0u32; n * 3];
+            let got = qym_shape_piece_sides(self.ptr, pieces.as_ptr(), pieces.len(), buf.as_mut_ptr(), buf.len());
+            buf.truncate(got.min(n) * 3);
+            buf.as_chunks::<3>()
+                .0
+                .iter()
+                .map(|[piece, beside, side]| qymcad_core::feature::PieceSide {
+                    piece: *piece,
+                    beside: *beside,
+                    side: match side {
+                        1 => Side::Front,
+                        2 => Side::Back,
+                        _ => Side::On,
+                    },
+                })
+                .collect()
+        }
+    }
+
+    /// ONE NAME, ONE EDGE: a name several edges wear is taken from all of them, each given a number of its own
+    /// (`qym_shape_unshare_edge_ids`). Returns how many.
+    pub(crate) fn unshare_edge_ids(&self) -> i32 {
+        unsafe { qym_shape_unshare_edge_ids(self.ptr) }
+    }
+
+    /// THE EDGES WITH ONE FACE ON BOTH SIDES, and where each comes from (`qym_shape_edges_on_their_face`).
+    pub(crate) fn edges_on_their_face(&self) -> Vec<qymcad_core::feature::EdgeOnItsFace> {
+        use qymcad_core::feature::OnItsFace;
+        unsafe {
+            let n = qym_shape_edges_on_their_face(self.ptr, std::ptr::null_mut(), 0);
+            if n == 0 {
+                return Vec::new();
+            }
+            let mut buf = vec![0u32; n * 4];
+            let got = qym_shape_edges_on_their_face(self.ptr, buf.as_mut_ptr(), buf.len());
+            buf.truncate(got.min(n) * 4);
+            buf.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|[edge, kind, along, across]| qymcad_core::feature::EdgeOnItsFace {
+                    edge: *edge,
+                    kind: match kind {
+                        1 => OnItsFace::SeamAlongU,
+                        2 => OnItsFace::SeamAlongV,
+                        _ => OnItsFace::Inside,
+                    },
+                    along: *along,
+                    across: *across,
+                })
+                .collect()
+        }
+    }
+
     pub(crate) fn edge_face_pairs(&self) -> Vec<qymcad_core::feature::EdgeFaces> {
         unsafe {
             let n = qym_shape_edge_face_pairs(self.ptr, std::ptr::null_mut(), 0);

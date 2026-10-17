@@ -6,7 +6,7 @@ use crate::door::Roles;
 use qymcad_core::feature::Sides;
 use qymcad_core::geom::EDGE_FIELDS;
 use qymcad_core::model::Id;
-use qymcad_core::names::{GeoName, Role};
+use qymcad_core::names::{CutOff, GeoName, Role, Side};
 
 /// PROFILES NAMED: the profiles with the numbers of their side roles in the slots of the names of their edges, the
 /// caps as the C++ side reads them (triples of [region key, start, end]), and the roles.
@@ -14,6 +14,13 @@ pub struct NamedSides {
     pub profiles: Vec<Vec<f64>>,
     pub caps: Vec<u32>,
     pub roles: Roles,
+}
+
+/// THE NAME OF A SIDE FACE FROM ITS SOURCE: the node, the role, the sketch entity and the piece of it - a piece starting
+/// at a crossing named after what crossed it (`SideSource::cut`).
+fn side_name(feature: Id, role: Role, s: qymcad_core::feature::SideSource) -> GeoName {
+    let cut = (s.cut != 0).then_some(CutOff { feature, role, src: s.cut, split: 0, side: Side::On });
+    GeoName { feature, role, src: s.src, split: s.split, cut }
 }
 
 /// THE SIDES AND CAPS OF A PROFILE OPERATION. A side face is `role` of the node from the source of its edge (`Wall`
@@ -40,11 +47,11 @@ pub fn name_sides(profiles: &[Vec<f64>], sides: Sides<'_>, role: Role) -> NamedS
         }
     }
     let mut order: Vec<usize> = (0..sides.sources.len()).collect();
-    order.sort_by_key(|&k| (owner[k], sides.sources[k].src, sides.sources[k].split));
+    order.sort_by_key(|&k| (owner[k], sides.sources[k].src, sides.sources[k].cut, sides.sources[k].split));
     let mut numbers: Vec<u32> = vec![0; sides.sources.len()];
     for k in order {
         let s = sides.sources[k];
-        numbers[k] = roles.give(GeoName { feature: sides.feature, role, src: s.src, split: s.split });
+        numbers[k] = roles.give(side_name(sides.feature, role, s));
     }
     let mut rewritten: Vec<Vec<f64>> = profiles.to_vec();
     let mut walls: Vec<u32> = Vec::new();
@@ -94,7 +101,7 @@ pub struct NamedSections {
 /// The loop blocks of the sections one after another (`offsets` marks where each starts), their slots renamed.
 pub fn name_sections(data: &[f64], offsets: &[usize], sides: Sides<'_>) -> NamedSections {
     let mut roles = Roles::default();
-    let numbers: Vec<u32> = sides.sources.iter().map(|s| roles.give(GeoName { feature: sides.feature, role: Role::Lofted, src: s.src, split: s.split })).collect();
+    let numbers: Vec<u32> = sides.sources.iter().map(|s| roles.give(side_name(sides.feature, Role::Lofted, *s))).collect();
     let mut rewritten = data.to_vec();
     for start in offsets.iter().take(offsets.len().saturating_sub(1)) {
         rename_loops(&mut rewritten, *start, 1, &numbers);
@@ -228,7 +235,7 @@ mod tests {
     /// walls numbered by their profile and then by their recipe; one region gets the plain caps of the node.
     #[test]
     fn caps_of_several_regions_are_named_after_their_profiles() {
-        let sources = [SideSource { src: 13, split: 0 }, SideSource { src: 11, split: 1 }, SideSource { src: 11, split: 0 }];
+        let sources = [SideSource { src: 13, split: 0, cut: 0 }, SideSource { src: 11, split: 1, cut: 0 }, SideSource { src: 11, split: 0, cut: 0 }];
         let one = name_sides(&[[vec![1.0], block(&[1, 2])].concat()], Sides { feature: 5, sources: &sources, regions: &[40] }, Role::Wall);
         assert_eq!(one.caps[0], 0, "one region has no key");
         // the profile of contour 40 holds sources 1 and 2 (13/0, 11/1), the profile of contour 30 holds source 3 (11/0)

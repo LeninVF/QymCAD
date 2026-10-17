@@ -206,6 +206,7 @@
 #include <BRepBndLib.hxx>
 #include <GProp_GProps.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Face.hxx>
 
 #include <vector>
 #include <cstdint>

@@ -421,7 +421,7 @@ impl Project {
         let mut outline = crate::geom::Contour::closed(points);
         outline.edge_src = (1..=sides).collect();
         // side k is the source at place k: its slot holds k itself
-        let sources: Vec<crate::feature::SideSource> = (1..=sides).map(|k| crate::feature::SideSource { src: k, split: 0 }).collect();
+        let sources: Vec<crate::feature::SideSource> = (1..=sides).map(|k| crate::feature::SideSource { src: k, split: 0, cut: 0 }).collect();
         let profiles = vec![crate::geom::encode_profile_named(&outline, &[], &|src: Id, _: &crate::geom::ProfEdge| src as u32)];
         crate::feature::KernelJob::new(Vec::new(), move |k| {
             k.combine_region_multi(

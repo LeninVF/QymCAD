@@ -1015,6 +1015,8 @@ pub(crate) struct PieceKey {
 pub(crate) struct PieceAt {
     key: [i64; 2],
     along: f64,
+    /// The entity crossing the piece at its start, 0 for the piece holding the start of its entity.
+    cut: Id,
 }
 
 /// THE SOURCES OF THE PIECES OF A PROFILE, in their order, and the place (from 1) of every piece among them.
