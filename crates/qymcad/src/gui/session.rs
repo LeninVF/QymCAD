@@ -495,3 +495,5 @@ mod reading;
 mod frames;
 /// A check waiting for an event of the window, not for a count of frames.
 pub(crate) mod waiting;
+/// The measure of the probes of time: what a piece of work cost, not the clock on the wall (`time_budget::Cost`).
+pub use qymcad_core::time_budget;
