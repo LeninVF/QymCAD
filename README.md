@@ -107,6 +107,13 @@ Linux — `just pkg-linux`, Docker required. Windows — MSVC with the kernel bu
 kernel from source as well, then `packaging/macos/bundle.sh`. The details are in
 [`packaging/README.md`](packaging/README.md).
 
+The kernel is OCCT 7.9.3, built from source with the `cmake` line given in
+[`packaging/README.md`](packaging/README.md#the-kernel). A package of OCCT from a system may differ in three ways that
+matter: another version (the program is written and tested against 7.9.3; another one gets a warning at the build);
+`BUILD_RELEASE_DISABLE_EXCEPTIONS` left at `ON` (OCCT's own checks are compiled out, and a degenerate input is no longer
+refused); signals not converted (`OCC_CONVERT_SIGNALS`; a fault inside OCCT then closes the program instead of being
+refused).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -85,6 +85,10 @@ jobs:
           path: C:\occt
           key: occt-7.9.3-msvc-x64-v2
 
+      # THE KERNEL IS OCCT 7.9.3 EXACTLY, built so on purpose (packaging/README.md, "The kernel"):
+      # - 7.9.3: the bridge is written and tested against this version and no other;
+      # - exceptions on (BUILD_RELEASE_DISABLE_EXCEPTIONS off): the checks of OCCT that throw stay in, the bridge refuses on them;
+      # - signals converted (OCC_CONVERT_SIGNALS, the default of OCCT off MSVC): a fault inside OCCT comes back as a refusal.
       - name: Build OCCT 7.9.3 (only when the cache missed)
         if: steps.occt.outputs.cache-hit != 'true'
         shell: pwsh
@@ -210,6 +214,10 @@ jobs:
 
       # The build record this action uploads by itself is a 30 KB artifact nobody opens, sitting next to the
       # 35 MB one that people came for. Off: the list of artifacts is read by a person looking for a package.
+      # THE KERNEL IS OCCT 7.9.3 EXACTLY, built so on purpose (packaging/README.md, "The kernel"):
+      # - 7.9.3: the bridge is written and tested against this version and no other;
+      # - exceptions on (BUILD_RELEASE_DISABLE_EXCEPTIONS off): the checks of OCCT that throw stay in, the bridge refuses on them;
+      # - signals converted (OCC_CONVERT_SIGNALS, the default of OCCT off MSVC): a fault inside OCCT comes back as a refusal.
       - name: Builder image (OCCT 7.9.3 from source, Ubuntu 22.04 base)
         uses: docker/build-push-action@v7
         env:
@@ -277,6 +285,10 @@ jobs:
           path: /Users/runner/occt
           key: occt-7.9.3-macos-${{ matrix.arch }}-v2
 
+      # THE KERNEL IS OCCT 7.9.3 EXACTLY, built so on purpose (packaging/README.md, "The kernel"):
+      # - 7.9.3: the bridge is written and tested against this version and no other;
+      # - exceptions on (BUILD_RELEASE_DISABLE_EXCEPTIONS off): the checks of OCCT that throw stay in, the bridge refuses on them;
+      # - signals converted (OCC_CONVERT_SIGNALS, the default of OCCT off MSVC): a fault inside OCCT comes back as a refusal.
       - name: Build OCCT 7.9.3 (only when the cache missed)
         if: steps.occt.outputs.cache-hit != 'true'
         run: |

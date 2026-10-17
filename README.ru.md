@@ -106,6 +106,12 @@ Linux — `just pkg-linux`, требуется Docker. Windows — MSVC, ядр�
 тоже из исходников, дальше `packaging/macos/bundle.sh`. Подробности:
 [`packaging/README.md`](packaging/README.md).
 
+Ядро — OCCT 7.9.3, собранное из исходников строкой `cmake` из
+[`packaging/README.md`](packaging/README.md#the-kernel). Пакет OCCT из системы может отличаться тремя важными вещами:
+другая версия (программа написана и проверена на 7.9.3; на другой сборка выдаёт предупреждение);
+`BUILD_RELEASE_DISABLE_EXCEPTIONS`, оставленный `ON` (собственные проверки OCCT вырезаны, и вырожденный ввод больше не
+отклоняется); сигналы без перевода (`OCC_CONVERT_SIGNALS`; сбой внутри OCCT тогда закрывает программу, а не даёт отказ).
+
 ## Участие в разработке
 
 См. [CONTRIBUTING.ru.md](CONTRIBUTING.ru.md).

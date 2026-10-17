@@ -8,6 +8,8 @@ use std::env;
 // The C++ runtime is named differently on every toolchain, and the choice is checked by unit tests in the
 // crate itself - so it lives in one file that both sides read rather than being written out twice.
 include!("src/cxx_runtime.rs");
+// The version of OCCT the bridge is written against, and the warning a build against another one gets.
+include!("src/occt_version.rs");
 
 fn main() {
     let inc = env::var("OCCT_INCLUDE_DIR").unwrap_or_else(|_| "/usr/include/opencascade".into());
@@ -19,6 +21,12 @@ fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let msvc = target_env == "msvc";
+
+    // ANOTHER OCCT IS WARNED ABOUT, not refused: why the version matters is in `src/occt_version.rs`.
+    let header = std::path::Path::new(&inc).join("Standard_Version.hxx");
+    if let Some(said) = occt_version_warning(&std::fs::read_to_string(&header).unwrap_or_default()) {
+        println!("cargo:warning={said}");
+    }
 
     let mut build = cc::Build::new();
     build
@@ -66,9 +74,18 @@ fn main() {
     if let Some(lib) = cxx_runtime(&target_os, &target_env) {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
-    // `src/cxx_runtime.rs` is on this list because it is `include!`d rather than imported: cargo does not
-    // see through the macro, and without the line an edit there would not rebuild the script.
-    for f in ["src/occt_bridge.cpp", "src/occt_helical.cpp", "src/occt_faces.cpp", "src/occt_io.cpp", "src/occt_limits.cpp", "src/occt_common.hpp", "src/cxx_runtime.rs"] {
+    // `src/cxx_runtime.rs` and `src/occt_version.rs` are on this list because they are `include!`d rather than
+    // imported: cargo does not see through the macro, and without the line an edit there would not rebuild the script.
+    for f in [
+        "src/occt_bridge.cpp",
+        "src/occt_helical.cpp",
+        "src/occt_faces.cpp",
+        "src/occt_io.cpp",
+        "src/occt_limits.cpp",
+        "src/occt_common.hpp",
+        "src/cxx_runtime.rs",
+        "src/occt_version.rs",
+    ] {
         println!("cargo:rerun-if-changed={f}");
     }
     println!("cargo:rerun-if-env-changed=OCCT_INCLUDE_DIR");
