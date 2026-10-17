@@ -10,7 +10,7 @@ mod tests {
     use crate::gui::a_big_drawing_stays_live::tests::{apart, numbers_apart, points_drawn, points_in_sight};
     use super::super::{App, Sel};
     use qymcad_core::feature::SketchPlane;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     #[test]
     fn a_grid_of_two_patterns_is_laid_and_worked() {
@@ -67,9 +67,10 @@ mod tests {
         // brought near a crossing, the ends there apart again: every one in sight is drawn
         hand.look2d((0.0, 0.0)).frame(Vec::new());
         assert_eq!(points_drawn(&hand).len(), points_in_sight(&hand, si), "near the corner of the grid not every end in sight is drawn");
-        let started = Instant::now();
-        hand.hover2d(15.0, 15.0);
-        let hover = started.elapsed();
+        let hover = qymcad_core::time_budget::cost_of(qymcad_core::time_budget::Doer::Thread, || {
+            hand.hover2d(15.0, 15.0);
+        })
+        .cost;
         eprintln!("a grid of {n} by {n}: the patterns laid in {laid:?}, two frames with the pointer over it {hover:?}");
         // measured in a release build on 200 by 200: the second pattern 29 s rebuilt after each copy, 0.3 s rebuilt once
         let budget = Duration::from_secs(2);
