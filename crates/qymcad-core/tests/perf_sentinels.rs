@@ -190,3 +190,23 @@ fn regen_without_changes_is_noop() {
     assert_eq!(t.out.x, 0.0, "after the scene is built no nodes are dirty, so there is nothing to rebuild");
     within(what, &t, Duration::from_millis(50));
 }
+
+/// A sketch with a spline of 30 nodes rebuilds in tens of milliseconds, not in a second. Every edge of its loop asked
+/// for its place along the spline, and every such search laid the spline out to the sag afresh: measured 1.0 s a rebuild
+/// at 30 nodes, 276 ms at 15 - a drag of a node froze the window. Reported behaviour: "splines slow down terribly once
+/// they have more than 10-20 nodes".
+#[test]
+fn a_sketch_with_a_spline_of_thirty_nodes_rebuilds_quickly() {
+    let mut p = Project::default();
+    p.new_document();
+    let si = p.new_sketch("S");
+    let nodes: Vec<Point2> = (0..30).map(|k| Point2::new(k as f64 * 3.0, if k % 2 == 0 { 0.0 } else { 6.0 })).collect();
+    p.add_spline(si, nodes, qymcad_core::feature::Ends::Open, qymcad_core::feature::Purpose::Real).expect("the spline");
+    let t = Instant::now();
+    for _ in 0..5 {
+        p.regen_sketch(si);
+    }
+    let per = t.elapsed() / 5;
+    eprintln!("[perf] a sketch with a spline of 30 nodes rebuilt in {per:?}");
+    assert!(per < std::time::Duration::from_millis(250), "a sketch with a spline of 30 nodes took {per:?} to rebuild, budget 250 ms");
+}

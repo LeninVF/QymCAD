@@ -613,14 +613,21 @@ fn exact_runs(c: &mut Contour, exact: &std::collections::HashMap<Id, Curve>) {
     // WHETHER EDGE k GOES ON FROM THE EDGE BEFORE IT along one curve: of the same curve, and at the same place of it - the
     // point they share found from the middle of each. Where a curve crosses itself the two stand on two branches of it,
     // and a lobe of a figure of eight, all of one spline, is a run from the crossing round to it.
+    // the place of the middle of every edge along its curve, found once: asked for each edge by itself and by the one
+    // after it, the search ran four times an edge
+    let middles: Vec<Option<f64>> = (0..n)
+        .map(|k| {
+            let ([a, b], curve) = (c.edges[k].ends()?, exact.get(&c.edge_src[k])?);
+            Some(curve.nearest(Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)).t)
+        })
+        .collect();
     let joined = |k: usize| -> bool {
         let p = (k + n - 1) % n;
         if c.edge_src[p] != c.edge_src[k] {
             return false;
         }
-        let (Some(curve), Some([pa, pb]), Some([qa, qb])) = (exact.get(&c.edge_src[k]), c.edges[p].ends(), c.edges[k].ends()) else { return true };
-        let middle = |a: Point2, b: Point2| curve.nearest(Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)).t;
-        let gap = (curve.polish(pb, middle(pa, pb)) - curve.polish(qa, middle(qa, qb))).abs();
+        let (Some(curve), Some([_, pb]), Some([qa, _]), Some(mp), Some(mk)) = (exact.get(&c.edge_src[k]), c.edges[p].ends(), c.edges[k].ends(), middles[p], middles[k]) else { return true };
+        let gap = (curve.polish(pb, mp) - curve.polish(qa, mk)).abs();
         gap < 1e-6 || (curve.closed() && (gap - 1.0).abs() < 1e-6)
     };
     // the loop read from the start of a run, or from its first edge when it is one curve all round

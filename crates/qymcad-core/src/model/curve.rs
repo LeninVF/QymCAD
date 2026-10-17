@@ -30,6 +30,12 @@ pub use meet::Meet;
 pub use shift::{Map, OFFSET_TOLERANCE};
 pub use stretch::End;
 
+/// How many even places of each span of a spline the search for the nearest place starts from.
+const NEAR_LOOKS: usize = 8;
+
+/// How many even places of a curve, at the least, the search for the nearest place starts from.
+const NEAR_LOOKS_LEAST: usize = 64;
+
 /// How far a laid out curve may stray from the true one, at most, in millimetres: 0.005 mm, checked at a quarter, a half
 /// and three quarters of every piece - one look at the middle of a piece misses the sag of a spline at a turn of its
 /// curvature, measured at 0.03 mm on an S-shaped span laid out by its middles alone.
@@ -339,9 +345,12 @@ impl Curve {
                     1.0
                 }
             }
+            // THE NEAREST OF EVEN PLACES ALONG IT, POLISHED: 8 a span of a spline, 64 at the least. The places the curve is
+            // laid out at to the sag (`places`) were made afresh on every call and cost 0.19 ms on a spline of 30 nodes;
+            // read for every edge of a loop of one, they made a rebuild of the sketch take 1 s
             _ => {
-                let places = self.places();
-                let best = places.iter().copied().min_by(|x, y| self.at(*x).dist(p).total_cmp(&self.at(*y).dist(p))).unwrap_or(0.0);
+                let n = (self.spans() * NEAR_LOOKS).max(NEAR_LOOKS_LEAST);
+                let best = (0..=n).map(|k| k as f64 / n as f64).min_by(|x, y| self.at(*x).dist(p).total_cmp(&self.at(*y).dist(p))).unwrap_or(0.0);
                 self.polish(p, best)
             }
         };

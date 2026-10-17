@@ -126,3 +126,6 @@ mod a_circle_is_drawn_in_each_of_its_modes;
 
 #[cfg(test)]
 mod a_spline_closes_on_its_first_node;
+
+#[cfg(test)]
+mod a_filleted_spline_drags_lightly;
