@@ -220,11 +220,11 @@ fn selected_bundled_default_redraw_stays_responsive() {
     let _ = draw(&mut app, vec![click(true)]);
     let _ = draw(&mut app, vec![click(false)]);
     assert_eq!(app.win.icon_manager.selected_pack_id, DEFAULT_THEME_ID);
-    let start = std::time::Instant::now();
+    let start = qymcad_core::time_budget::Meter::start(qymcad_core::time_budget::Doer::Process);
     for _ in 0..8 {
         let _ = draw(&mut app, vec![]);
     }
-    let elapsed = start.elapsed();
+    let elapsed = start.cost().work;
     eprintln!("selected bundled default: eight redraws took {elapsed:?}");
     assert!(qymcad_core::time_budget::within(elapsed, std::time::Duration::from_millis(180)), "eight redraws of the selected bundled theme took {elapsed:?}");
     fn find_gallery_tab(shape: &egui::epaint::Shape, title: &str) -> Option<egui::Pos2> {
@@ -241,11 +241,11 @@ fn selected_bundled_default_redraw_stays_responsive() {
     let _ = draw(&mut app, vec![egui::Event::PointerMoved(gallery)]);
     let _ = draw(&mut app, vec![gallery_click(true)]);
     let _ = draw(&mut app, vec![gallery_click(false)]);
-    let start = std::time::Instant::now();
+    let start = qymcad_core::time_budget::Meter::start(qymcad_core::time_budget::Doer::Process);
     for _ in 0..8 {
         let _ = draw(&mut app, vec![]);
     }
-    let gallery_elapsed = start.elapsed();
+    let gallery_elapsed = start.cost().work;
     eprintln!("selected bundled default gallery: eight redraws took {gallery_elapsed:?}");
     assert!(qymcad_core::time_budget::within(gallery_elapsed, std::time::Duration::from_millis(180)), "eight gallery redraws of the selected bundled theme took {gallery_elapsed:?}");
     assert!(app.set.active_icon_packs.is_empty(), "selection must not activate the theme");
