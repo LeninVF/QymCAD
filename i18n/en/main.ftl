@@ -914,6 +914,7 @@ cmd-on-cylinder = On a cylinder (a shaft)
 cmd-direction = Direction
 cmd-outwards = Outwards
 cmd-through-all = Through all
+cmd-through-both = Through all, both sides
 cmd-shell = Shell
 cmd-flip = Flip
 cmd-union = Union

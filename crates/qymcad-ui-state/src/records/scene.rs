@@ -283,6 +283,8 @@ pub enum ExtentMode {
     Symmetric,
     TwoSided, // two sides (the "down" field is active)
     Through,  // through all (operations on a body only)
+    /// through all to both sides of the sketch plane (operations on a body only)
+    ThroughBothWays,
 }
 
 impl ExtentMode {
@@ -293,11 +295,18 @@ impl ExtentMode {
         matches!(self, ExtentMode::TwoSided)
     }
     pub fn through(self) -> bool {
-        matches!(self, ExtentMode::Through)
+        matches!(self, ExtentMode::Through | ExtentMode::ThroughBothWays)
     }
-    /// Restore the mode from a saved feature's flags (through takes priority, then symmetry, then two-sided).
+    /// Does the tool go to both sides of the sketch plane: symmetric about it, or through all both ways.
+    pub fn both_ways(self) -> bool {
+        matches!(self, ExtentMode::Symmetric | ExtentMode::ThroughBothWays)
+    }
+    /// Restore the mode from a saved feature's flags (through takes priority, both ways or one, then symmetry, then
+    /// two-sided).
     pub fn from_extent(reach: qymcad_core::feature::Reach, down: f64, through: bool) -> Self {
-        if through {
+        if through && reach == qymcad_core::feature::Reach::BothWays {
+            ExtentMode::ThroughBothWays
+        } else if through {
             ExtentMode::Through
         } else if reach == qymcad_core::feature::Reach::BothWays {
             ExtentMode::Symmetric

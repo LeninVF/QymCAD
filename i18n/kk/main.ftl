@@ -912,6 +912,7 @@ cmd-on-cylinder = Цилиндрде (білікте)
 cmd-direction = Бағыт
 cmd-outwards = Сыртқа
 cmd-through-all = Тесіп өту
+cmd-through-both = Екі жаққа да тесіп өту
 cmd-shell = Қабық
 cmd-flip = Аудару
 cmd-union = Біріктіру

@@ -69,6 +69,7 @@ pub fn feat_command_bar(pc: &mut qymcad_ui_state::PartCtx, ui: &mut egui::Ui) {
                     ui.selectable_value(&mut pc.cmd.extent, qymcad_ui_state::ExtentMode::TwoSided, qymcad_i18n::tr("cmd-two-sides"));
                     if pc.feat.op != 0 {
                         ui.selectable_value(&mut pc.cmd.extent, qymcad_ui_state::ExtentMode::Through, qymcad_i18n::tr("cmd-through-all"));
+                        ui.selectable_value(&mut pc.cmd.extent, qymcad_ui_state::ExtentMode::ThroughBothWays, qymcad_i18n::tr("cmd-through-both"));
                     } else if pc.cmd.extent.through() {
                         pc.cmd.extent = qymcad_ui_state::ExtentMode::Length; // "through all" only applies to operations on a body
                     }

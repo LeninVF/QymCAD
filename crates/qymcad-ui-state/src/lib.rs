@@ -531,7 +531,7 @@ pub fn sweep_preview(project: &Project, sweep: SweepParams) -> Option<SweepPrevi
 /// the rebuild cannot come to different answers about the same two switches.
 pub fn cmd_reach(cmd: &FeatCommand, feat: FeatTarget) -> qymcad_core::feature::Reach {
     use qymcad_core::feature::Reach;
-    if cmd.extent.symmetric() {
+    if cmd.extent.both_ways() {
         Reach::BothWays
     } else if feat.flip {
         Reach::Backward

@@ -911,6 +911,7 @@ cmd-on-cylinder = На циліндрі (вал)
 cmd-direction = Напрямок
 cmd-outwards = Назовні
 cmd-through-all = Наскрізь
+cmd-through-both = Наскрізь в обидва боки
 cmd-shell = Оболонка
 cmd-flip = Навпаки
 cmd-union = Об'єднання

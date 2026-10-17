@@ -56,4 +56,7 @@ mod nothing_changed_rebuilds_nothing;
 mod a_hinge_follows_its_parameter;
 
 #[cfg(test)]
+mod a_cut_through_both_ways_reopens_both_ways;
+
+#[cfg(test)]
 mod a_cut_on_a_datum_follows_its_parameter_in_the_window;
