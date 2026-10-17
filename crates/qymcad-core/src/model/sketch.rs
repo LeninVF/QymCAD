@@ -444,6 +444,16 @@ impl Project {
             _ => None,
         }
     }
+    /// WHAT A SKETCH STANDS ON THAT A REBUILD MAKES: the body of the face it is drawn on, or the datum plane it is drawn
+    /// on; `None` on a plane of the world.
+    pub fn sketch_support(&self, sketch: Id) -> Option<Id> {
+        let si = self.sketch_index(sketch)?;
+        match self.sketches[si].plane {
+            crate::feature::SketchPlane::Face(body, _) => Some(body),
+            crate::feature::SketchPlane::Datum(plane) => Some(plane),
+            _ => None,
+        }
+    }
     /// Settle the sketches before building: a body must not be built from geometry that does not yet satisfy
     /// its own constraints.
     ///

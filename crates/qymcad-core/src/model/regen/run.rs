@@ -29,10 +29,27 @@ impl Project {
         let Some(nd) = self.timeline.get(i) else { return false };
         let kind = &nd.kind;
         kind.inputs().iter().any(|id| set.contains(id))
-            || kind.inputs().iter().any(|&inp| self.sketch_plane_body(inp).is_some_and(|pb| set.contains(&pb)))
+            || self.supports_read(kind).iter().any(|s| set.contains(s))
             || matches!(kind, FeatureKind::MirrorPart { src_comp, .. } if self.active_body_before(*src_comp, i).is_some_and(|b| set.contains(&b)))
             || matches!(kind, FeatureKind::PartInstance { .. } | FeatureKind::ComponentPattern { .. })
                 && kind.copy_source().and_then(|s| self.active_body_before(s, i)).is_some_and(|b| set.contains(&b))
+    }
+
+    /// WHAT THE SKETCHES A NODE READS STAND ON (`sketch_support`): the body of the face of a sketch it builds from, or
+    /// the datum plane - and for a sketch node, what its own sketch stands on only when it projects geometry of a body.
+    /// The timeline does not say so through `inputs`, the place of a sketch being the sketch's: a node missing it was not
+    /// rebuilt when the plane under its sketch moved. Reported behaviour: a cut on a datum plane placed by a parameter
+    /// stayed at the old height when the parameter changed, on one thread and on many.
+    ///
+    /// A sketch is solved in its own plane, wherever the plane stands: the node of a sketch with nothing projected reads
+    /// nothing of what it stands on, and waiting for it put a wave between every body and the cut sketched on its face
+    /// (measured on the case example: 29 waves of one against 11 of 2-5, 9.1 s of work on 19 threads against 6.0).
+    pub(crate) fn supports_read(&self, kind: &FeatureKind) -> Vec<Id> {
+        let own = match kind {
+            FeatureKind::Sketch { sketch } if self.sketch_index(*sketch).is_some_and(|si| !self.sketches[si].projections.is_empty()) => Some(*sketch),
+            _ => None,
+        };
+        kind.inputs().into_iter().chain(own).filter_map(|s| self.sketch_support(s)).collect()
     }
 
     /// THE NODES OF A REBUILD LAID OUT IN WAVES: those that can be computed at the same time stand together.
@@ -64,11 +81,10 @@ impl Project {
             };
             for id in nd.kind.inputs() {
                 note(id, &mut after);
-                // a sketch drawn on a face of a body waits for that body, and the timeline does not say so
-                // through `inputs`
-                if let Some(pb) = self.sketch_plane_body(id) {
-                    note(pb, &mut after);
-                }
+            }
+            // a sketch waits for the body or the plane it stands on, and the timeline does not say so through `inputs`
+            for id in self.supports_read(&nd.kind) {
+                note(id, &mut after);
             }
             // the dynamic inputs: a mirrored part and a pattern instance follow the ACTIVE body of their
             // source, which is not in `inputs` either
