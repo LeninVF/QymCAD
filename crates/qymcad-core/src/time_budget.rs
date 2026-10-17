@@ -54,8 +54,10 @@ pub enum Doer {
     /// The whole process, the work on threads of its own: the cost is the wall clock less the share of it the threads
     /// of the process stood ready with no processor - each thread of a work slowed by the load as much as the rest, the
     /// wall shrinks by the share they got. Not the processor time of the process: a rebuild of the case sample spent
-    /// 42 s on processors in 13.7 s of the wall, its booleans on 19 threads. True only when the probe is alone in its
-    /// process - a probe of the acceptance set, a check run one at a time.
+    /// 42 s on processors in 13.7 s of the wall, its booleans on 19 threads. The share is read from every thread of the
+    /// process: alone in it - a probe of the acceptance set, a check of the gate run one at a time - it is the work's
+    /// own; beside other checks it is theirs too, slowed by the same machine. A work of a few milliseconds is read to a
+    /// tick of the scheduler.
     Process,
 }
 
