@@ -36,13 +36,26 @@ pub fn within(took: Duration, budget: Duration) -> bool {
 pub const SAID_OVER_BUDGET: &str = "over its budget of time";
 pub const SAID_NOT_IN_TIME: &str = "did not happen in time";
 
+/// WHAT A LINE OF A MEASURE STARTS WITH: a probe of time prints its measure green or red, so how much of the budget is
+/// left is read without changing the budget, and the runner of the acceptance set passes such lines on from a probe's
+/// own process.
+pub const MEASURED: &str = "measured: ";
+
+/// PRINT the cost of `what` as a line of a measure.
+pub fn tell(what: &str, cost: Cost) {
+    eprintln!("{MEASURED}{what}: {cost}");
+}
+
 /// WHAT DOES THE WORK THAT IS MEASURED.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Doer {
     /// The thread that measures, by itself: the cost is its time less the time it stood ready with no processor.
     Thread,
-    /// The whole process, the work on threads of its own: the cost is the processor time of every thread. True only
-    /// when the probe is alone in its process - a probe of the acceptance set, a check run one at a time.
+    /// The whole process, the work on threads of its own: the cost is the wall clock less the share of it the threads
+    /// of the process stood ready with no processor - each thread of a work slowed by the load as much as the rest, the
+    /// wall shrinks by the share they got. Not the processor time of the process: a rebuild of the case sample spent
+    /// 42 s on processors in 13.7 s of the wall, its booleans on 19 threads. True only when the probe is alone in its
+    /// process - a probe of the acceptance set, a check run one at a time.
     Process,
 }
 
@@ -50,7 +63,8 @@ pub enum Doer {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cost {
     /// What the budget is held against: for a thread its time on the wall less `waited` - running, or blocked on what
-    /// the program waits for, so a frame stalled on a lock is a slow frame - for a process `cpu`.
+    /// the program waits for, so a frame stalled on a lock is a slow frame - for a process the wall times the share of
+    /// their ready time its threads ran (`Doer::Process`).
     pub work: Duration,
     /// The clock on the wall, from start to end.
     pub wall: Duration,
@@ -58,6 +72,7 @@ pub struct Cost {
     /// counts a running thread's time at its ticks - or of every thread of the process, to 10 ms.
     pub cpu: Duration,
     /// How long the threads stood ready to run with no processor free for them: the share the machine gave to others.
+    /// For a process, of the threads still there at the end - one that ended took its counters with it.
     pub waited: Duration,
 }
 
@@ -163,7 +178,10 @@ impl Meter {
             }
             Doer::Process => {
                 let cpu = to.process.saturating_sub(self.from.process);
-                Cost { work: cpu, wall, cpu, waited }
+                let ran: Duration = to.threads.iter().map(|t| since(t, |t| t.ran)).sum();
+                let ready = ran + waited;
+                let work = if ready.is_zero() { wall } else { wall.mul_f64(ran.as_secs_f64() / ready.as_secs_f64()) };
+                Cost { work, wall, cpu, waited }
             }
         }
     }
@@ -219,6 +237,32 @@ mod tests {
         assert!(super::within(Duration::from_secs(3600), Duration::MAX));
     }
 
+    /// The checks of the measure one at a time: a crowd of one would be counted in the process of another.
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn alone() -> std::sync::MutexGuard<'static, ()> {
+        ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A CROWD OF OTHER PROGRAMS: four spinning processes a processor of the machine, ended when dropped.
+    struct Crowd(Vec<std::process::Child>);
+
+    impl Crowd {
+        fn gather() -> Self {
+            let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+            Self((0..4 * threads).filter_map(|_| std::process::Command::new("sh").args(["-c", "while :; do :; done"]).spawn().ok()).collect())
+        }
+    }
+
+    impl Drop for Crowd {
+        fn drop(&mut self) {
+            for c in &mut self.0 {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        }
+    }
+
     /// Spin for `span` of the wall: work for a processor and nothing else.
     fn spin(span: Duration) -> u64 {
         let until = Instant::now() + span;
@@ -230,10 +274,11 @@ mod tests {
     }
 
     /// A THREAD KEPT WAITING FOR A PROCESSOR IS NOT CHARGED FOR THE WAIT: with four spinning threads a processor, the
-    /// work of a thread is a part of its wall, and the rest is what it waited. Measured on 20 threads, three runs: 0.40 s
-    /// of the wall, 0.06-0.11 s of work, 0.29-0.34 s waited.
+    /// work of a thread is a part of its wall, and the rest is what it waited. Measured on 20 threads, six runs: 0.40-0.42 s
+    /// of the wall, 0.06-0.19 s of work, 0.21-0.34 s waited.
     #[test]
     fn the_wait_for_a_processor_is_not_work() {
+        let _alone = alone();
         let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let crowd: Vec<_> = (0..4 * threads).map(|_| std::thread::spawn(|| spin(Duration::from_millis(600)))).collect();
         let timed = cost_of(Doer::Thread, || spin(Duration::from_millis(400)));
@@ -251,19 +296,48 @@ mod tests {
     /// A THREAD BLOCKED ON WHAT THE PROGRAM WAITS FOR IS CHARGED FOR IT: a frame stalled on a lock is a slow frame.
     #[test]
     fn a_block_is_work() {
+        let _alone = alone();
         let cost = cost_of(Doer::Thread, || std::thread::sleep(Duration::from_millis(80))).cost;
         assert!(cost.work >= Duration::from_millis(80), "a sleep of 80 ms: {cost}");
     }
 
-    /// THE WORK OF A PROCESS COUNTS ITS OTHER THREADS: a thread that waits for a worker spends nothing on a processor,
-    /// and the worker's 300 ms are counted.
+    /// THE WORK OF A PROCESS IS ITS WALL LESS ITS THREADS' WAIT: two workers spin 0.4 s among four spinning programs a
+    /// processor and are read while still there; the work is a part of the wall, as their share of a processor was.
+    /// Measured on 20 threads, three runs: 0.40-0.42 s of the wall, 0.06-0.10 s of work.
     #[test]
-    fn a_process_counts_its_workers() {
-        let cost = cost_of(Doer::Process, || std::thread::spawn(|| spin(Duration::from_millis(300))).join()).cost;
+    fn a_process_is_not_charged_for_the_wait_of_its_threads() {
+        let _alone = alone();
+        let crowd = Crowd::gather();
+        let (done, read) = (std::sync::Arc::new(std::sync::Barrier::new(3)), std::sync::Arc::new(std::sync::Barrier::new(3)));
+        let meter = super::Meter::start(Doer::Process);
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let (done, read) = (done.clone(), read.clone());
+                std::thread::spawn(move || {
+                    spin(Duration::from_millis(400));
+                    done.wait();
+                    read.wait();
+                })
+            })
+            .collect();
+        done.wait();
+        let cost = meter.cost();
+        read.wait();
+        workers.into_iter().for_each(|t| drop(t.join()));
+        drop(crowd);
+        eprintln!("two workers among spinning programs: {cost}");
         if !super::read(Doer::Process, super::Moment::End).counted {
             eprintln!("PASSED OVER: this system gives no counters of a process's time; the cost is the wall clock");
             return;
         }
+        assert!(cost.waited > Duration::ZERO && cost.work < cost.wall.mul_f64(0.75), "two workers among spinning programs: {cost}");
+    }
+
+    /// A PROCESS ON A MACHINE AT REST IS CHARGED ITS WALL: a worker that spins 300 ms and is joined.
+    #[test]
+    fn a_process_at_rest_is_charged_its_wall() {
+        let _alone = alone();
+        let cost = cost_of(Doer::Process, || std::thread::spawn(|| spin(Duration::from_millis(300))).join()).cost;
         assert!(cost.work >= Duration::from_millis(250), "a worker spinning 300 ms: {cost}");
     }
 }
