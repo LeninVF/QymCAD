@@ -57,15 +57,15 @@ fn every_constraint_has_correct_analytic_derivatives() {
     check("PointOnCircle", Constraint::PointOnCircle { p: 5, c: 3 });
     check("PointOnEllipse", Constraint::PointOnEllipse { p: 5, c: 1, ma: 2, mi: 3 });
     // the rows on curves of any kind, read at the places found on the curves
-    let spline = |nodes: Vec<u64>| CurveRef::Spline { nodes, handles: Vec::new(), ends: Ends::Open };
+    let spline = |nodes: Vec<u64>| CurveRef::SplineNow { nodes, handles: Vec::new(), ends: Ends::Open };
     check("PointOnCurve (spline)", Constraint::PointOnCurve { p: 5, on: spline(vec![1, 2, 4, 3]) });
-    check("PointOnCurve (ellipse)", Constraint::PointOnCurve { p: 5, on: CurveRef::Oval { c: 1, ma: 2, mi: 3 } });
+    check("PointOnCurve (ellipse)", Constraint::PointOnCurve { p: 5, on: CurveRef::Oval { c: 1, ma: 2, mi: 3, span: None } });
     check("TangentCurves (circle, spline)", Constraint::TangentCurves { one: CurveRef::Round { c: 3 }, other: spline(vec![1, 2, 4, 5]), near: None, end: None });
-    check("TangentCurves (line, ellipse)", Constraint::TangentCurves { one: CurveRef::Line { a: 1, b: 2 }, other: CurveRef::Oval { c: 3, ma: 4, mi: 5 }, near: None, end: None });
+    check("TangentCurves (line, ellipse)", Constraint::TangentCurves { one: CurveRef::Line { a: 1, b: 2 }, other: CurveRef::Oval { c: 3, ma: 4, mi: 5, span: None }, near: None, end: None });
     let distance = |from: CurveRef, to: CurveRef| Constraint::CurveDistance { from, to, d: 1.5, off: 0.0, expr: String::new(), driven: false, at: None };
     check("CurveDistance (point, spline)", distance(CurveRef::Point { p: 3 }, spline(vec![1, 2, 4, 5])));
     check("CurveDistance (circle, spline)", distance(CurveRef::Round { c: 3 }, spline(vec![1, 2, 4, 5])));
-    check("CurveDistance (arc, ellipse)", distance(CurveRef::Arc { c: 4, a: 1, b: 2, winding: Winding::Ccw }, CurveRef::Oval { c: 3, ma: 5, mi: 1 }));
+    check("CurveDistance (arc, ellipse)", distance(CurveRef::Arc { c: 4, a: 1, b: 2, winding: Winding::Ccw }, CurveRef::Oval { c: 3, ma: 5, mi: 1, span: None }));
     check("TangentCurves (at an end)", Constraint::TangentCurves { one: CurveRef::Line { a: 1, b: 2 }, other: spline(vec![2, 4, 5]), near: None, end: Some(2) });
     check("ArcLength(ccw)", Constraint::ArcLength { c: 3, a: 1, b: 2, ccw: true, len: 5.0, off: 0.0, expr: String::new(), driven: false });
     check("ArcLength(cw)", Constraint::ArcLength { c: 3, a: 1, b: 2, ccw: false, len: 5.0, off: 0.0, expr: String::new(), driven: false });

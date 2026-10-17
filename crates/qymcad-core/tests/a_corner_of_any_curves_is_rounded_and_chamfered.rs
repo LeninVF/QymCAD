@@ -8,7 +8,7 @@
 use qymcad_core::feature::{ChamferMode, Ends, Purpose, Winding};
 use qymcad_core::geom::Point2;
 use qymcad_core::model::curve::Curve;
-use qymcad_core::model::{entity_ends, ChamferLegs, EllipseArcSpec, Id, Project};
+use qymcad_core::model::{entity_ends, ChamferLegs, Constraint, EllipseArcSpec, Id, Project};
 
 fn p2(at: [f64; 2]) -> Point2 {
     Point2::new(at[0], at[1])
@@ -266,4 +266,35 @@ fn every_fillet_holds_its_corner_when_a_side_is_dragged() {
         }
     }
     assert!(failures.is_empty(), "{} of 16:\n{}", failures.len(), failures.join("\n"));
+}
+
+/// A FILLET TOUCHES EVERY CURVE IT ENDS ON AT THAT END: the touching of the arc with a spline or an arc of an ellipse is
+/// held where the two meet, the way of each read at the shared end - not sought along the curves, where the place of
+/// touching could slide off the end the arc stands on.
+#[test]
+fn a_fillet_touches_a_curve_of_any_kind_at_the_end_it_shares_with_it() {
+    let kinds = ["line", "arc", "open spline", "arc of an ellipse"];
+    let mut failures = Vec::new();
+    for first in kinds {
+        for second in ["open spline", "arc of an ellipse"] {
+            let mut corner = laid([first, second]);
+            let si = corner.si;
+            if !corner.p.fillet_at_vertex(si, corner.vertex, 2.0) {
+                failures.push(format!("{first} to {second}: refused"));
+                continue;
+            }
+            let along: Vec<String> = corner.p.sketches[si]
+                .constraints
+                .iter()
+                .filter_map(|c| match c {
+                    Constraint::TangentCurves { end: None, .. } => Some(format!("{c:?}")),
+                    _ => None,
+                })
+                .collect();
+            if !along.is_empty() {
+                failures.push(format!("{first} to {second}: a touching sought along the curves, not held at the end: {}", along.join("; ")));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} of 8:\n{}", failures.len(), failures.join("\n"));
 }

@@ -198,11 +198,7 @@ pub(crate) fn touch_row(now: &Now, pair: [&CurveRef; 2], near: Option<[f64; 2]>,
 /// The sine of the turn between the way of the curve of the pair that ends at `p`, there, and the way of the other at the
 /// place nearest `p`.
 fn end_turn(now: &Now, [one, other]: [&CurveRef; 2], p: Id) -> Option<f64> {
-    let ends_at = |on: &CurveRef| match on {
-        CurveRef::Line { a, b } => [*a, *b].contains(&p),
-        CurveRef::Spline { nodes, ends, .. } => *ends == crate::feature::Ends::Open && (nodes.first() == Some(&p) || nodes.last() == Some(&p)),
-        _ => false,
-    };
+    let ends_at = |on: &CurveRef| on.open_ends().is_some_and(|e| e.contains(&p));
     let (owner, other) = if ends_at(one) { (one, other) } else { (other, one) };
     let (c, o, q) = (now.curve(owner, Reach::Ends)?, now.curve(other, Reach::Straight)?, now.point(p)?);
     let t = if c.at(0.0).dist(q) <= c.at(1.0).dist(q) { 0.0 } else { 1.0 };
@@ -230,14 +226,8 @@ fn gone(now: &Now, curve: &CurveRef, on: f64) -> Option<Gone> {
 }
 
 fn touching<'a>(now: &Now, [one, other]: [&'a CurveRef; 2], near: Option<[f64; 2]>, on: f64) -> Option<Touching<'a>> {
-    let rank = |r: &CurveRef| match r {
-        CurveRef::Point { .. } | CurveRef::Line { .. } => 0,
-        CurveRef::Round { .. } | CurveRef::Arc { .. } => 1,
-        CurveRef::Oval { .. } => 2,
-        CurveRef::Spline { .. } => 3,
-    };
     // the simpler is read along; `swapped` when the curve read to is the second of the pair
-    let first_along = rank(one) < rank(other);
+    let first_along = one.order() < other.order();
     let read = |swapped: bool| -> Option<Touching<'a>> {
         let (to, along) = if swapped { (other, one) } else { (one, other) };
         // the place last touched at, as [on the curve read to, on the curve read along]
@@ -373,28 +363,21 @@ struct Least<'a> {
 fn least<'a>(now: &Now, [from, to]: [&'a CurveRef; 2]) -> Option<Least<'a>> {
     let end = |p: Id, on: &'a CurveRef| foot(now, p, on).map(|f| Least { value: point_off_at(now, p, on, f), at: Nearest::End { p, on, foot: f } });
     let mut found: Vec<Least<'a>> = Vec::new();
-    match (from, to) {
-        (CurveRef::Point { p }, on) | (on, CurveRef::Point { p }) => found.extend(end(*p, on)),
-        _ => {
+    // a point measured to a curve, either way round
+    let point = from.as_point().map(|p| (p, to)).or_else(|| to.as_point().map(|p| (p, from)));
+    match point {
+        Some((p, on)) => found.extend(end(p, on)),
+        None => {
             found.extend(touching(now, [from, to], None, 0.0).map(|t| Least { value: gap_at(now, &t), at: Nearest::Pair(t) }));
             for [curve, other] in [[from, to], [to, from]] {
-                for p in open_ends(curve).into_iter().flatten() {
+                // the ends of an open curve, not a line's, read as its whole straight
+                for p in curve.open_ends().filter(|_| !curve.is_straight()).into_iter().flatten() {
                     found.extend(end(p, other));
                 }
             }
         }
     }
     found.into_iter().min_by(|x, y| x.value.abs().total_cmp(&y.value.abs()))
-}
-
-/// The two ends of an open curve a distance may stand at: an arc's, an open spline's first and last nodes - not a line's,
-/// read as its whole straight.
-fn open_ends(on: &CurveRef) -> Option<[Id; 2]> {
-    match on {
-        CurveRef::Arc { a, b, .. } => Some([*a, *b]),
-        CurveRef::Spline { nodes, ends: crate::feature::Ends::Open, .. } => Some([*nodes.first()?, *nodes.last()?]),
-        _ => None,
-    }
 }
 
 /// The least distance read where `at` stands - its row read at fixed places, as the touching's is.
@@ -433,7 +416,7 @@ pub fn distance_ends(points: &[crate::model::SketchPoint], radii: &[RadiusVar], 
 /// is flat in them there, so the steps need not look for them again.
 pub(crate) fn numeric_row(c: &Constraint, now: &Now) -> Vec<Slope> {
     let mut vars: Vec<usize> = c.points().iter().filter_map(|id| now.idx.get(id)).flat_map(|&i| [2 * i, 2 * i + 1]).collect();
-    let rounds = |on: &CurveRef| if let CurveRef::Round { c } = on { now.ridx.get(c).copied() } else { None };
+    let rounds = |on: &CurveRef| on.radius_centre().and_then(|c| now.ridx.get(&c).copied());
     match c {
         Constraint::PointOnCurve { on, .. } => vars.extend(rounds(on)),
         Constraint::TangentCurves { one, other, .. } | Constraint::CurveDistance { from: one, to: other, .. } => vars.extend(rounds(one).into_iter().chain(rounds(other))),

@@ -583,14 +583,7 @@ fn ellipse_scale(x0: &[f64], at: [usize; 3]) -> f64 {
 /// accepting it and not counting it.
 pub(crate) fn cons_ok(c: &Constraint, has: &impl Fn(Id) -> bool, is_center: &impl Fn(Id) -> bool) -> bool {
     // a curve of a constraint can be read: its points there, a circle's centre the centre of one, a spline of two nodes
-    let curve_ok = |on: &crate::model::CurveRef| {
-        let readable = match on {
-            crate::model::CurveRef::Round { c } | crate::model::CurveRef::Arc { c, .. } => is_center(*c),
-            crate::model::CurveRef::Spline { nodes, .. } => nodes.len() >= 2,
-            _ => true,
-        };
-        readable && on.points().into_iter().all(has)
-    };
+    let curve_ok = |on: &crate::model::CurveRef| on.readable(&|c| is_center(c)) && on.points().into_iter().all(has);
     match *c {
         Constraint::Fixed { p } => has(p),
         Constraint::Horizontal { a, b } | Constraint::Vertical { a, b } | Constraint::Orientation { a, b, .. } | Constraint::Coincident { a, b } | Constraint::Distance { a, b, .. } => {

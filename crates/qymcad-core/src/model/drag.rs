@@ -361,7 +361,7 @@ impl Project {
                 None => {}
             }
         }
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).cloned().collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).map(|c| s.as_solved(c)).collect();
         active.extend(self.entity_intrinsics(si));
         let part = crate::solver::part_holding(&s.points, &radii, &active, d)?;
         let carried = s.carried_with(d);

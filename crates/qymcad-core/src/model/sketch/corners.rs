@@ -364,52 +364,10 @@ impl Project {
         if !self.corner_at(si, corner) {
             return None;
         }
-        // A CORNER WITH A CURVE IN IT is read off the curves themselves: taken along the chords to the far ends, the
-        // preview of a fillet between two arcs of crossing circles stood 1.9 mm off the arc the fillet laid, and between the
-        // halves of two circles, whose far ends are one point, it was refused as a corner of no angle
-        if !self.both_lines(si, [e1, e2]) {
-            return self.blend_any(si, corner, cut);
-        }
-        let (pcx, pcy) = self.point_xy(si, pid)?;
-        // the direction away from the corner along each edge, and how long that edge is
-        let dir = |me: &Self, eid: Id| -> Option<(f64, f64, f64)> {
-            let (a, b) = me.edge_end_ids(si, eid)?;
-            let other = if a == pid { b } else { a };
-            let (ox, oy) = me.point_xy(si, other)?;
-            let (dx, dy) = (ox - pcx, oy - pcy);
-            let l = (dx * dx + dy * dy).sqrt();
-            (l > 1e-9).then_some((dx / l, dy / l, l))
-        };
-        let (Some((d1x, d1y, l1)), Some((d2x, d2y, l2))) = (dir(self, e1), dir(self, e2)) else { return None };
-        let shorter = l1.min(l2);
-        let theta = (d1x * d2x + d1y * d2y).clamp(-1.0, 1.0).acos();
-        let at = |dx: f64, dy: f64, d: f64| [pcx + dx * d, pcy + dy * d];
-        // THE MOST THE CORNER TAKES: a chamfer's legs short of the far end of each line, a radius whose touching points
-        // stand at r / tan(theta / 2) from the corner for a fillet. Past this there is nothing to show.
-        let value = match cut {
-            CornerCut::Chamfer(legs) => {
-                let (a, b) = legs.along(theta)?;
-                if a >= l1 * (1.0 - 1e-9) || b >= l2 * (1.0 - 1e-9) {
-                    return None;
-                }
-                return Some(CornerBlend { vertex: [pcx, pcy], ends: [at(d1x, d1y, a), at(d2x, d2y, b)], arc: None });
-            }
-            // the radius the size makes on this corner, whose arc turns through pi less the angle of its edges
-            CornerCut::Fillet(size) => size.radius_on(std::f64::consts::PI - theta)?,
-        };
-        let limit = shorter * (theta / 2.0).tan();
-        if value <= 1e-6 || !limit.is_finite() || value >= limit * (1.0 - 1e-9) {
-            return None;
-        }
-        let half = (theta / 2.0).max(1e-6);
-        let along = value / half.tan(); // where the arc touches each line
-        let (bx, by) = (d1x + d2x, d1y + d2y);
-        let bl = (bx * bx + by * by).sqrt();
-        if bl < 1e-9 {
-            return None;
-        }
-        let out = value / half.sin(); // the centre stands this far from the corner, along the bisector
-        Some(CornerBlend { vertex: [pcx, pcy], ends: [at(d1x, d1y, along), at(d2x, d2y, along)], arc: Some(([pcx + bx / bl * out, pcy + by / bl * out], value)) })
+        // READ OFF THE CURVES THEMSELVES, by the path the cut takes (`blend_any`), whatever their kinds: taken along the
+        // chords to the far ends, the preview of a fillet between two arcs of crossing circles stood 1.9 mm off the arc
+        // the fillet laid, and a radius taking a side of two lines whole was laid but not shown
+        self.blend_any(si, corner, cut)
     }
     /// THE TWO EDGES OF THE CORNER AT `pid`, out of every edge that meets there.
     ///
@@ -526,8 +484,7 @@ impl Project {
         let Some(pair) = self.vertex_pair(si, pid, Some((x, y))) else { return false };
         self.chamfer_corner(si, CornerAt { point: pid, pair }, legs, toward)
     }
-    /// The cut of `legs` off the corner the two named edges make: two lines by `chamfer_lines`, a corner with a curve in
-    /// it cut along the curve by `chamfer_any` - its legs measured straight from the corner.
+    /// The cut of `legs` off the corner the two named edges make, at the point they share (`chamfer_corner`).
     pub fn chamfer_lines_of_pair(&mut self, si: usize, (e1, e2): (Id, Id), legs: ChamferLegs, toward: Option<Point2>) -> bool {
         let Some(point) = self.corner_of_pair(si, e1, e2) else {
             return false; // two lines in one straight line: nothing is cut, and the cut would be along them

@@ -331,7 +331,7 @@ impl Project {
     /// fully constrained; a non-zero second value means there are redundant constraints.
     pub fn sketch_dof(&self, si: usize) -> (i32, i32) {
         let Some(s) = self.sketches.get(si) else { return (0, 0) };
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).cloned().collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).map(|c| s.as_solved(c)).collect();
         active.extend(self.entity_intrinsics(si)); // Arcs keep their endpoints on the circle: five degrees of
                                                    // freedom for a free arc.
         crate::solver::dof(&s.points, &self.entity_radii(si), &active)
@@ -358,10 +358,10 @@ impl Project {
             return false;
         }
         let intr = self.entity_intrinsics(si);
-        let mut without: Vec<Constraint> = s.constraints.iter().enumerate().filter(|(i, c)| *i != ci && !c.is_driven()).map(|(_, c)| c.clone()).collect();
+        let mut without: Vec<Constraint> = s.constraints.iter().enumerate().filter(|(i, c)| *i != ci && !c.is_driven()).map(|(_, c)| s.as_solved(c)).collect();
         without.extend(intr.iter().cloned());
         let mut with = without;
-        with.push(s.constraints[ci].clone());
+        with.push(s.as_solved(&s.constraints[ci]));
         // The rank did not grow, so the dimension constrains nothing.
         crate::solver::freedom_taken(&s.points, &self.entity_radii(si), &with, with.len() - 1) == 0
     }
@@ -375,7 +375,7 @@ impl Project {
         // the sketch's own constraints that constrain (not the reference ones), by their place in the sketch, then the
         // entities' own
         let at: Vec<usize> = (0..s.constraints.len()).filter(|&ci| !s.constraints[ci].is_driven()).collect();
-        let mut active: Vec<Constraint> = at.iter().map(|&ci| s.constraints[ci].clone()).collect();
+        let mut active: Vec<Constraint> = at.iter().map(|&ci| s.as_solved(&s.constraints[ci])).collect();
         active.extend(self.entity_intrinsics(si));
         crate::solver::redundant(&s.points, &self.entity_radii(si), &active, at.len()).into_iter().map(|k| at[k]).collect()
     }
@@ -386,10 +386,10 @@ impl Project {
         let Some(s) = self.sketches.get(si) else { return false };
         let intr = self.entity_intrinsics(si);
         let radii = self.entity_radii(si);
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|x| !x.is_driven()).cloned().collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|x| !x.is_driven()).map(|c| s.as_solved(c)).collect();
         active.extend(intr.iter().cloned());
         let mut with = active;
-        with.push(c.clone());
+        with.push(s.as_solved(&c));
         // JUDGED WHERE THE CONSTRAINTS HOLD, on a copy solved with the new one: at the geometry as clicked, nearly but not
         // quite satisfying what is laid, constraints that follow from each other read as independent. A U drawn with
         // Line, its corners squared, got a Parallel between its legs on top of the two Perpendiculars that imply it, and
@@ -408,7 +408,7 @@ impl Project {
     pub fn independent_of(&self, si: usize, new: Vec<Constraint>) -> Vec<Constraint> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let radii = self.entity_radii(si);
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|x| !x.is_driven()).cloned().collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|x| !x.is_driven()).map(|c| s.as_solved(c)).collect();
         active.extend(self.entity_intrinsics(si));
         let mut kept = Vec::new();
         for c in new {
@@ -416,7 +416,7 @@ impl Project {
                 kept.push(c);
                 continue;
             }
-            active.push(c.clone());
+            active.push(s.as_solved(&c));
             if crate::solver::freedom_taken(&s.points, &radii, &active, active.len() - 1) > 0 {
                 kept.push(c);
             } else {
@@ -443,7 +443,7 @@ impl Project {
             )
         };
         let mut cs = s.constraints.clone();
-        let active = |cs: &[Constraint]| -> Vec<Constraint> { cs.iter().filter(|c| !c.is_driven()).cloned().chain(intr.iter().cloned()).collect() };
+        let active = |cs: &[Constraint]| -> Vec<Constraint> { cs.iter().filter(|c| !c.is_driven()).map(|c| s.as_solved(c)).chain(intr.iter().cloned()).collect() };
         let mut gone = 0;
         for ci in (0..had.min(cs.len())).rev() {
             if !relation(&cs[ci]) || !constraint_point_ids(&cs[ci]).iter().all(|p| among.contains(p)) {
@@ -504,7 +504,7 @@ impl Project {
     pub fn sketch_checks(&self, si: usize) -> crate::solver::Checks {
         let Some(s) = self.sketches.get(si) else { return crate::solver::Checks { dof: (0, 0), free: Vec::new(), redundant: Vec::new() } };
         let at: Vec<usize> = (0..s.constraints.len()).filter(|&ci| !s.constraints[ci].is_driven()).collect();
-        let mut active: Vec<Constraint> = at.iter().map(|&ci| s.constraints[ci].clone()).collect();
+        let mut active: Vec<Constraint> = at.iter().map(|&ci| s.as_solved(&s.constraints[ci])).collect();
         active.extend(self.entity_intrinsics(si));
         let radii = self.entity_radii(si);
         let mut checks = s.checked.with(|memo| crate::solver::checks_remembered(&s.points, &radii, &active, at.len(), memo));
@@ -513,7 +513,7 @@ impl Project {
     }
     pub fn sketch_free_points(&self, si: usize) -> Vec<bool> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).cloned().collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).map(|c| s.as_solved(c)).collect();
         active.extend(self.entity_intrinsics(si));
         crate::solver::free_points(&s.points, &self.entity_radii(si), &active)
     }
@@ -789,8 +789,7 @@ impl Project {
             }
         }
         s.points.retain(|p| used.contains(&p.id) || protected.contains(&p.id));
-        let alive: std::collections::HashSet<Id> = s.points.iter().map(|p| p.id).collect();
-        s.constraints.retain(|c| constraint_point_ids(c).iter().all(|id| alive.contains(id)));
+        s.drop_constraints_on_what_is_gone();
     }
     /// Delete the selected entities, together with the points they orphan, the constraints on those points,
     /// and the constraints that hung on the deleted lines by their pair of endpoints — even when those
@@ -848,8 +847,7 @@ impl Project {
             let protected: std::collections::HashSet<Id> =
                 s.system_ids().into_iter().chain(s.constraints.iter().filter_map(|c| if let Constraint::Midpoint { p, .. } = c { Some(*p) } else { None })).collect();
             s.points.retain(|p| used.contains(&p.id) || protected.contains(&p.id));
-            let alive: std::collections::HashSet<Id> = s.points.iter().map(|p| p.id).collect();
-            s.constraints.retain(|c| constraint_point_ids(c).iter().all(|id| alive.contains(id)));
+            s.drop_constraints_on_what_is_gone();
         }
         self.regen_sketch(si);
         // the sides a broken rectangle leaves keep what they plainly have, as they do in a sketch of plain lines
@@ -892,8 +890,7 @@ impl Project {
                 s.system_ids().into_iter().chain(s.constraints.iter().filter_map(|c| if let Constraint::Midpoint { p, .. } = c { Some(*p) } else { None })).collect();
             set.extend(going.iter().flat_map(entity_points).filter(|p| !used.contains(p) && !protected.contains(p)));
             s.points.retain(|p| !set.contains(&p.id));
-            let alive: std::collections::HashSet<Id> = s.points.iter().map(|p| p.id).collect();
-            s.constraints.retain(|c| constraint_point_ids(c).iter().all(|id| alive.contains(id)));
+            s.drop_constraints_on_what_is_gone();
             if set.contains(&s.origin) {
                 s.origin = 0;
             }

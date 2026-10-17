@@ -66,8 +66,10 @@ impl Project {
             }
             std::iter::once(0.0).chain(at.iter().copied()).zip(at.iter().copied().chain(std::iter::once(1.0))).map(|(a, b)| [a, b]).collect()
         };
+        let held = self.where_refs_hold(si, eid);
         self.sketches[si].entities.retain(|x| x.id != eid);
         let pieces: Vec<Id> = runs.iter().map(|[a, b]| self.lay_curve(si, &c.piece([*a, *b]), how)).collect();
+        self.refs_go_to_pieces(si, eid, &held, &pieces);
         self.break_figures_of(si, &[]);
         self.regen_sketch(si);
         pieces

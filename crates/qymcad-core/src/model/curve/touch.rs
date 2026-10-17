@@ -173,16 +173,16 @@ impl Project {
         // TWO CURVES SHARING AN END TOUCH THERE, the ways of the two held alike at it: a tangent arc gone on from a spline,
         // the arc of a fillet. Sought along themselves, the touching of an arc with the spline it went on from was found
         // at 0.93 of the spline, and the joint stood 0.075 rad apart.
-        // The row of a touching at an end reads whose end it is off a line or a spline, the one kind of reference that
-        // has ends: an arc of an ellipse held so leaned 0.8 off touching, and is sought along itself as before.
-        let ends_read = [&r1, &r2].iter().any(|r| matches!(r, CurveRef::Line { .. } | CurveRef::Spline { .. }));
-        let shared = entity_ends(e1).and_then(|a| entity_ends(e2).and_then(|b| a.into_iter().find(|p| b.contains(p)))).filter(|_| ends_read);
+        // The row of a touching at an end reads whose end it is and the way the curve goes there, so both are taken as
+        // drawn, between their ends (`curve_ref_drawn`): an arc of an ellipse taken whole had no ends and leaned 0.8 off
+        // touching the arc of its fillet.
+        let shared = entity_ends(e1).and_then(|a| entity_ends(e2).and_then(|b| a.into_iter().find(|p| b.contains(p))));
         if let (Some(p), Some(c1), Some(c2)) = (shared, Curve::of(s, e1), Curve::of(s, e2)) {
             let q = s.point(p).map(|q| Point2::new(q.x, q.y));
             let near = q.map(|q| [c1.nearest(q).t, c2.nearest(q).t]);
-            return vec![Constraint::TangentCurves { one: r1, other: r2, near, end: Some(p) }];
+            return vec![Constraint::TangentCurves { one: curve_ref_drawn(e1), other: curve_ref_drawn(e2), near, end: Some(p) }];
         }
-        let near = crate::solver::touching_places(&s.points, &self.entity_radii(si), [&r1, &r2], None);
+        let near = crate::solver::touching_places(&s.points, &self.entity_radii(si), [&s.resolved(&r1), &s.resolved(&r2)], None);
         // the end the touching comes past, of the first of the two it comes past: one end held on the other curve is the
         // whole of a touching at an end, and both held were one more than the two can meet
         let past = |e: &SketchEntity, place: f64| {

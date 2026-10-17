@@ -92,23 +92,7 @@ impl Curve {
                 let winding = if *ccw { crate::feature::Winding::Ccw } else { crate::feature::Winding::Cw };
                 Curve::arc_of(ArcEnds { centre: at(*center)?, from: at(*a)?, to: at(*b)?, winding })
             }
-            EntityKind::Ellipse { c, ma, mi, span } => {
-                let (pc, pa, pi) = (at(*c)?, at(*ma)?, at(*mi)?);
-                let (major, minor) = (pa - pc, pi - pc);
-                let (from, sweep) = match span {
-                    None => (0.0, TURN),
-                    Some(sp) => {
-                        let axes = [pc, pa, pi];
-                        let (t0, t1) = (tess::ellipse_angle(axes, at(sp.from)?), tess::ellipse_angle(axes, at(sp.to)?));
-                        let sweep = match sp.winding {
-                            crate::feature::Winding::Ccw => (t1 - t0).rem_euclid(TURN),
-                            crate::feature::Winding::Cw => -(t0 - t1).rem_euclid(TURN),
-                        };
-                        (t0, sweep)
-                    }
-                };
-                Curve::Oval { centre: pc, major, minor, from, sweep }
-            }
+            EntityKind::Ellipse { c, ma, mi, span } => Curve::oval_of(at, [*c, *ma, *mi], span.as_ref())?,
             EntityKind::Spline { nodes, handles, ends } => Curve::spline(nodes.iter().map(|id| at(*id)).collect::<Option<_>>()?, handles, *ends),
         })
     }
@@ -126,6 +110,26 @@ impl Curve {
         Curve::Round { centre, r: centre.dist(from), from: a0, sweep }
     }
 
+    /// THE ELLIPSE OF FRAME `[centre, major end, minor end]`, its points where `at` puts them: whole, or between the ends of
+    /// `span` the way it goes.
+    fn oval_of(at: &dyn Fn(Id) -> Option<Point2>, [c, ma, mi]: [Id; 3], span: Option<&EllipseSpan>) -> Option<Curve> {
+        let (pc, pa, pi) = (at(c)?, at(ma)?, at(mi)?);
+        let (major, minor) = (pa - pc, pi - pc);
+        let (from, sweep) = match span {
+            None => (0.0, TURN),
+            Some(sp) => {
+                let axes = [pc, pa, pi];
+                let (t0, t1) = (tess::ellipse_angle(axes, at(sp.from)?), tess::ellipse_angle(axes, at(sp.to)?));
+                let sweep = match sp.winding {
+                    crate::feature::Winding::Ccw => (t1 - t0).rem_euclid(TURN),
+                    crate::feature::Winding::Cw => -(t0 - t1).rem_euclid(TURN),
+                };
+                (t0, sweep)
+            }
+        };
+        Some(Curve::Oval { centre: pc, major, minor, from, sweep })
+    }
+
     /// THE CURVE A CONSTRAINT REFERS TO (`CurveRef`), its points where `at` puts them and the radius of a circle about a
     /// centre where `radius` reads it: a line between its ends, a circle whole, an arc between its ends, an ellipse whole,
     /// a spline as drawn. `None` for a point, or where a point or a radius is missing.
@@ -136,11 +140,9 @@ impl Curve {
             CurveRef::Line { a, b } => Curve::Line { a: at(*a)?, b: at(*b)? },
             CurveRef::Round { c } => Curve::Round { centre: at(*c)?, r: radius(*c)?, from: 0.0, sweep: TURN },
             CurveRef::Arc { c, a, b, winding } => Curve::arc_of(ArcEnds { centre: at(*c)?, from: at(*a)?, to: at(*b)?, winding: *winding }),
-            CurveRef::Oval { c, ma, mi } => {
-                let centre = at(*c)?;
-                Curve::Oval { centre, major: at(*ma)? - centre, minor: at(*mi)? - centre, from: 0.0, sweep: TURN }
-            }
-            CurveRef::Spline { nodes, handles, ends } => Curve::spline(nodes.iter().map(|id| at(*id)).collect::<Option<_>>()?, handles, *ends),
+            CurveRef::Oval { c, ma, mi, span } => Curve::oval_of(at, [*c, *ma, *mi], span.as_ref())?,
+            CurveRef::Spline { .. } => return None,
+            CurveRef::SplineNow { nodes, handles, ends } => Curve::spline(nodes.iter().map(|id| at(*id)).collect::<Option<_>>()?, handles, *ends),
         })
     }
 

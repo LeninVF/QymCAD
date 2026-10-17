@@ -231,6 +231,12 @@ fn settle_centre(arms: [Arm; 2], sides: [f64; 2], start: Point2) -> Option<Round
 /// as asked; two legs each straight from the corner; a leg on the first and the cut at the angle from the first's way to
 /// the corner. `None` where a curve does not reach as far.
 pub fn chamfer(arms: [Arm; 2], legs: ChamferLegs) -> Option<[f64; 2]> {
+    // a leg of no length cuts nothing, and an angle of none or of a half turn cuts along a side
+    let leg_of_none = legs.first <= 1e-9 || (legs.mode == crate::feature::ChamferMode::TwoDist && legs.second <= 1e-9);
+    let flat = legs.mode == crate::feature::ChamferMode::DistAngle && !(legs.second > 0.0 && legs.second < 180.0);
+    if leg_of_none || flat {
+        return None;
+    }
     let corner = arms[0].corner();
     match legs.mode {
         crate::feature::ChamferMode::TwoDist => Some([arms[0].reach(legs.first)?, arms[1].reach(legs.second)?]),

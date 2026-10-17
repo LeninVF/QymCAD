@@ -124,7 +124,7 @@ impl Project {
             Constraint::Diameter { c: c1, .. } => vec![*c1],
             Constraint::DistancePL { p, a, b, .. } => vec![*p, *a, *b],
             Constraint::EdgeDistance { c1, c2, .. } => vec![*c1, *c2],
-            Constraint::CurveDistance { from, to, .. } => from.points().into_iter().chain(to.points()).collect(),
+            Constraint::CurveDistance { from, to, .. } => from.points().into_iter().chain(to.points()).chain(c.curve_ids()).collect(),
             Constraint::ArcLength { c: c1, a, b, .. } => vec![*c1, *a, *b],
             _ => return None,
         })

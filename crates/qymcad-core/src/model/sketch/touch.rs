@@ -41,7 +41,7 @@ impl Project {
     pub fn curve_distance_ends(&self, si: usize, c: &Constraint) -> Option<[Point2; 2]> {
         let s = self.sketches.get(si)?;
         let Constraint::CurveDistance { from, to, .. } = c else { return None };
-        crate::solver::distance_ends(&s.points, &self.entity_radii(si), [from, to])
+        crate::solver::distance_ends(&s.points, &self.entity_radii(si), [&s.resolved(from), &s.resolved(to)])
     }
 
     /// EVERY TOUCHING OF SKETCH `si` THAT HAS COME PAST AN END of a line or a spline, held at that end: the end put on the
@@ -50,12 +50,13 @@ impl Project {
     pub(crate) fn touchings_held_at_ends(&mut self, si: usize) -> bool {
         let radii = self.entity_radii(si);
         let Some(s) = self.sketches.get_mut(si) else { return false };
+        let solved: Vec<Constraint> = s.constraints.iter().map(|c| s.as_solved(c)).collect();
         let mut held: Vec<Constraint> = Vec::new();
-        for c in s.constraints.iter_mut() {
-            let Constraint::TangentCurves { one, other, near, end: end @ None } = c else { continue };
-            let Some([t1, t2]) = crate::solver::touching_places(&s.points, &radii, [one, other], *near) else { continue };
+        for (c, now) in s.constraints.iter_mut().zip(&solved) {
+            let (Constraint::TangentCurves { one, other, near, end: end @ None }, Constraint::TangentCurves { one: one_now, other: other_now, .. }) = (c, now) else { continue };
+            let Some([t1, t2]) = crate::solver::touching_places(&s.points, &radii, [one_now, other_now], *near) else { continue };
             let past = |on: &CurveRef, t: f64| {
-                let [start, finish] = open_ends(on)?;
+                let [start, finish] = on.open_ends()?;
                 if t < -1e-6 {
                     Some(start)
                 } else if t > 1.0 + 1e-6 {
@@ -64,10 +65,10 @@ impl Project {
                     None
                 }
             };
-            if let Some(p) = past(one, t1) {
+            if let Some(p) = past(one_now, t1) {
                 held.push(Constraint::PointOnCurve { p, on: other.clone() });
                 *end = Some(p);
-            } else if let Some(p) = past(other, t2) {
+            } else if let Some(p) = past(other_now, t2) {
                 held.push(Constraint::PointOnCurve { p, on: one.clone() });
                 *end = Some(p);
             }
@@ -75,14 +76,5 @@ impl Project {
         let any = !held.is_empty();
         s.constraints.extend(held);
         any
-    }
-}
-
-/// The two ends of an open curve of a constraint: a line's, an open spline's first and last nodes.
-fn open_ends(on: &CurveRef) -> Option<[Id; 2]> {
-    match on {
-        CurveRef::Line { a, b } | CurveRef::Arc { a, b, .. } => Some([*a, *b]),
-        CurveRef::Spline { nodes, ends: crate::feature::Ends::Open, .. } => Some([*nodes.first()?, *nodes.last()?]),
-        _ => None,
     }
 }

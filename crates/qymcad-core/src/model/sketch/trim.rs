@@ -139,6 +139,10 @@ impl Project {
         if let Some(e) = piece.and_then(|id| self.sketches[si].entities.iter_mut().find(|e| e.id == id)) {
             e.id = eid;
         }
+        // what holds to the piece holds to the curve it was
+        if let Some(id) = piece {
+            self.sketches[si].rename_curve_refs(crate::model::curve::refs::CurveNamed { was: id, now: eid });
+        }
     }
     /// WHERE A POINT STANDS in the drawing, or `None` where the sketch has no such point.
     pub fn point_xy(&self, si: usize, id: Id) -> Option<(f64, f64)> {

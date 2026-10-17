@@ -570,8 +570,8 @@ pub fn make_between_dim(sk: &mut qymcad_ui_state::SketchCtx, si: usize, r1: qymc
     };
     // A CURVE ON EITHER SIDE: the least distance to it, measured where the solve would
     let as_curve = |r: qymcad_ui_state::DimRef| match r {
-        qymcad_ui_state::DimRef::Point(p) => Some(qymcad_core::model::CurveRef::Point { p }),
-        qymcad_ui_state::DimRef::Line(a, b) => Some(qymcad_core::model::CurveRef::Line { a, b }),
+        qymcad_ui_state::DimRef::Point(p) => Some(qymcad_core::model::CurveRef::at_point(p)),
+        qymcad_ui_state::DimRef::Line(a, b) => Some(qymcad_core::model::CurveRef::line([a, b])),
         qymcad_ui_state::DimRef::Curve(eid) => sk.project.sketches[si].entity(eid).map(qymcad_core::model::curve_ref_drawn),
     };
     let to_curve = matches!(r1, qymcad_ui_state::DimRef::Curve(_)) || matches!(r2, qymcad_ui_state::DimRef::Curve(_));

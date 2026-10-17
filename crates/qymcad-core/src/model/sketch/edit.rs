@@ -431,7 +431,7 @@ impl Project {
     /// `Fixed` — an absolute-position anchor is not copied, since the copy is placed elsewhere. References to
     /// the axes, the origin or outside points are filtered out automatically, their points not being in the
     /// set. The clones carry the old ids.
-    pub(crate) fn internal_constraints(&self, si: usize, inside: &std::collections::HashSet<Id>) -> Vec<Constraint> {
+    pub(crate) fn internal_constraints(&self, si: usize, inside: &std::collections::HashSet<Id>, curves: &[Id]) -> Vec<Constraint> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         s.constraints
             .iter()
@@ -439,8 +439,9 @@ impl Project {
                 if matches!(c, Constraint::Fixed { .. }) {
                     return false;
                 }
-                let ps = constraint_point_ids(c);
-                !ps.is_empty() && ps.iter().all(|p| inside.contains(p))
+                // on the points of the set and on its curves - a spline is referred to by its id
+                let (ps, cs) = (constraint_point_ids(c), c.curve_ids());
+                (!ps.is_empty() || !cs.is_empty()) && ps.iter().all(|p| inside.contains(p)) && cs.iter().all(|e| curves.contains(e))
             })
             .cloned()
             .collect()
@@ -503,7 +504,7 @@ impl Project {
             // shape but not its anchor or its links to the axes.
             let inside: std::collections::HashSet<Id> = map.keys().copied().collect();
             let maps = CopyMaps { points: &map, curves: &curves, turn: &along };
-            let cons: Vec<Constraint> = self.internal_constraints(si, &inside).iter().map(|c| copied_constraint(c, &maps)).collect();
+            let cons: Vec<Constraint> = self.internal_constraints(si, &inside, eids_taken).iter().map(|c| copied_constraint(c, &maps)).collect();
             self.sketches[si].constraints.extend(cons);
         }
         let maps = CopyMaps { points: &map, curves: &curves, turn: &along };
@@ -526,8 +527,8 @@ impl Project {
         let points: Vec<(Id, f64, f64)> = s.points.iter().filter(|p| pids.contains(&p.id)).map(|p| (p.id, p.x, p.y)).collect();
         let entities: Vec<SketchEntity> = s.entities.iter().filter(|e| taken.contains(&e.id)).cloned().collect();
         let inside: std::collections::HashSet<Id> = pids.iter().copied().collect();
-        let constraints = self.internal_constraints(si, &inside); // Internal constraints and dimensions, without
-                                                                  // `Fixed` or axis references.
+        let constraints = self.internal_constraints(si, &inside, &taken); // Internal constraints and dimensions, without
+                                                                          // `Fixed` or axis references.
         GeomClip { points, entities, constraints, ref_x: rx, ref_y: ry, whole }
     }
     /// Paste snapshot `clip` into sketch `si` so that its reference point lands at `(tx, ty)`.
@@ -561,8 +562,9 @@ impl Project {
         }
         // The internal constraints and dimensions of the copy are re-pointed at the new points; every
         // reference stays within the set and is remapped through the map.
+        let maps = CopyMaps { points: &map, curves: &curves, turn: &|v| v };
         for c in &clip.constraints {
-            let nc = remap_constraint_via(c, &map);
+            let nc = copied_constraint(c, &maps);
             self.sketches[si].constraints.push(nc);
         }
         self.lay_copied_records(si, &clip.whole, &CopyMaps { points: &map, curves: &curves, turn: &|v| v });

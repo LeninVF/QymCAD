@@ -668,6 +668,25 @@ pub struct SplineHandle {
     pub end: Point2,
 }
 
+/// THE FORMULA FIELD OF A DIMENSION, read or changed as `$c` is borrowed: the one list of the kinds of dimension that
+/// carry a formula, for `dim_expr`, `expr` and `expr_mut` alike.
+macro_rules! dimension_formula {
+    ($c:expr) => {
+        match $c {
+            Constraint::Distance { expr, .. }
+            | Constraint::Angle { expr, .. }
+            | Constraint::AngleLines { expr, .. }
+            | Constraint::Diameter { expr, .. }
+            | Constraint::DistancePL { expr, .. }
+            | Constraint::EdgeDistance { expr, .. }
+            | Constraint::CurveDistance { expr, .. }
+            | Constraint::ArcLength { expr, .. } => Some(expr),
+            _ => None,
+        }
+    };
+}
+pub(crate) use dimension_formula;
+
 /// A sketch constraint or dimension, expressed through point ids. Solved by the sketch solver.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Constraint {
@@ -940,17 +959,7 @@ impl Constraint {
     /// The formula a dimension is set by, as typed (empty when a number was typed); `None` for a constraint that is
     /// not a dimension.
     pub fn dim_expr(&self) -> Option<&str> {
-        match self {
-            Constraint::Distance { expr, .. }
-            | Constraint::Angle { expr, .. }
-            | Constraint::AngleLines { expr, .. }
-            | Constraint::Diameter { expr, .. }
-            | Constraint::DistancePL { expr, .. }
-            | Constraint::EdgeDistance { expr, .. }
-            | Constraint::CurveDistance { expr, .. }
-            | Constraint::ArcLength { expr, .. } => Some(expr),
-            _ => None,
-        }
+        dimension_formula!(self).map(String::as_str)
     }
 
     /// A reference (driven) dimension or angle: it does not constrain the geometry, only displays a value.

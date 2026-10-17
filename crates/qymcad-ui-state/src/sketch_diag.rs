@@ -124,6 +124,7 @@ pub fn sketch_shape_key(project: &qymcad_core::model::Project, si: usize) -> u64
         for c in &s.constraints {
             std::mem::discriminant(c).hash(&mut h);
             c.points().hash(&mut h);
+            c.curve_ids().hash(&mut h);
             c.is_driven().hash(&mut h);
             // the values of the dimensions (a number edited without the points moving - before solving)
             if let Some(d) = c.dim_value() {

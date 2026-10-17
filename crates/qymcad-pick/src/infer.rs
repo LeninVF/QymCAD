@@ -314,7 +314,7 @@ pub fn constraint_glyphs(pick: &PickCtx, rect: Rect, si: usize) -> Vec<(usize, P
             Constraint::PointOnCurve { p, .. } | Constraint::PointOnEllipse { p, .. } => push(&mut out, ci, pt(p).map(|q| sh.at(q) + egui::vec2(8.0, 8.0)), Gly::PointOnCircle),
             Constraint::TangentCurves { end: Some(p), .. } => push(&mut out, ci, pt(p).map(|q| sh.at(q) + egui::vec2(8.0, -8.0)), Gly::Tangent),
             Constraint::TangentCurves { ref one, ref other, .. } => {
-                if let (Some(&a), Some(&b)) = (one.points().first(), other.points().first()) {
+                if let (Some(&a), Some(&b)) = (s.resolved(one).points().first(), s.resolved(other).points().first()) {
                     push(&mut out, ci, mid(a, b), Gly::Tangent);
                 }
             }

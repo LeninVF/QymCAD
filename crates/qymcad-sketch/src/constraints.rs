@@ -14,12 +14,11 @@ pub fn constraint_parts(dc: &qymcad_ui_state::DrawCtx, si: usize, c: &qymcad_cor
     let Some(s) = dc.project.sketches.get(si) else { return Vec::new() };
     let owner = |pid: Id| -> Option<Id> { s.entities.iter().find(|e| qymcad_core::model::entity_points(e).contains(&pid)).map(|e| e.id) };
     let mut out: Vec<String> = Vec::new();
-    for pid in c.points() {
-        if let Some(eid) = owner(pid) {
-            let name = sketch_entity_name(dc.project, si, eid);
-            if !name.is_empty() && !out.contains(&name) {
-                out.push(name);
-            }
+    // the curves it stands on by their points, and those it names by id
+    for eid in c.points().into_iter().filter_map(owner).chain(c.curve_ids()) {
+        let name = sketch_entity_name(dc.project, si, eid);
+        if !name.is_empty() && !out.contains(&name) {
+            out.push(name);
         }
     }
     out

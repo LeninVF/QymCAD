@@ -30,6 +30,7 @@ pub(crate) struct CopyMaps<'a> {
 /// turn of the copy turns its sides, and a side held at 30 deg mirrored about the Y axis stands at 150 deg.
 pub(crate) fn copied_constraint(c: &Constraint, maps: &CopyMaps) -> Constraint {
     let mut nc = remap_constraint_via(c, maps.points);
+    nc.each_curve_mut(|on| on.rename_curve(&|id| maps.curves.get(&id).copied()));
     if let Constraint::Orientation { deg, .. } = &mut nc {
         let (s, k) = deg.to_radians().sin_cos();
         let [x, y] = (maps.turn)([k, s]);

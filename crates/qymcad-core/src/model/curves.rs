@@ -338,34 +338,14 @@ impl Constraint {
     /// Expression of a dimensional constraint, when it has one; used to rebuild selectively by parameter
     /// name.
     pub fn expr(&self) -> Option<&str> {
-        match self {
-            Constraint::Distance { expr, .. }
-            | Constraint::DistancePL { expr, .. }
-            | Constraint::Diameter { expr, .. }
-            | Constraint::EdgeDistance { expr, .. }
-            | Constraint::CurveDistance { expr, .. }
-            | Constraint::Angle { expr, .. }
-            | Constraint::AngleLines { expr, .. }
-            | Constraint::ArcLength { expr, .. } => Some(expr).filter(|e| !e.is_empty()).map(|e| e.as_str()),
-            _ => None,
-        }
+        self.dim_expr().filter(|e| !e.is_empty())
     }
 
     /// Mutable access to a dimension expression. Renaming a driver needs it: sketch formulas reference
     /// names just as project parameters and feature parameters do, and skipping them would leave the
     /// document holding references to a name that no longer exists.
     pub fn expr_mut(&mut self) -> Option<&mut String> {
-        match self {
-            Constraint::Distance { expr, .. }
-            | Constraint::DistancePL { expr, .. }
-            | Constraint::Diameter { expr, .. }
-            | Constraint::EdgeDistance { expr, .. }
-            | Constraint::CurveDistance { expr, .. }
-            | Constraint::Angle { expr, .. }
-            | Constraint::AngleLines { expr, .. }
-            | Constraint::ArcLength { expr, .. } => Some(expr),
-            _ => None,
-        }
+        dimension_formula!(self)
     }
 }
 

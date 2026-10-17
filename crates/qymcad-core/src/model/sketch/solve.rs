@@ -38,7 +38,7 @@ impl Project {
     pub fn sketch_residuals(&self, si: usize) -> Vec<f64> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let radii = self.entity_radii(si);
-        let active: Vec<Constraint> = s.constraints.clone();
+        let active: Vec<Constraint> = s.constraints.iter().map(|c| s.as_solved(c)).collect();
         crate::solver::residual_per_constraint(&s.points, &radii, &active)
     }
     /// Conflicting constraints of a sketch: the indices of constraints that contradict each other, so the
@@ -74,7 +74,7 @@ impl Project {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let radii = self.entity_radii(si);
         let nuser = s.constraints.len();
-        let mut all: Vec<Constraint> = s.constraints.clone();
+        let mut all: Vec<Constraint> = s.constraints.iter().map(|c| s.as_solved(c)).collect();
         all.extend(self.entity_intrinsics(si));
         let mut out = s.checked.with(|memo| crate::solver::conflicts_remembered(&s.points, &radii, &all, memo));
         out.retain(|&ci| ci < nuser);
@@ -100,7 +100,6 @@ impl Project {
         let mut radii = self.entity_radii(si);
         let intrinsics = self.entity_intrinsics(si);
         let Some(s) = self.sketches.get_mut(si) else { return 0.0 };
-        splines_held_follow(s);
         touchings_follow(s, &radii);
         // where the points stood before anything of this solve moved them, for what it rebuilds after it
         let at_start: Vec<(f64, f64)> = s.points.iter().map(|p| (p.x, p.y)).collect();
@@ -166,7 +165,7 @@ impl Project {
         }
         // Reference (driven) dimensions do not constrain the geometry and are excluded from the solver, while
         // the arc intrinsics (endpoints on the circle of radius R) are always active.
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).cloned().collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).map(|c| s.as_solved(c)).collect();
         active.extend(intrinsics);
         let (was, radii_was): (Vec<(f64, f64)>, Vec<f64>) = (s.points.iter().map(|p| (p.x, p.y)).collect(), radii.iter().map(|r| r.value).collect());
         // A RECTANGLE CHANGES ITS SIZE FROM WHERE IT WAS DRAWN: from the centre a rectangle drawn from the centre, from the
@@ -362,8 +361,9 @@ impl Project {
         let Some(s) = self.sketches.get_mut(si) else { return };
         // a reference distance to a curve of any kind measures between the places the curves come nearest
         let points = s.points.clone();
-        for c in &mut s.constraints {
-            if let Constraint::CurveDistance { from, to, d, driven: true, .. } = c {
+        let solved: Vec<Constraint> = s.constraints.iter().map(|c| s.as_solved(c)).collect();
+        for (c, now) in s.constraints.iter_mut().zip(&solved) {
+            if let (Constraint::CurveDistance { d, driven: true, .. }, Constraint::CurveDistance { from, to, .. }) = (c, now) {
                 if let Some([a, b]) = crate::solver::distance_ends(&points, &radii, [from, to]) {
                     *d = a.dist(b);
                 }
@@ -598,38 +598,13 @@ impl Project {
     }
 }
 
-/// THE SPLINES A CONSTRAINT HOLDS TO, AS THEY ARE NOW: a constraint keeps the handles and the ends of a spline it was laid
-/// with, and a handle dragged since would leave it holding the curve as it was. The spline is found by its nodes.
-fn splines_held_follow(s: &mut Sketch) {
-    let shapes: Vec<EntityKind> = s.entities.iter().filter(|e| e.kind.as_spline().is_some()).map(|e| e.kind.clone()).collect();
-    if shapes.is_empty() {
-        return;
-    }
-    let follow = |on: &mut CurveRef| {
-        if let CurveRef::Spline { nodes, handles, ends } = on {
-            if let Some(now) = shapes.iter().filter_map(|k| k.as_spline()).find(|sp| sp.nodes == nodes.as_slice()) {
-                (*handles, *ends) = (now.handles.to_vec(), now.ends);
-            }
-        }
-    };
-    for c in s.constraints.iter_mut() {
-        match c {
-            Constraint::PointOnCurve { on, .. } => follow(on),
-            Constraint::TangentCurves { one, other, .. } => {
-                follow(one);
-                follow(other);
-            }
-            _ => {}
-        }
-    }
-}
-
 /// WHERE CURVES MADE TO TOUCH TOUCH NOW, written into their constraints before a solve: the solve takes the place of
 /// touching nearest it, and two curves that could touch at more places than one keep touching where they did.
 fn touchings_follow(s: &mut Sketch, radii: &[crate::solver::RadiusVar]) {
+    let solved: Vec<Constraint> = s.constraints.iter().map(|c| s.as_solved(c)).collect();
     let points = s.points.clone();
-    for c in s.constraints.iter_mut() {
-        if let Constraint::TangentCurves { one, other, near, end: None } = c {
+    for (c, now) in s.constraints.iter_mut().zip(&solved) {
+        if let (Constraint::TangentCurves { near, end: None, .. }, Constraint::TangentCurves { one, other, .. }) = (c, now) {
             *near = crate::solver::touching_places(&points, radii, [one, other], *near).or(*near);
         }
     }

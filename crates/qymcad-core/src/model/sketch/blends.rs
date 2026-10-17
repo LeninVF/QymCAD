@@ -75,12 +75,6 @@ impl Project {
         self.leg(si, at).map(|l| l.arm().leaving())
     }
 
-    /// Whether both entities are lines.
-    pub(crate) fn both_lines(&self, si: usize, eids: [Id; 2]) -> bool {
-        let Some(s) = self.sketches.get(si) else { return false };
-        eids.iter().all(|id| s.entity(*id).is_some_and(|e| e.kind.as_line().is_some()))
-    }
-
     /// The two sides of `corner`, at its point.
     fn legs_of(&self, si: usize, corner: CornerAt) -> Option<Corner> {
         let CornerAt { point, pair } = corner;
@@ -88,8 +82,7 @@ impl Project {
         Some(Corner { legs: [self.leg(si, EdgeAt { edge: e1, corner: point })?, self.leg(si, EdgeAt { edge: e2, corner: point })?], point })
     }
 
-    /// WHAT THE CUT WOULD LEAVE AT THE CORNER OF ANY TWO CURVES, changing nothing: `corner_blend` for a pair that is not
-    /// two lines and arcs.
+    /// WHAT THE CUT WOULD LEAVE AT THE CORNER OF ANY TWO CURVES, changing nothing: the preview `corner_blend` shows.
     pub(crate) fn blend_any(&self, si: usize, corner: CornerAt, cut: CornerCut) -> Option<CornerBlend> {
         let legs = self.legs_of(si, corner)?.legs;
         blend_of_arms([legs[0].arm(), legs[1].arm()], cut)
