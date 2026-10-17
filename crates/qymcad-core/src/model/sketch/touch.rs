@@ -41,6 +41,9 @@ impl Project {
     pub fn curve_distance_ends(&self, si: usize, c: &Constraint) -> Option<[Point2; 2]> {
         let s = self.sketches.get(si)?;
         let Constraint::CurveDistance { from, to, .. } = c else { return None };
+        if let Some(ends) = s.offset_dim_ends(c) {
+            return Some(ends);
+        }
         crate::solver::distance_ends(&s.points, &self.entity_radii(si), [&s.resolved(from), &s.resolved(to)])
     }
 

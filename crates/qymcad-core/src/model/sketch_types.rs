@@ -50,6 +50,9 @@ pub struct Sketch {
     /// Projections of body geometry (driven entities that reference their source).
     #[serde(default)]
     pub projections: Vec<SketchProjection>,
+    /// Curves offset from a curve of the sketch and held to it, see `SketchOffset`.
+    #[serde(default)]
+    pub offsets: Vec<SketchOffset>,
     /// Placement of the sketch in 3D (a plane, a face or a datum). The 2D geometry is lifted through this
     /// frame. Defaults to the global XY plane.
     #[serde(default)]
@@ -641,6 +644,46 @@ pub struct SketchProjection {
     /// kernel gives the edges in.
     #[serde(default)]
     pub edges: Vec<u32>,
+}
+
+/// THE SIDE OF ITS SOURCE AN OFFSET LIES ON, looking along the source as `Curve` runs it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OffsetSide {
+    Left,
+    Right,
+}
+
+/// A CURVE OFFSET FROM A CURVE OF THE SKETCH AND HELD TO IT: an ellipse, an arc of one or a spline, whose offset is none
+/// of them - its copies are splines through points of the true offset (`Curve::offset`), laid again from the source
+/// after every solve at the distance its dimension holds: a `CurveDistance` from the source to the first copy, edited as
+/// any dimension. The copies are driven, as a projection is: their points are given to the solver, not unknowns.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SketchOffset {
+    pub id: Id,
+    /// the curve offset
+    pub source: Id,
+    pub side: OffsetSide,
+    /// the splines the offset is laid as: one, or more where loops of the true offset are cut away
+    pub copies: Vec<Id>,
+    /// where the copy meets the copy of a line of the same chain that crosses it: cut there, the end of the line on it
+    #[serde(default)]
+    pub cuts: Vec<OffsetCut>,
+}
+
+/// AN END OF AN OFFSET COPY CUT WHERE THE COPY OF A LINE OF THE CHAIN CROSSES IT: the end of the copy, the line, and the
+/// end of the line held at the crossing.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct OffsetCut {
+    pub end: CopyEnd,
+    pub line: Id,
+    pub point: Id,
+}
+
+/// WHICH END OF AN OFFSET COPY: of its first piece, or of its last.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CopyEnd {
+    Start,
+    Finish,
 }
 
 /// AN ARC OF AN ELLIPSE TO BE LAID: the centre, the semi-axes (major along X of `radii`, minor along Y) turned by `rot`

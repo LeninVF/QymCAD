@@ -45,6 +45,7 @@ impl Project {
             rects: Vec::new(),
             figures: Vec::new(),
             projections: Vec::new(),
+            offsets: Vec::new(),
             plane: crate::feature::SketchPlane::default(),
             origin: 0,
             axis_pts: [0, 0],
@@ -254,6 +255,7 @@ impl Project {
             rects: Vec::new(),
             figures: Vec::new(),
             projections: Vec::new(),
+            offsets: Vec::new(),
             plane: crate::feature::SketchPlane::default(),
             origin: 0,
             axis_pts: [0, 0],
@@ -287,6 +289,7 @@ impl Project {
             rects: Vec::new(),
             figures: Vec::new(),
             projections: Vec::new(),
+            offsets: Vec::new(),
             plane: crate::feature::SketchPlane::default(),
             origin: 0,
             axis_pts: [0, 0],
@@ -331,7 +334,7 @@ impl Project {
     /// fully constrained; a non-zero second value means there are redundant constraints.
     pub fn sketch_dof(&self, si: usize) -> (i32, i32) {
         let Some(s) = self.sketches.get(si) else { return (0, 0) };
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).map(|c| s.as_solved(c)).collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| s.solves(c)).map(|c| s.as_solved(c)).collect();
         active.extend(self.entity_intrinsics(si)); // Arcs keep their endpoints on the circle: five degrees of
                                                    // freedom for a free arc.
         crate::solver::dof(&s.points, &self.entity_radii(si), &active)
@@ -358,7 +361,7 @@ impl Project {
             return false;
         }
         let intr = self.entity_intrinsics(si);
-        let mut without: Vec<Constraint> = s.constraints.iter().enumerate().filter(|(i, c)| *i != ci && !c.is_driven()).map(|(_, c)| s.as_solved(c)).collect();
+        let mut without: Vec<Constraint> = s.constraints.iter().enumerate().filter(|(i, c)| *i != ci && s.solves(c)).map(|(_, c)| s.as_solved(c)).collect();
         without.extend(intr.iter().cloned());
         let mut with = without;
         with.push(s.as_solved(&s.constraints[ci]));
@@ -374,7 +377,7 @@ impl Project {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         // the sketch's own constraints that constrain (not the reference ones), by their place in the sketch, then the
         // entities' own
-        let at: Vec<usize> = (0..s.constraints.len()).filter(|&ci| !s.constraints[ci].is_driven()).collect();
+        let at: Vec<usize> = (0..s.constraints.len()).filter(|&ci| s.solves(&s.constraints[ci])).collect();
         let mut active: Vec<Constraint> = at.iter().map(|&ci| s.as_solved(&s.constraints[ci])).collect();
         active.extend(self.entity_intrinsics(si));
         crate::solver::redundant(&s.points, &self.entity_radii(si), &active, at.len()).into_iter().map(|k| at[k]).collect()
@@ -386,7 +389,7 @@ impl Project {
         let Some(s) = self.sketches.get(si) else { return false };
         let intr = self.entity_intrinsics(si);
         let radii = self.entity_radii(si);
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|x| !x.is_driven()).map(|c| s.as_solved(c)).collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| s.solves(c)).map(|c| s.as_solved(c)).collect();
         active.extend(intr.iter().cloned());
         let mut with = active;
         with.push(s.as_solved(&c));
@@ -408,7 +411,7 @@ impl Project {
     pub fn independent_of(&self, si: usize, new: Vec<Constraint>) -> Vec<Constraint> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let radii = self.entity_radii(si);
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|x| !x.is_driven()).map(|c| s.as_solved(c)).collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| s.solves(c)).map(|c| s.as_solved(c)).collect();
         active.extend(self.entity_intrinsics(si));
         let mut kept = Vec::new();
         for c in new {
@@ -443,14 +446,14 @@ impl Project {
             )
         };
         let mut cs = s.constraints.clone();
-        let active = |cs: &[Constraint]| -> Vec<Constraint> { cs.iter().filter(|c| !c.is_driven()).map(|c| s.as_solved(c)).chain(intr.iter().cloned()).collect() };
+        let active = |cs: &[Constraint]| -> Vec<Constraint> { cs.iter().filter(|c| s.solves(c)).map(|c| s.as_solved(c)).chain(intr.iter().cloned()).collect() };
         let mut gone = 0;
         for ci in (0..had.min(cs.len())).rev() {
             if !relation(&cs[ci]) || !constraint_point_ids(&cs[ci]).iter().all(|p| among.contains(p)) {
                 continue;
             }
             // the place of the relation among the active constraints: the reference ones before it are not there
-            let at = cs[..ci].iter().filter(|c| !c.is_driven()).count();
+            let at = cs[..ci].iter().filter(|c| s.solves(c)).count();
             if crate::solver::freedom_taken(&s.points, &radii, &active(&cs), at) == 0 {
                 cs.remove(ci);
                 gone += 1;
@@ -503,7 +506,7 @@ impl Project {
     /// `sketch_free_points` and `sketch_redundant_constraints`.
     pub fn sketch_checks(&self, si: usize) -> crate::solver::Checks {
         let Some(s) = self.sketches.get(si) else { return crate::solver::Checks { dof: (0, 0), free: Vec::new(), redundant: Vec::new() } };
-        let at: Vec<usize> = (0..s.constraints.len()).filter(|&ci| !s.constraints[ci].is_driven()).collect();
+        let at: Vec<usize> = (0..s.constraints.len()).filter(|&ci| s.solves(&s.constraints[ci])).collect();
         let mut active: Vec<Constraint> = at.iter().map(|&ci| s.as_solved(&s.constraints[ci])).collect();
         active.extend(self.entity_intrinsics(si));
         let radii = self.entity_radii(si);
@@ -513,7 +516,7 @@ impl Project {
     }
     pub fn sketch_free_points(&self, si: usize) -> Vec<bool> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).map(|c| s.as_solved(c)).collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| s.solves(c)).map(|c| s.as_solved(c)).collect();
         active.extend(self.entity_intrinsics(si));
         crate::solver::free_points(&s.points, &self.entity_radii(si), &active)
     }
@@ -1182,6 +1185,7 @@ impl Project {
             rects: Vec::new(),
             figures: Vec::new(),
             projections: Vec::new(),
+            offsets: Vec::new(),
             plane: crate::feature::SketchPlane::default(),
             origin: 0,
             axis_pts: [0, 0],

@@ -70,3 +70,50 @@ fn half_an_ellipse_closed_by_a_line_is_four_faces() {
     assert_eq!(b.faces, 4, "half an ellipse closed by a line extruded has {} faces, not the arc, the line and two ends", b.faces);
     assert!((b.volume - want).abs() < 1e-3 * want, "the volume is {:.3}, half of pi x 10 x 5, x 10, is {want:.3}", b.volume);
 }
+
+/// THE WALL BETWEEN AN ELLIPSE AND ITS OFFSET: the ellipse 10 by 5 offset 3 outwards, the ring between them extruded - one
+/// face for the ellipse, one for each span of the spline the offset is laid as (`Curve::offset`), and the two ends; the
+/// volume the ring between the two curves closes. Laid as the segments of its points, the offset gave a face a segment.
+#[test]
+fn the_wall_between_an_ellipse_and_its_offset_is_a_face_a_curve_span() {
+    let mut spans = 0;
+    let mut p = Project::default();
+    p.new_document();
+    let c = p.add_part("A");
+    p.set_active_component(Some(c));
+    let si = p.new_sketch("s");
+    let sid = p.sketches[si].id;
+    p.add_sketch_node(sid, "s");
+    p.add_ellipse_entity(si, Point2::new(0.0, 0.0), 10.0, 5.0, 0.3, Purpose::Real);
+    let ellipse = p.sketches[si].entities.iter().find(|e| e.kind.as_ellipse().is_some()).map(|e| e.id).expect("the ellipse");
+    assert!(p.offset_entities(si, &[ellipse], 3.0) > 0, "setup: the ellipse is not offset");
+    p.solve_sketch(si);
+    let s = &p.sketches[si];
+    for e in &s.entities {
+        if let Some(sp) = e.kind.as_spline() {
+            spans += sp.nodes.len();
+        }
+    }
+    // the ring: the area inside the offset less the ellipse's
+    let area = |c: &Curve| {
+        let path = c.polyline();
+        0.5 * path.iter().zip(path.iter().cycle().skip(1)).map(|(a, b)| a.x * b.y - b.x * a.y).sum::<f64>().abs()
+    };
+    let curves: Vec<Curve> = s.entities.iter().filter_map(|e| Curve::of(s, e)).collect();
+    let ring = curves.iter().map(area).fold(0.0, f64::max) - curves.iter().map(area).fold(f64::MAX, f64::min);
+    // the outer loop, the offset's: its region is it less the ellipse inside it - the ring
+    let loops: Vec<Id> = p.sketches[si].contour_ids.clone();
+    let outer = loops.iter().copied().max_by(|a, b| {
+        let size = |c: Id| p.contour_profile_xy(c).map_or(0.0, |xy| xy.chunks(2).map(|q| q[0].hypot(q[1])).fold(0.0, f64::max));
+        size(*a).total_cmp(&size(*b))
+    });
+    let body: Id = p.add_extrude_on(sid, outer.expect("the loops"), 10.0, qymcad_core::feature::Reach::Forward, 0.0);
+    p.finish_base_body(body, 1);
+    let (report, shapes) = qymcad_testkit::regenerate(&mut p);
+    assert!(report.errors.is_empty(), "the body did not build: {:?}", report.errors);
+    let shape = shapes.get(&body).expect("the body has a shape");
+    let faces: u32 = shape.face_kinds().map_or(0, |k| k.iter().sum());
+    let want = 1 + spans as u32 + 2;
+    assert_eq!(faces, want, "the wall has {faces} faces, not the ellipse, the {spans} spans of its offset and two ends");
+    assert!((shape.volume() - ring * 10.0).abs() < 2e-3 * ring * 10.0, "the volume is {:.3}, the ring {ring:.3} x 10 is {:.3}", shape.volume(), ring * 10.0);
+}

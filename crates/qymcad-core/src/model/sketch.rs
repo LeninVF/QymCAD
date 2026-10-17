@@ -975,6 +975,7 @@ mod edit;
 mod trim;
 mod corners;
 mod offset;
+mod offsets;
 mod solve;
 mod contours;
 mod profiles;

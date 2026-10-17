@@ -217,8 +217,10 @@ impl Sketch {
         out
     }
 
-    /// DROP THE CONSTRAINTS ON WHAT IS GONE: a point no longer in the sketch, or a curve.
+    /// DROP THE CONSTRAINTS ON WHAT IS GONE: a point no longer in the sketch, or a curve - and the offsets whose source
+    /// or copy went.
     pub(crate) fn drop_constraints_on_what_is_gone(&mut self) {
+        self.drop_offsets_of_what_is_gone();
         let points: std::collections::HashSet<Id> = self.points.iter().map(|p| p.id).collect();
         let curves: std::collections::HashSet<Id> = self.entities.iter().map(|e| e.id).collect();
         self.constraints.retain(|c| crate::model::constraint_point_ids(c).iter().all(|id| points.contains(id)) && c.curve_ids().iter().all(|id| curves.contains(id)));

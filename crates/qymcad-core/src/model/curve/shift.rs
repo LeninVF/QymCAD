@@ -52,11 +52,6 @@ impl Map {
     }
 }
 
-/// The least distance from `p` to a polyline.
-fn off_polyline(p: Point2, line: &[Point2]) -> f64 {
-    line.windows(2).map(|w| Curve::Line { a: w[0], b: w[1] }.nearest(p).off).fold(f64::MAX, f64::min)
-}
-
 /// The tolerance an offset of an ellipse or a spline is laid within, in millimetres.
 pub const OFFSET_TOLERANCE: f64 = 0.01;
 
@@ -77,6 +72,12 @@ impl Curve {
                 ends: *ends,
             },
         }
+    }
+
+    /// WHETHER THE OFFSET OF THE CURVE IS A CURVE OF ITS OWN KIND - a line's a line, an arc's or a circle's one about the
+    /// same centre - which constraints can hold to it; an ellipse's and a spline's are not, and are laid again from it.
+    pub fn offsets_exactly(&self) -> bool {
+        matches!(self, Curve::Line { .. } | Curve::Round { .. })
     }
 
     /// THE CURVE LAID `d` TO THE LEFT OF ITSELF - looking along it; a negative `d` to the right: a line and an arc or a
@@ -101,47 +102,7 @@ impl Curve {
                     Vec::new()
                 }
             }
-            Curve::Oval { .. } | Curve::Spline { .. } => {
-                let true_at = |t: f64| {
-                    let (p, u) = (self.at(t), self.tangent(t));
-                    Point2::new(p.x - u.y * d, p.y + u.x * d)
-                };
-                let closed = self.closed();
-                // the true offset, densely, its loops cut away: what the splines are laid through and held to
-                // a loop laid out once round: its place 1 is its place 0 again, which the cutting of loops closes it by
-                let last = if closed { 1999 } else { 2000 };
-                let mut dense: Vec<Point2> = (0..=last).map(|k| true_at(k as f64 / 2000.0)).collect();
-                let ends = if closed { Ends::Closed } else { Ends::Open };
-                let laid = Laid { places: dense.iter().enumerate().map(|(k, p)| (key_of(*p), k as f64 / 2000.0)).collect(), samples: 2000.0, ends };
-                if !closed {
-                    // near a free end bending tighter than `d` the offset turns back towards the curve without crossing
-                    // itself: on the S of the probes it began 2.981 mm from the curve offset by 3. What stands nearer
-                    // than `d` is cut from either end
-                    let near = |q: &Point2| self.nearest(*q).off < d.abs() - 1e-6;
-                    let head = dense.iter().take_while(|q| near(q)).count();
-                    let tail = dense[head..].iter().rev().take_while(|q| near(q)).count();
-                    dense.truncate(dense.len() - tail);
-                    dense.drain(..head);
-                    if dense.len() < 2 {
-                        return Vec::new();
-                    }
-                }
-                let laid_out = dense.len();
-                let runs = without_loops(dense, ends);
-                // EACH PIECE IS LAID ALONG THE CURVE ITSELF, by its own places and ways: as few nodes as keep it within the
-                // tolerance. Through points of it chosen evenly, a closed spline took 512 nodes, its pieces past the bend of
-                // a notch 2 048. A whole loop stays a loop; a piece left by a loop cut away runs from its corner, open there
-                // one run that lost no more than a couple of points is the whole of it: a crossing found by the pieces next
-                // to the seam of a loop, at a bend tight as the distance, cut nothing away
-                let whole = runs.len() == 1 && runs[0].len() + 3 >= laid_out;
-                let spans = if matches!(self, Curve::Spline { .. }) && closed { self.spans() } else { 8 };
-                runs.iter()
-                    .map(|run| {
-                        let span = if whole && closed { [0.0, 1.0] } else { self.span_of_run(&true_at, run, &laid) };
-                        hermite_offset(&true_at, OffsetRun { span, ends: if whole { ends } else { Ends::Open }, source: ends, run, spans })
-                    })
-                    .collect()
-            }
+            Curve::Oval { .. } | Curve::Spline { .. } => remembered(self, d),
         }
     }
 }
@@ -280,6 +241,8 @@ struct OffsetRun<'a> {
     /// the ends of the curve offset: a loop's parameter runs on past 1 to its start again
     source: Ends,
     run: &'a [Point2],
+    /// how far a point stands off the true offset, its foot on the curve sought from a place of the curve
+    off: &'a dyn Fn(Point2, f64) -> f64,
     /// how many spans to begin with: those of the curve where it has spans, its bends changing at its nodes
     spans: usize,
 }
@@ -289,7 +252,7 @@ struct OffsetRun<'a> {
 /// span. A span straying more than `OFFSET_TOLERANCE` from the run at a quarter, a half or three quarters of it is cut in
 /// two; the rest stay.
 fn hermite_offset(at: &dyn Fn(f64) -> Point2, laid: OffsetRun) -> Curve {
-    let OffsetRun { span: [t0, t1], ends, source, run, spans: first } = laid;
+    let OffsetRun { span: [t0, t1], ends, source, run, off, spans: first } = laid;
     let closed = ends == Ends::Closed;
     let wraps = source == Ends::Closed;
     let place = |t: f64| at(if wraps { t.rem_euclid(1.0) } else { t.clamp(t0, t1) });
@@ -321,13 +284,29 @@ fn hermite_offset(at: &dyn Fn(f64) -> Point2, laid: OffsetRun) -> Curve {
                     ts[1] - ts[0]
                 };
                 let after = if i + 1 < ts.len() { ts[i + 1] - ts[i] } else { before };
-                let w = way(ts[i]);
+                let mut w = way(ts[i]);
+                // AT A CORNER OF A PIECE the way is the piece's own, read off its run where it ends: the true offset
+                // just past the corner is the loop cut away, and the way taken there ran the last span of a piece of an
+                // inward offset 40 mm off across the drawing
+                let corner = match i {
+                    0 if !closed && run.len() >= 2 => Some(run[1] - run[0]),
+                    _ if !closed && i + 1 == count && run.len() >= 2 => Some(run[run.len() - 1] - run[run.len() - 2]),
+                    _ => None,
+                };
+                if let Some(u) = corner.filter(|u| u.x.hypot(u.y) > 1e-12) {
+                    let (len, speed) = (u.x.hypot(u.y), w.x.hypot(w.y));
+                    w = u * (speed / len);
+                }
                 NodeTangents { arrive: w * before, leave: w * after }
             })
             .collect();
         let laid = Curve::Spline { nodes, tangents, ends };
         let spans = ts.len() - 1;
-        let astray: Vec<usize> = (0..spans).filter(|&k| [0.25, 0.5, 0.75].iter().any(|q| off_polyline(laid.at((k as f64 + q) / spans as f64), run) > OFFSET_TOLERANCE)).collect();
+        // read at seven places a span, each against the run where it should stand: at three, a span turning a loop
+        // between them passed
+        let astray: Vec<usize> = (0..spans)
+            .filter(|&k| [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875].iter().any(|q| off(laid.at((k as f64 + q) / spans as f64), ts[k] + q * (ts[k + 1] - ts[k])) > OFFSET_TOLERANCE))
+            .collect();
         if astray.is_empty() || ts.len() > 4096 {
             return laid;
         }
@@ -381,4 +360,126 @@ struct SampleKey {
 
 fn key_of(p: Point2) -> SampleKey {
     SampleKey { x: p.x.to_bits(), y: p.y.to_bits() }
+}
+
+impl Curve {
+    /// THE OFFSET OF AN ELLIPSE OR A SPLINE, laid afresh (`Curve::offset`).
+    fn offset_laid(&self, d: f64) -> Vec<Curve> {
+        match self {
+            Curve::Oval { .. } | Curve::Spline { .. } => {
+                let true_at = |t: f64| {
+                    let (p, u) = (self.at(t), self.tangent(t));
+                    Point2::new(p.x - u.y * d, p.y + u.x * d)
+                };
+                let closed = self.closed();
+                // the true offset, densely, its loops cut away: what the splines are laid through and held to
+                // a loop laid out once round: its place 1 is its place 0 again, which the cutting of loops closes it by
+                let last = if closed { 1999 } else { 2000 };
+                let mut dense: Vec<Point2> = (0..=last).map(|k| true_at(k as f64 / 2000.0)).collect();
+                let ends = if closed { Ends::Closed } else { Ends::Open };
+                let laid = Laid { places: dense.iter().enumerate().map(|(k, p)| (key_of(*p), k as f64 / 2000.0)).collect(), samples: 2000.0, ends };
+                if !closed {
+                    // near a free end bending tighter than `d` the offset turns back towards the curve without crossing
+                    // itself: on the S of the probes it began 2.981 mm from the curve offset by 3. What stands nearer
+                    // than `d` is cut from either end
+                    let near = |q: &Point2| self.nearest(*q).off < d.abs() - 1e-6;
+                    let head = dense.iter().take_while(|q| near(q)).count();
+                    let tail = dense[head..].iter().rev().take_while(|q| near(q)).count();
+                    dense.truncate(dense.len() - tail);
+                    dense.drain(..head);
+                    if dense.len() < 2 {
+                        return Vec::new();
+                    }
+                }
+                // HOW FAR A POINT STANDS OFF THE TRUE OFFSET: off the distance from the curve, its foot sought from the place it
+                // should stand by. Held to the samples of the true offset instead - a polyline, whose chords stand off the
+                // curve by more than the tolerance where it bends tight - the fit of an offset of a spline of 39 nodes never
+                // came within it, and laid pieces of 7 000 nodes in minutes
+                let off = |q: Point2, t: f64| {
+                    let foot = self.polish(q, if closed { t.rem_euclid(1.0) } else { t.clamp(0.0, 1.0) });
+                    (self.at(foot).dist(q) - d.abs()).abs()
+                };
+                let laid_out = dense.len();
+                let runs = without_loops(dense, ends);
+                // EACH PIECE IS LAID ALONG THE CURVE ITSELF, by its own places and ways: as few nodes as keep it within the
+                // tolerance. Through points of it chosen evenly, a closed spline took 512 nodes, its pieces past the bend of
+                // a notch 2 048. A whole loop stays a loop; a piece left by a loop cut away runs from its corner, open there
+                // one run that lost no more than a couple of points is the whole of it: a crossing found by the pieces next
+                // to the seam of a loop, at a bend tight as the distance, cut nothing away
+                let whole = runs.len() == 1 && runs[0].len() + 3 >= laid_out;
+                let spans = if matches!(self, Curve::Spline { .. }) && closed { self.spans() } else { 8 };
+                runs.iter()
+                    .map(|run| {
+                        let span = if whole && closed { [0.0, 1.0] } else { self.span_of_run(&true_at, run, &laid) };
+                        hermite_offset(&true_at, OffsetRun { span, ends: if whole { ends } else { Ends::Open }, source: ends, run, off: &off, spans })
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// A KEY OF THE CURVE BY THE BITS OF ITS NUMBERS: two curves of one key are one curve.
+    fn key(&self, h: &mut impl std::hash::Hasher) {
+        use std::hash::Hash;
+        let bits = |p: Point2, h: &mut dyn std::hash::Hasher| {
+            h.write_u64(p.x.to_bits());
+            h.write_u64(p.y.to_bits());
+        };
+        std::mem::discriminant(self).hash(h);
+        match self {
+            Curve::Line { a, b } => [*a, *b].iter().for_each(|p| bits(*p, h)),
+            Curve::Round { centre, r, from, sweep } => {
+                bits(*centre, h);
+                [*r, *from, *sweep].iter().for_each(|v| h.write_u64(v.to_bits()));
+            }
+            Curve::Oval { centre, major, minor, from, sweep } => {
+                [*centre, *major, *minor].iter().for_each(|p| bits(*p, h));
+                [*from, *sweep].iter().for_each(|v| h.write_u64(v.to_bits()));
+            }
+            Curve::Spline { nodes, tangents, ends } => {
+                nodes.iter().for_each(|p| bits(*p, h));
+                tangents.iter().for_each(|t| {
+                    bits(t.arrive, h);
+                    bits(t.leave, h);
+                });
+                ends.hash(h);
+            }
+        }
+    }
+}
+
+/// AN OFFSET LAID BEFORE, by the key of its curve and distance.
+struct Remembered {
+    key: u64,
+    pieces: Vec<Curve>,
+}
+
+/// How many offsets are remembered: a preview asks each frame the offsets of the curves picked, on both sides.
+const REMEMBERED: usize = 32;
+
+thread_local! {
+    static OFFSETS: std::cell::RefCell<Vec<Remembered>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// THE OFFSET OF CURVE `c` BY `d`, AS LAID BEFORE where it was: the preview of the offset tool asked it three times a frame
+/// with nothing changed, 20 ms each for a closed spline of 22 nodes.
+fn remembered(c: &Curve, d: f64) -> Vec<Curve> {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    c.key(&mut h);
+    h.write_u64(d.to_bits());
+    let key = h.finish();
+    if let Some(found) = OFFSETS.with(|m| m.borrow().iter().find(|r| r.key == key).map(|r| r.pieces.clone())) {
+        return found;
+    }
+    let pieces = c.offset_laid(d);
+    OFFSETS.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= REMEMBERED {
+            m.remove(0);
+        }
+        m.push(Remembered { key, pieces: pieces.clone() });
+    });
+    pieces
 }

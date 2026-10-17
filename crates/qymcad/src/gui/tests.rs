@@ -98,6 +98,9 @@ mod a_corner_at_a_crossing_keeps_its_two_sides;
 mod a_fillet_of_a_spline_holds_when_dragged;
 
 #[cfg(test)]
+mod an_offset_follows_its_source;
+
+#[cfg(test)]
 mod the_offset_of_a_closed_spline_is_light;
 
 #[cfg(test)]

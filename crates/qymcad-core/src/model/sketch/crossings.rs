@@ -363,6 +363,9 @@ impl Project {
         if ext.goes.is_empty() {
             return false;
         }
+        if let Some(s) = self.sketches.get_mut(si) {
+            s.let_go_the_copy(eid);
+        }
         let Some(e) = self.sketches.get(si).and_then(|s| s.entity(eid)) else { return false };
         let reached = |end: End| if end == End::Start { ext.curve.at(0.0) } else { ext.curve.at(1.0) };
         let spline = e.kind.as_spline().map(|sp| (sp.nodes.to_vec(), sp.ends));

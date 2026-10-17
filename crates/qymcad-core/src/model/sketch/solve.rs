@@ -39,7 +39,15 @@ impl Project {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let radii = self.entity_radii(si);
         let active: Vec<Constraint> = s.constraints.iter().map(|c| s.as_solved(c)).collect();
-        crate::solver::residual_per_constraint(&s.points, &radii, &active)
+        let mut out = crate::solver::residual_per_constraint(&s.points, &radii, &active);
+        // the dimension of an offset is not solved but laid at: the copies it sets stand at it within the 0.01 mm the
+        // splines of an offset keep to, and its row read off them is no fault of the sketch
+        for (r, c) in out.iter_mut().zip(&s.constraints) {
+            if s.sets_an_offset(c) {
+                *r = 0.0;
+            }
+        }
+        out
     }
     /// Conflicting constraints of a sketch: the indices of constraints that contradict each other, so the
     /// system cannot be satisfied until one of them is removed or made a reference dimension.
@@ -73,11 +81,12 @@ impl Project {
     pub fn sketch_conflicts(&self, si: usize) -> Vec<usize> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let radii = self.entity_radii(si);
-        let nuser = s.constraints.len();
-        let mut all: Vec<Constraint> = s.constraints.iter().map(|c| s.as_solved(c)).collect();
+        // the constraints of the sketch, by their place, but the dimensions of offsets: those lay their copies
+        let at: Vec<usize> = (0..s.constraints.len()).filter(|&ci| !s.sets_an_offset(&s.constraints[ci])).collect();
+        let mut all: Vec<Constraint> = at.iter().map(|&ci| s.as_solved(&s.constraints[ci])).collect();
         all.extend(self.entity_intrinsics(si));
-        let mut out = s.checked.with(|memo| crate::solver::conflicts_remembered(&s.points, &radii, &all, memo));
-        out.retain(|&ci| ci < nuser);
+        let found = s.checked.with(|memo| crate::solver::conflicts_remembered(&s.points, &radii, &all, memo));
+        let mut out: Vec<usize> = found.into_iter().filter_map(|k| at.get(k).copied()).collect();
         // Unevaluable constraints go red too. The solver rejects them (otherwise they silently hold nothing),
         // but a silent rejection is no better than a silent no-op: the point still looks constrained. A
         // constraint with nothing to measure against therefore enters the diagnostics.
@@ -165,7 +174,7 @@ impl Project {
         }
         // Reference (driven) dimensions do not constrain the geometry and are excluded from the solver, while
         // the arc intrinsics (endpoints on the circle of radius R) are always active.
-        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| !c.is_driven()).map(|c| s.as_solved(c)).collect();
+        let mut active: Vec<Constraint> = s.constraints.iter().filter(|c| s.solves(c)).map(|c| s.as_solved(c)).collect();
         active.extend(intrinsics);
         let (was, radii_was): (Vec<(f64, f64)>, Vec<f64>) = (s.points.iter().map(|p| (p.x, p.y)).collect(), radii.iter().map(|r| r.value).collect());
         // A RECTANGLE CHANGES ITS SIZE FROM WHERE IT WAS DRAWN: from the centre a rectangle drawn from the centre, from the
@@ -242,8 +251,12 @@ impl Project {
             .map(|(p, _)| p.id)
             .chain(radii.iter().zip(&radii_was).filter(|(r, &old)| r.value.to_bits() != old.to_bits()).map(|(r, _)| r.center))
             .collect();
+        // the offsets laid again from their sources as the solve left them
+        let followed = self.offsets_follow(si);
+        let moved: std::collections::HashSet<Id> = moved.into_iter().chain(followed.moved).collect();
         self.update_driven_dims(si);
         match rebuild {
+            _ if followed.relaid => self.regen_sketch(si),
             Rebuild::Whole => self.regen_sketch(si),
             Rebuild::Moved => self.regen_sketch_moved(si, &moved),
         }
@@ -307,6 +320,8 @@ impl Project {
         // A shared corner occupies several slots of `points`; it is pinned once, or the duplicates would
         // count as redundant constraints (8 on a box face).
         let mut pinned = std::collections::HashSet::new();
+        // the copies of an offset are laid from their source, as a projection from its body
+        out.extend(s.offset_points().into_iter().filter(|p| pinned.insert(*p)).map(|p| Constraint::Fixed { p }));
         for pr in &s.projections {
             out.extend(pr.points.iter().filter(|&&p| pinned.insert(p)).map(|&p| Constraint::Fixed { p }));
             for e in s.entities.iter().filter(|e| pr.entities.contains(&e.id)) {

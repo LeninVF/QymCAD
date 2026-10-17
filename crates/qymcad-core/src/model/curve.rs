@@ -32,6 +32,9 @@ pub use shift::{Map, OFFSET_TOLERANCE};
 pub use stretch::End;
 pub use touch::WayOn;
 
+/// How many places the nearest hollow of the even places is looked at finely in, over two of them either side.
+const FINE_LOOKS: usize = 32;
+
 /// How many even places of each span of a spline the search for the nearest place starts from.
 const NEAR_LOOKS: usize = 8;
 
@@ -352,10 +355,41 @@ impl Curve {
             // THE NEAREST OF EVEN PLACES ALONG IT, POLISHED: 8 a span of a spline, 64 at the least. The places the curve is
             // laid out at to the sag (`places`) were made afresh on every call and cost 0.19 ms on a spline of 30 nodes;
             // read for every edge of a loop of one, they made a rebuild of the sketch take 1 s
+            // THE NEAREST HOLLOW OF THE EVEN PLACES LOOKED AT FINELY, and polished from the nearest of the fine places, and
+            // the next nearest hollow polished as it is; the nearer of the two taken. At a bend tight as the spacing of
+            // the even places the distance dips twice between two of them - a point 3 off a spline at such a bend, polished
+            // from the even places, came to the dip 3.31 off and not to the one 3.007 off - and at a notch the nearest
+            // even place lies in the hollow next to the one the curve is nearest in
             _ => {
                 let n = (self.spans() * NEAR_LOOKS).max(NEAR_LOOKS_LEAST);
-                let best = (0..=n).map(|k| k as f64 / n as f64).min_by(|x, y| self.at(*x).dist(p).total_cmp(&self.at(*y).dist(p))).unwrap_or(0.0);
-                self.polish(p, best)
+                let off: Vec<f64> = (0..=n).map(|k| self.at(k as f64 / n as f64).dist(p)).collect();
+                let closed = self.closed();
+                let hollow = |k: usize| {
+                    let before = if k > 0 {
+                        off[k - 1]
+                    } else if closed {
+                        off[n - 1]
+                    } else {
+                        f64::MAX
+                    };
+                    let after = if k < n {
+                        off[k + 1]
+                    } else if closed {
+                        off[1]
+                    } else {
+                        f64::MAX
+                    };
+                    off[k] <= before && off[k] <= after
+                };
+                let mut hollows: Vec<usize> = (0..=n).filter(|&k| hollow(k)).collect();
+                hollows.sort_by(|a, b| off[*a].total_cmp(&off[*b]));
+                let hold = |t: f64| if closed { t.rem_euclid(1.0) } else { t.clamp(0.0, 1.0) };
+                let finely = |k: usize| -> f64 {
+                    let (from, step) = ((k as f64 - 2.0) / n as f64, 4.0 / (n as f64 * FINE_LOOKS as f64));
+                    (0..=FINE_LOOKS).map(|j| hold(from + step * j as f64)).min_by(|a, b| self.at(*a).dist(p).total_cmp(&self.at(*b).dist(p))).unwrap_or(k as f64 / n as f64)
+                };
+                let starts: Vec<f64> = hollows.first().map(|&k| finely(k)).into_iter().chain(hollows.get(1).map(|&k| k as f64 / n as f64)).collect();
+                starts.iter().map(|&s| self.polish(p, s)).min_by(|a, b| self.at(*a).dist(p).total_cmp(&self.at(*b).dist(p))).unwrap_or(0.0)
             }
         };
         let point = self.at(t);
@@ -418,7 +452,9 @@ impl Curve {
 
     /// The place `t` near `start` where the curve is nearest to `p`, by Newton's steps on the derivative of the squared
     /// distance, held within the curve - on a closed curve going on round past its start: a point 0.001 of the way
-    /// before the start of a closed spline, held at 0 by the end of the curve, was answered 0.025 mm off it.
+    /// before the start of a closed spline, held at 0 by the end of the curve, was answered 0.025 mm off it. A step that
+    /// would stand farther from `p` is halved until it does not: near a bend the step of Newton's leapt to the far side
+    /// of a spline, and a point 2 off it was answered 42 off.
     pub(crate) fn polish(&self, p: Point2, start: f64) -> f64 {
         let closed = self.closed();
         let hold = |t: f64| if closed { t.rem_euclid(1.0) } else { t.clamp(0.0, 1.0) };
@@ -434,9 +470,17 @@ impl Curve {
             if dg.abs() < 1e-18 {
                 break;
             }
-            let next = hold(t - g / dg);
-            if (next - t).abs() < 1e-14 {
-                t = next;
+            let here = self.at(hold(t)).dist(p);
+            let mut step = -g / dg;
+            let mut next = hold(t + step);
+            for _ in 0..30 {
+                if self.at(next).dist(p) <= here {
+                    break;
+                }
+                step *= 0.5;
+                next = hold(t + step);
+            }
+            if self.at(next).dist(p) > here || (next - t).abs() < 1e-14 {
                 break;
             }
             t = next;

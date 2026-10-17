@@ -96,6 +96,7 @@ impl Project {
             End::Finish => [0.0, t],
         };
         let piece = leg.curve.piece(run);
+        self.sketches[si].let_go_the_copy(leg.eid);
         let how = Self::lay_as_of(self.sketches[si].entity(leg.eid)?);
         let kind = self.curve_kind(si, &piece, how);
         let at = self.point_exactly_at(si, leg.curve.at(t));

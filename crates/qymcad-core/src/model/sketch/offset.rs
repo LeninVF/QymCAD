@@ -3,25 +3,32 @@
 use super::*;
 use crate::model::curve::Curve;
 
-/// THE OFFSETS OF THE CURVES OF `ents` THAT NO LOOP OR CHAIN OF LINES AND ARCS TAKES - an ellipse, an arc of one, a
-/// spline - by `dist`: outwards of a closed curve, as a circle grows by it, to the left of an open one; construction
-/// geometry left out, as the lines and arcs leave it.
-fn free_offsets(s: &Sketch, ents: &[SketchEntity], dist: f64) -> Vec<Curve> {
+/// THE CURVES OF `ents` WHOSE OFFSET IS NO CURVE OF THEIR KIND - an ellipse, an arc of one, a spline - each with the
+/// distance to its left it is offset by for `dist`: outwards of a closed curve, as a circle grows by it, to the left of
+/// an open one; construction geometry left out, as the lines and arcs leave it.
+fn offset_freely(s: &Sketch, ents: &[SketchEntity], dist: f64) -> Vec<Freely> {
     ents.iter()
-        .filter(|e| !e.construction && (e.kind.as_ellipse().is_some() || e.kind.as_spline().is_some()))
-        .filter_map(|e| Curve::of(s, e))
-        .flat_map(|c| {
+        .filter(|e| !e.construction)
+        .filter_map(|e| {
+            let curve = Curve::of(s, e).filter(|c| !c.offsets_exactly())?;
             // a closed curve running counter-clockwise has its inside on its left
-            let left = if !c.closed() {
+            let left = if !curve.closed() {
                 dist
-            } else if winds_counter_clockwise(&c) {
+            } else if winds_counter_clockwise(&curve) {
                 -dist
             } else {
                 dist
             };
-            c.offset(left)
+            Some(Freely { eid: e.id, curve, left })
         })
         .collect()
+}
+
+/// A CURVE OFFSET ON ITS OWN: its id, the curve, and the distance to its left it is offset by.
+struct Freely {
+    eid: Id,
+    curve: Curve,
+    left: f64,
 }
 
 /// Whether a closed curve runs counter-clockwise: the area its laid out points enclose is positive.
@@ -54,7 +61,7 @@ impl Project {
         for ch in entity_bulge_chains(&s.points, &ents) {
             out.extend(crate::offset::offset_bulge_open(&ch, dist).iter().map(|v| crate::offset::bulge_points(v, false)));
         }
-        out.extend(free_offsets(s, &ents, dist).iter().map(Curve::polyline));
+        out.extend(offset_freely(s, &ents, dist).iter().flat_map(|f| f.curve.offset(f.left)).map(|c| c.polyline()));
         out
     }
 
@@ -79,6 +86,7 @@ impl Project {
             (s.points.clone(), ents)
         };
         let mut count = 0;
+        let before: std::collections::HashSet<Id> = self.sketches[si].entities.iter().map(|e| e.id).collect();
         // A circle entity gives a concentric circle (r plus or minus dist) rather than a polygon, HELD TO ITS SOURCE: the
         // centres concentric and the radii apart by the distance, a dimension of the offset. Laid free, the copy was a
         // circle of its own - five freedoms where the pair has two, and moving or resizing the source left it behind.
@@ -195,15 +203,21 @@ impl Project {
                 count += 1;
             }
         }
-        // AN ELLIPSE, AN ARC OF ONE, A SPLINE: each offset alone, as a spline within 0.01 mm of the true offset
-        // (`Curve::offset`)
-        let free = free_offsets(&self.sketches[si], &ents, dist);
-        for c in &free {
-            self.lay_curve(si, c, LayAs::default());
-            count += 1;
+        // AN ELLIPSE, AN ARC OF ONE, A SPLINE: each offset alone, as splines within 0.01 mm of the true offset
+        // (`Curve::offset`), HELD TO ITS SOURCE by a record of its own (`lay_held_offset`): laid free, it stayed where
+        // it was when the source was edited
+        for f in offset_freely(&self.sketches[si], &ents, dist) {
+            if self.lay_held_offset(si, f.eid, f.left) {
+                count += 1;
+            }
         }
         if count > 0 {
-            self.regen_sketch(si);
+            // a joint laid is solved at once: the copy cut at the crossing and the end of the line put on it
+            if self.join_offset_chain(si, &before, dist) {
+                self.solve_sketch(si);
+            } else {
+                self.regen_sketch(si);
+            }
         }
         count
     }

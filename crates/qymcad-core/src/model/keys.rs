@@ -579,6 +579,7 @@ fn feed_sketch(s: &Sketch, h: &mut std::collections::hash_map::DefaultHasher) {
         rects,
         figures,
         projections,
+        offsets,
         plane,
         origin,
         axis_pts,
@@ -618,6 +619,8 @@ fn feed_sketch(s: &Sketch, h: &mut std::collections::hash_map::DefaultHasher) {
     feed(patterns, h);
     feed(rects, h);
     feed(figures, h);
+    // the offsets held to their sources: which curve carries which copies
+    feed(offsets, h);
     // how many constraints there are, and the numbers of the dimensions, so an edited number is visible before
     // the solve runs
     constraints.len().hash(h);
