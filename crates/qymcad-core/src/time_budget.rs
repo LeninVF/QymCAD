@@ -8,9 +8,12 @@
 //! processors, and the wall clock of the probe stretches with the share: under a load of 40-50 on 20 threads a click
 //! meant to land 300 ms into a rebuild landed 266-435 ms late, a rebuild of 13 s took 30.4 s. What the program spent is
 //! read from the kernel of the system instead (`Cost`): the time a thread ran or was blocked on what the program waits
-//! for, less the time it stood ready with no processor free; or the processor time of the whole process, when the work
-//! runs on threads of its own and the probe is alone in its process. On a system without these counters (they are
-//! read from `/proc`) the cost is the wall clock, as it was.
+//! for, less the time it stood ready with no processor free; or, when the work runs on threads of its own, the wall
+//! times the share of their ready time the threads of the process ran. On a system without these counters (they are
+//! read from `/proc`: macOS and Windows have none) the cost is the wall clock, as it was, and its words say so.
+//!
+//! `Doer::Process` in a process shared with other checks counts their threads too: it is an estimate of the share of
+//! the machine the process got, not an exact measure of one check.
 
 use std::time::{Duration, Instant};
 
@@ -76,11 +79,31 @@ pub struct Cost {
     /// How long the threads stood ready to run with no processor free for them: the share the machine gave to others.
     /// For a process, of the threads still there at the end - one that ended took its counters with it.
     pub waited: Duration,
+    /// Where the cost was read from.
+    pub source: Source,
+}
+
+/// The least processor time of a process its share is read from: three ticks of `/proc/self/stat`.
+const PROCESS_TICKS: Duration = Duration::from_millis(30);
+
+/// WHERE A COST WAS READ FROM.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Source {
+    /// The counters of the system: the time run and waited by every thread.
+    Counters,
+    /// The wall clock, the system having no counters: the work is the wall, the machine's share in it.
+    #[default]
+    Wall,
 }
 
 impl std::fmt::Display for Cost {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.3?} of work ({:.3?} on the wall: {:.3?} on a processor, {:.3?} waiting for one)", self.work, self.wall, self.cpu, self.waited)
+        match self.source {
+            Source::Counters => {
+                write!(f, "{:.3?} of work ({:.3?} on the wall: {:.3?} on a processor, {:.3?} waiting for one; the counters of the system)", self.work, self.wall, self.cpu, self.waited)
+            }
+            Source::Wall => write!(f, "{:.3?} of work (the wall clock: this system has no counters of the time of threads)", self.work),
+        }
     }
 }
 
@@ -167,7 +190,7 @@ impl Meter {
         let to = read(self.doer, Moment::End);
         let wall = to.at.duration_since(self.from.at);
         if !self.from.counted || !to.counted {
-            return Cost { work: wall, wall, cpu: wall, waited: Duration::ZERO };
+            return Cost { work: wall, wall, cpu: wall, waited: Duration::ZERO, source: Source::Wall };
         }
         // a thread started during the work counts from nothing; one that ended took its waiting with it
         let before = |id: &str| self.from.threads.iter().find(|t| t.id == id);
@@ -176,14 +199,16 @@ impl Meter {
         match self.doer {
             Doer::Thread => {
                 let cpu = to.threads.iter().map(|t| since(t, |t| t.ran)).sum();
-                Cost { work: wall.saturating_sub(waited), wall, cpu, waited }
+                Cost { work: wall.saturating_sub(waited), wall, cpu, waited, source: Source::Counters }
             }
             Doer::Process => {
+                // the time run is the process's own count, which keeps the threads that ended - a worker of a rebuild
+                // ends before the measure is read, and the threads still there would leave only the idle one that
+                // waited for it. A work shorter than a few ticks of that count (10 ms each) is read as its wall.
                 let cpu = to.process.saturating_sub(self.from.process);
-                let ran: Duration = to.threads.iter().map(|t| since(t, |t| t.ran)).sum();
-                let ready = ran + waited;
-                let work = if ready.is_zero() { wall } else { wall.mul_f64(ran.as_secs_f64() / ready.as_secs_f64()) };
-                Cost { work, wall, cpu, waited }
+                let ran = cpu.max(to.threads.iter().map(|t| since(t, |t| t.ran)).sum());
+                let work = if ran < PROCESS_TICKS { wall } else { wall.mul_f64(ran.as_secs_f64() / (ran + waited).as_secs_f64()) };
+                Cost { work, wall, cpu, waited, source: Source::Counters }
             }
         }
     }
@@ -246,21 +271,42 @@ mod tests {
         ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// A CROWD OF OTHER PROGRAMS: four spinning processes a processor of the machine, ended when dropped.
-    struct Crowd(Vec<std::process::Child>);
+    /// A CROWD: four spinning threads a processor of the machine, stopped and joined when dropped. Threads of this
+    /// process, so it gathers the same on every system; the process measure counts them as it counts the threads of
+    /// other checks beside it.
+    #[cfg(target_os = "linux")]
+    struct Crowd {
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        threads: Vec<std::thread::JoinHandle<()>>,
+    }
 
+    #[cfg(target_os = "linux")]
     impl Crowd {
         fn gather() -> Self {
-            let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-            Self((0..4 * threads).filter_map(|_| std::process::Command::new("sh").args(["-c", "while :; do :; done"]).spawn().ok()).collect())
+            let n = 4 * std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let threads = (0..n)
+                .map(|_| {
+                    let stop = stop.clone();
+                    std::thread::spawn(move || {
+                        let mut k = 0u64;
+                        while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                            k = k.wrapping_add(1);
+                        }
+                        std::hint::black_box(k);
+                    })
+                })
+                .collect();
+            Self { stop, threads }
         }
     }
 
+    #[cfg(target_os = "linux")]
     impl Drop for Crowd {
         fn drop(&mut self) {
-            for c in &mut self.0 {
-                let _ = c.kill();
-                let _ = c.wait();
+            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            for t in self.threads.drain(..) {
+                let _ = t.join();
             }
         }
     }
@@ -275,37 +321,50 @@ mod tests {
         n
     }
 
+    /// A COST SAYS WHERE IT WAS READ FROM: the counters of the system on Linux, the wall clock where there are none.
+    #[test]
+    fn a_cost_says_where_it_was_read_from() {
+        let _alone = alone();
+        let cost = cost_of(Doer::Thread, || spin(Duration::from_millis(20))).cost;
+        let words = cost.to_string();
+        if cfg!(target_os = "linux") {
+            assert!(cost.source == super::Source::Counters && words.contains("the counters of the system"), "read on Linux: {words}");
+        } else {
+            assert!(cost.source == super::Source::Wall && words.contains("no counters") && cost.work == cost.wall, "read with no counters: {words}");
+        }
+    }
+
     /// A THREAD KEPT WAITING FOR A PROCESSOR IS NOT CHARGED FOR THE WAIT: with four spinning threads a processor, the
-    /// work of a thread is a part of its wall, and the rest is what it waited. Measured on 20 threads, six runs: 0.40-0.42 s
-    /// of the wall, 0.06-0.19 s of work, 0.21-0.34 s waited.
+    /// work of a thread is a part of its wall, and the rest is what it waited. Measured on 20 threads under a load of 27-40
+    /// beside, four runs: 0.40-0.42 s of the wall, 0.01-0.03 s of work, 0.37-0.40 s waited. Linux only: the wait is read from its counters, and macOS
+    /// and Windows have none - there the cost is the wall clock.
+    #[cfg(target_os = "linux")]
     #[test]
     fn the_wait_for_a_processor_is_not_work() {
         let _alone = alone();
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-        let crowd: Vec<_> = (0..4 * threads).map(|_| std::thread::spawn(|| spin(Duration::from_millis(600)))).collect();
-        let timed = cost_of(Doer::Thread, || spin(Duration::from_millis(400)));
-        crowd.into_iter().for_each(|t| drop(t.join()));
-        let cost = timed.cost;
-        eprintln!("a thread among {} spinning ones: {cost}", 4 * threads);
-        if !super::read(Doer::Thread, super::Moment::End).counted {
-            eprintln!("PASSED OVER: this system gives no counters of a thread's time; the cost is the wall clock");
-            return;
-        }
-        assert!(cost.waited > Duration::ZERO && cost.work < cost.wall.mul_f64(0.75), "a thread among {} spinning ones: {cost}", 4 * threads);
+        let crowd = Crowd::gather();
+        let cost = cost_of(Doer::Thread, || spin(Duration::from_millis(400))).cost;
+        drop(crowd);
+        eprintln!("a thread among spinning ones: {cost}");
+        assert!(cost.waited > Duration::ZERO && cost.work < cost.wall.mul_f64(0.75), "a thread among spinning ones: {cost}");
         assert!(cost.work <= cost.cpu + Duration::from_millis(20), "spinning is all on a processor: {cost}");
     }
 
-    /// A THREAD BLOCKED ON WHAT THE PROGRAM WAITS FOR IS CHARGED FOR IT: a frame stalled on a lock is a slow frame.
+    /// A THREAD BLOCKED ON WHAT THE PROGRAM WAITS FOR IS CHARGED FOR IT: a frame stalled on a lock is a slow frame. The
+    /// wake after the block waits for a processor like any other, and a busy machine takes that wait off: the block is
+    /// held against most of its 80 ms, not all, where a block taken for a wait would leave next to nothing.
     #[test]
     fn a_block_is_work() {
         let _alone = alone();
         let cost = cost_of(Doer::Thread, || std::thread::sleep(Duration::from_millis(80))).cost;
-        assert!(cost.work >= Duration::from_millis(80), "a sleep of 80 ms: {cost}");
+        assert!(cost.work >= Duration::from_millis(60), "a sleep of 80 ms: {cost}");
     }
 
-    /// THE WORK OF A PROCESS IS ITS WALL LESS ITS THREADS' WAIT: two workers spin 0.4 s among four spinning programs a
+    /// THE WORK OF A PROCESS IS ITS WALL LESS ITS THREADS' WAIT: two workers spin 0.4 s among four spinning threads a
     /// processor and are read while still there; the work is a part of the wall, as their share of a processor was.
-    /// Measured on 20 threads, three runs: 0.40-0.42 s of the wall, 0.06-0.10 s of work.
+    /// Measured under a load of 27-40 beside, four runs: 0.41-0.60 s of the wall, 0.07-0.12 s of work. Linux only, as the
+    /// wait is read from its counters.
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_process_is_not_charged_for_the_wait_of_its_threads() {
         let _alone = alone();
@@ -327,17 +386,14 @@ mod tests {
         read.wait();
         workers.into_iter().for_each(|t| drop(t.join()));
         drop(crowd);
-        eprintln!("two workers among spinning programs: {cost}");
-        if !super::read(Doer::Process, super::Moment::End).counted {
-            eprintln!("PASSED OVER: this system gives no counters of a process's time; the cost is the wall clock");
-            return;
-        }
-        assert!(cost.waited > Duration::ZERO && cost.work < cost.wall.mul_f64(0.75), "two workers among spinning programs: {cost}");
+        eprintln!("two workers among spinning threads: {cost}");
+        assert!(cost.waited > Duration::ZERO && cost.work < cost.wall.mul_f64(0.75), "two workers among spinning threads: {cost}");
     }
 
-    /// A PROCESS ON A MACHINE AT REST IS CHARGED ITS WALL: a worker that spins 300 ms and is joined.
+    /// A WORKER THAT ENDED BEFORE THE MEASURE IS STILL COUNTED: a worker spins 300 ms and is joined, and the process is
+    /// charged about its wall - read from the threads still there, the share would be the idle one's that waited for it.
     #[test]
-    fn a_process_at_rest_is_charged_its_wall() {
+    fn a_worker_that_ended_is_counted() {
         let _alone = alone();
         let cost = cost_of(Doer::Process, || std::thread::spawn(|| spin(Duration::from_millis(300))).join()).cost;
         assert!(cost.work >= Duration::from_millis(250), "a worker spinning 300 ms: {cost}");
