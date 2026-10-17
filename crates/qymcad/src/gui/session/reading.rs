@@ -245,7 +245,8 @@ impl Session {
         }
     }
 
-    /// THE LONGEST A FRAME TOOK SINCE THE LAST STEP WAS WATCHED, in wall time; asking starts the count again.
+    /// THE LONGEST A FRAME TOOK SINCE THE LAST STEP WAS WATCHED, by its work (`Window::worst_frame`); asking starts the
+    /// count again.
     pub fn step_frame(&mut self) -> Duration {
         std::mem::take(&mut self.win.worst_step_frame)
     }
@@ -355,7 +356,8 @@ impl Session {
         waiting
     }
 
-    /// THE LONGEST A FRAME TOOK since this was last asked, in wall time; asking starts the count again.
+    /// THE LONGEST A FRAME TOOK since this was last asked, by its work (`Window::worst_frame`); asking starts the count
+    /// again.
     pub fn worst_frame(&mut self) -> Duration {
         std::mem::take(&mut self.win.worst_frame)
     }

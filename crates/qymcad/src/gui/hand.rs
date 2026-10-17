@@ -133,15 +133,16 @@ impl<'a> Hand<'a> {
     }
 
     fn run(&mut self, modifiers: egui::Modifiers, events: Vec<egui::Event>) -> &mut Self {
-        let started = std::time::Instant::now();
+        let meter = qymcad_core::time_budget::Meter::start(qymcad_core::time_budget::Doer::Thread);
         self.win.run(self.app, modifiers, events, false);
-        self.worst = self.worst.max(started.elapsed());
+        self.worst = self.worst.max(meter.cost().work);
         self
     }
 
-    /// THE LONGEST FRAME SINCE THIS WAS LAST ASKED: the window standing still under a step of the hand. The time of a
-    /// whole gesture holds the hand's own looking - over the hint of every button, four frames each - which a person
-    /// who knows the panel does not do; the longest frame is what the person waits.
+    /// THE LONGEST FRAME SINCE THIS WAS LAST ASKED, by its work (`time_budget::Cost`): the window standing still under a
+    /// step of the hand, not the machine busy with others. The time of a whole gesture holds the hand's own looking -
+    /// over the hint of every button, four frames each - which a person who knows the panel does not do; the longest
+    /// frame is what the person waits.
     pub fn worst_frame(&mut self) -> std::time::Duration {
         std::mem::take(&mut self.worst)
     }
