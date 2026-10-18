@@ -101,7 +101,7 @@ mod tests {
                 }
                 hand.click2d(at.0, at.1);
                 let held = hand.app.project.sketches[0].points.iter().any(|q| (q.x - at.0).abs() < 1e-6 && (q.y - at.1).abs() < 1e-6);
-                let rects = hand.app.project.sketches[0].rects.len();
+                let rects = hand.app.project.sketches[0].rects().len();
                 if lines(&hand, 0) != 4 * (k + 2) || !held || rects != k + 2 {
                     failures.push(format!("{by:?}: paste {} at {at:?} - the sketch has {} curves and {rects} rectangles, a corner on the click {held}", k + 1, lines(&hand, 0)));
                 }
@@ -124,8 +124,8 @@ mod tests {
         hand.click2d(30.0, 30.0);
         assert_eq!(lines(&hand, other), 4, "the copy pasted into another sketch: {} curves there", lines(&hand, other));
         let s = &hand.app.project.sketches[other];
-        let centre_held = s.rects.first().is_some_and(|r| s.points.iter().any(|q| q.id == r.centre && (q.x - 40.0).abs() < 1e-6 && (q.y - 35.0).abs() < 1e-6));
-        assert!(centre_held, "the copy pasted into another sketch is no rectangle with its centre at (40, 35): {:?}", s.rects);
+        let centre_held = s.rects().first().is_some_and(|r| s.points.iter().any(|q| q.id == r.centre && (q.x - 40.0).abs() < 1e-6 && (q.y - 35.0).abs() < 1e-6));
+        assert!(centre_held, "the copy pasted into another sketch is no rectangle with its centre at (40, 35): {:?}", s.rects());
         assert_eq!(lines(&hand, 0), 4, "the first sketch changed");
     }
 
@@ -143,8 +143,8 @@ mod tests {
             }
             paste(&mut hand, by);
             hand.click2d(10.0, 10.0);
-            if lines(&hand, 0) != 4 || hand.app.project.sketches[0].rects.len() != 1 {
-                failures.push(format!("{by:?}: the cut pasted back - {} curves, {} rectangles", lines(&hand, 0), hand.app.project.sketches[0].rects.len()));
+            if lines(&hand, 0) != 4 || hand.app.project.sketches[0].rects().len() != 1 {
+                failures.push(format!("{by:?}: the cut pasted back - {} curves, {} rectangles", lines(&hand, 0), hand.app.project.sketches[0].rects().len()));
             }
         }
         assert!(failures.is_empty(), "a cut to the clipboard:\n{}", failures.join("\n"));

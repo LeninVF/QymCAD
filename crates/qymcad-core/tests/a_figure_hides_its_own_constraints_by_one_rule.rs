@@ -33,7 +33,7 @@ fn own(d: &Drawn) -> Vec<usize> {
 
 /// A corner of the rectangle fixed by a person: laid on the figure, not the figure's.
 fn fix_a_corner(mut p: Project, si: usize) -> Drawn {
-    let corner = p.sketches[si].rects[0].corners[0];
+    let corner = p.sketches[si].rects()[0].corners[0];
     p.sketches[si].constraints.push(Constraint::Fixed { p: corner });
     let laid = vec![p.sketches[si].constraints.len() - 1];
     Drawn { p, si, laid }
@@ -64,7 +64,7 @@ fn turned_by_an_angle() -> Drawn {
     p.add_rect_entity(si, 10.0, 10.0, 50.0, 40.0, Purpose::Real);
     let l = p.add_line_entity(si, 0.0, 0.0, 30.0, -10.0, Purpose::Real);
     let ends = p.sketches[si].entities.iter().find(|e| e.id == l).and_then(|e| e.kind.as_line()).expect("the line");
-    let r = p.sketches[si].rects[0].clone();
+    let r = p.sketches[si].rects()[0].clone();
     let dim = Constraint::AngleLines { a: ends.a, b: ends.b, c: r.corners[0], d: r.corners[1], deg: 20.0, expr: String::new(), driven: false, off: 0.0, at: None };
     p.give_rect_turn_to(si, &dim);
     let s = &mut p.sketches[si];

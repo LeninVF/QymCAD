@@ -41,6 +41,6 @@ fn one_side_of_a_rectangle_mirrored_mirrors_the_rectangle() {
     let s = &hand.app.project.sketches[si];
     let status = hand.app.status.clone();
     let left = s.points.iter().filter(|q| q.x < -4.9 && q.x > -25.1).count();
-    assert_eq!(s.rects.len(), 2, "{} rectangles: the image is no rectangle; the status line says {status:?}", s.rects.len());
+    assert_eq!(s.rects().len(), 2, "{} rectangles: the image is no rectangle; the status line says {status:?}", s.rects().len());
     assert!(left >= 4, "{left} points left of the Y axis, not the four corners of the image");
 }

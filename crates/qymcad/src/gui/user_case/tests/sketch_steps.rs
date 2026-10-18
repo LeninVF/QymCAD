@@ -42,7 +42,7 @@ fn a_rectangle_with_its_centre_fixed(app: &mut App, si: usize, problems: &mut Ve
     let mut hand = Hand::new(app);
     hand.sk_tool(2).click2d(110.0, 30.0).click2d(130.0, 50.0).key(egui::Key::Escape).key(egui::Key::Escape);
     hand.sk_tool(0);
-    let centre = hand.app.project.sketches[si].rects.last().map(|r| r.centre);
+    let centre = hand.app.project.sketches[si].rects().last().map(|r| r.centre);
     match centre {
         Some(c) if hand.select2d(&[(0, c)]) => {
             hand.constraint(6);

@@ -92,9 +92,9 @@ mod tests {
         app.chosen.sel = Sel::Sketch(si);
         Hand::new(&mut app).sk_tool(2).click2d(0.0, 0.0).click2d(40.0, 30.0).key(egui::Key::Enter);
         Hand::new(&mut app).sk_tool(0);
-        let sides: Vec<(u8, u64)> = app.project.sketches[si].rects[0].sides.iter().map(|&id| (1u8, id)).collect();
+        let sides: Vec<(u8, u64)> = app.project.sketches[si].rects()[0].sides.iter().map(|&id| (1u8, id)).collect();
         assert!(Hand::new(&mut app).sk_corner_set("tb-fillet-sketch-hint", &sides, 3.0), "no place to click on the four sides");
-        let corner = app.project.sketches[si].rects[0].corners[2];
+        let corner = app.project.sketches[si].rects()[0].corners[2];
         assert!(!app.project.sketches[si].unseen_points().contains(&corner), "the corner of the rounded rectangle is hidden from the drawing");
         let at = app.project.sketches[si].points.iter().find(|q| q.id == corner).map(|q| (q.x, q.y)).expect("the corner stays");
         let mut hand = Hand::new(&mut app);

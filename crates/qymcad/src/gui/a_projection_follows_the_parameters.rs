@@ -98,7 +98,7 @@ mod tests {
         // each corner of the inner square 5 off the corner of the outline nearest it, along X and along Y
         let corners: Vec<u64> = {
             let s = &hand.app.project.sketches[si2];
-            s.rects.last().map(|r| r.corners.to_vec()).expect("the inner square")
+            s.rects().last().map(|r| r.corners.to_vec()).expect("the inner square")
         };
         for c in corners.clone() {
             let s = &hand.app.project.sketches[si2];

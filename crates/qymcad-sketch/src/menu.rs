@@ -51,7 +51,7 @@ pub fn sketch_context_menu(sk: &mut qymcad_ui_state::SketchCtx, ui: &mut egui::U
                     let len = qymcad_i18n::num(curve_length(&*sk.project, si, id), 1);
                     // the rectangle the curve is a side of, by its number in the sketch: two sides of one length are told
                     // apart by the shape they belong to
-                    let rect = sk.project.sketches[si].rects.iter().position(|r| r.sides.contains(&id));
+                    let rect = sk.project.sketches[si].rects().iter().position(|r| r.sides.contains(&id));
                     let label = match rect {
                         Some(k) => qymcad_i18n::trn("sk-overlapping-side", &[("name", &name), ("rect", &(k + 1).to_string()), ("len", &len)]),
                         None => qymcad_i18n::tr2("sk-overlapping-item", "name", &name, "len", &len),

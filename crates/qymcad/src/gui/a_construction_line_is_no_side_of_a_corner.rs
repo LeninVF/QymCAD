@@ -20,7 +20,7 @@ mod tests {
         assert!(hand.press_word(&qymcad_i18n::tr("opt-rect-centre"), egui::pos2(0.0, 0.0)), "no centre + corner on the bar");
         hand.click2d(20.0, 15.0).click2d(40.0, 30.0).key(egui::Key::Enter);
         Hand::new(&mut app).sk_tool(0);
-        assert!(app.project.sketches[si].rects.first().is_some_and(|r| r.diagonals.is_some()), "the rectangle was not drawn from its centre with its diagonals");
+        assert!(app.project.sketches[si].rects().first().is_some_and(|r| r.diagonals.is_some()), "the rectangle was not drawn from its centre with its diagonals");
         (app, si)
     }
 
@@ -29,7 +29,7 @@ mod tests {
         let mut sins = Vec::new();
         for (key, tool) in [("tb-chamfer-sketch-hint", "the chamfer"), ("tb-fillet-sketch-hint", "the fillet")] {
             let (mut app, si) = from_its_centre();
-            let r = app.project.sketches[si].rects[0].clone();
+            let r = app.project.sketches[si].rects()[0].clone();
             let diagonal = r.diagonals.expect("the diagonals")[0];
             let entities = app.project.sketches[si].entities.len();
             if !Hand::new(&mut app).sk_corner_set(key, &[(1, r.sides[0]), (1, diagonal)], 3.0) {
@@ -54,7 +54,7 @@ mod tests {
         let mut sins = Vec::new();
         for (key, tool) in [("tb-chamfer-sketch-hint", "the chamfer"), ("tb-fillet-sketch-hint", "the fillet")] {
             let (mut app, si) = from_its_centre();
-            let diagonal = app.project.sketches[si].rects[0].diagonals.expect("the diagonals")[0];
+            let diagonal = app.project.sketches[si].rects()[0].diagonals.expect("the diagonals")[0];
             let Some(spot) = Hand::new(&mut app).spot2d((1, diagonal)) else {
                 sins.push(format!("{tool}: no place on the diagonal the select tool picks"));
                 continue;

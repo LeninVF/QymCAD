@@ -333,6 +333,10 @@ const CASES: &[Case] = &[
     Case { name: "a line and an arc", code: 4, first: line_left, second: arc_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([52.0, 29.0]) },
     Case { name: "two lines", code: 8, first: line_left, second: line_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([58.0, 40.0]) },
     Case { name: "a line and an open spline", code: 5, first: line_left, second: spline_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([56.0, 26.0]) },
+    // a circle has one size and an ellipse two, and the length of a spline is held by nothing a sketch keeps: as in the
+    // sketchers a person comes from, neither is made equal
+    Case { name: "a circle and an ellipse", code: 5, first: circle_left, second: ellipse_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([54.0, 32.0]) },
+    Case { name: "two open splines", code: 5, first: spline_left, second: spline_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([56.0, 26.0]) },
     Case { name: "two arcs", code: 7, first: arc_left, second: arc_right, picks: &[Pick::First, Pick::Second], holds: Holds::Refused, drag: p([52.0, 29.0]) },
 ];
 

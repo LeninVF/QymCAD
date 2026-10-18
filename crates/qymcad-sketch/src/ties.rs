@@ -216,7 +216,7 @@ pub(crate) fn tie_the_rect_to_what_is_under(sk: &mut qymcad_ui_state::SketchCtx,
             }
         }
         RectPut::After => {
-            let own: Vec<Id> = sk.project.sketches[si].rects.last().map(|r| r.corners.iter().copied().chain([r.centre]).collect()).unwrap_or_default();
+            let own: Vec<Id> = sk.project.sketches[si].rects().last().map(|r| r.corners.iter().copied().chain([r.centre]).collect()).unwrap_or_default();
             tie_the_clicked_points(&mut *sk.project, *sk.view, si, clicks, &own);
         }
     }

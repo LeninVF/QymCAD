@@ -122,7 +122,8 @@ impl Project {
         }
         // how many constraints name each centre, and where each point stands, counted once: asked of every constraint for
         // every rectangle and looked along the points, 10 000 rectangles drawn were 6e8 steps a solve
-        let corner_drawn: Vec<&crate::model::SketchRect> = s.rects.iter().filter(|r| matches!(r.anchor, crate::model::RectAnchor::Corner(_))).collect();
+        let all_rects = s.rects();
+        let corner_drawn: Vec<&crate::model::SketchRect> = all_rects.iter().filter(|r| matches!(r.anchor, crate::model::RectAnchor::Corner(_))).collect();
         let mut naming: std::collections::HashMap<Id, usize> = corner_drawn.iter().map(|r| (r.centre, 0)).collect();
         if !naming.is_empty() {
             for c in &s.constraints {
@@ -185,7 +186,7 @@ impl Project {
         // A CORNER DRAGGED OF A RECTANGLE DRAWN FROM A CORNER asks whether its centre is held - counted only then, as a
         // drag frame of a sketch the drag session does not take is solved here
         let dragged = drag.map(|(d, _, _)| d);
-        let corner_dragged = dragged.is_some_and(|d| s.rects.iter().any(|r| matches!(r.anchor, crate::model::RectAnchor::Corner(_)) && r.corners.contains(&d)));
+        let corner_dragged = dragged.is_some_and(|d| s.rects().iter().any(|r| matches!(r.anchor, crate::model::RectAnchor::Corner(_)) && r.corners.contains(&d)));
         let free: std::collections::HashMap<Id, bool> = if corner_dragged {
             s.points.iter().map(|q| q.id).zip(crate::solver::free_points(&s.points, &radii, &active)).collect()
         } else {
@@ -193,7 +194,7 @@ impl Project {
         };
         let centre_of = |r: &crate::model::SketchRect| if free.get(&r.centre) == Some(&false) { Centre::Held } else { Centre::Free };
         let anchors: Vec<Constraint> =
-            s.rects.iter().filter_map(|r| held_for_size(r, dragged, centre_of(r))).filter(|p| s.points.iter().any(|q| q.id == *p)).map(|p| Constraint::Fixed { p }).collect();
+            s.rects().iter().filter_map(|r| held_for_size(r, dragged, centre_of(r))).filter(|p| s.points.iter().any(|q| q.id == *p)).map(|p| Constraint::Fixed { p }).collect();
         let outcome = if anchors.is_empty() {
             crate::solver::solve_within(&mut s.points, &mut radii, &active, drag, left(budget))
         } else {

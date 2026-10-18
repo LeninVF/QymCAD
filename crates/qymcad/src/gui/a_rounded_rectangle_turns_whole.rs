@@ -35,7 +35,7 @@ mod tests {
         app.chosen.sel = Sel::Sketch(si);
         Hand::new(&mut app).sk_tool(2).click2d(0.0, 0.0).click2d(40.0, 30.0).type_text("45").key(egui::Key::Tab).type_text("35").key(egui::Key::Enter);
         Hand::new(&mut app).sk_tool(0);
-        let sides = app.project.sketches[si].rects[0].sides;
+        let sides = app.project.sketches[si].rects()[0].sides;
         let named: Vec<(u8, u64)> = sides.iter().map(|&id| (1u8, id)).collect();
         assert!(Hand::new(&mut app).sk_corner_set("tb-fillet-sketch-hint", &named, 3.0), "no place to click on the four sides");
         let before = arcs(&app, si);

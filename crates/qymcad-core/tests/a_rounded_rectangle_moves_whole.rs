@@ -13,7 +13,7 @@ fn rounded() -> (Project, usize) {
     p.new_document();
     let si = p.new_sketch("S");
     p.add_rect_entity(si, 0.0, 0.0, 45.0, 35.0, Purpose::Real);
-    let c = p.sketches[si].rects[0].corners;
+    let c = p.sketches[si].rects()[0].corners;
     let dim = |a, b, d| Constraint::Distance { a, b, d, off: 0.0, expr: String::new(), driven: false, axis: 0, at: None };
     p.sketches[si].constraints.extend([dim(c[0], c[1], 45.0), dim(c[1], c[2], 35.0)]);
     p.solve_sketch(si);
@@ -45,7 +45,7 @@ fn worst(p: &Project, si: usize) -> f64 {
 #[test]
 fn a_rounded_rectangle_turns_by_its_sides() {
     let (mut p, si) = rounded();
-    let sides = p.sketches[si].rects[0].sides;
+    let sides = p.sketches[si].rects()[0].sides;
     p.rotate_entities(si, &sides, 22.5, 17.5, 30.0);
     let s = &p.sketches[si];
     let at = |id: u64| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y)).expect("a point");
@@ -63,7 +63,7 @@ fn a_rounded_rectangle_turns_by_its_sides() {
 fn a_rounded_rectangle_moves_by_its_sides() {
     let (mut p, si) = rounded();
     let before: Vec<(u64, f64, f64)> = p.sketches[si].points.iter().map(|q| (q.id, q.x, q.y)).collect();
-    let sides = p.sketches[si].rects[0].sides;
+    let sides = p.sketches[si].rects()[0].sides;
     p.move_entities(si, &sides, 10.0, 5.0);
     let left: Vec<String> = before
         .iter()

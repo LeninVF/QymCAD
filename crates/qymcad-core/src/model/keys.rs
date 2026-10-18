@@ -576,7 +576,6 @@ fn feed_sketch(s: &Sketch, h: &mut std::collections::hash_map::DefaultHasher) {
         notes: _, // counted with the placement, in `key_of`
         texts,
         patterns,
-        rects,
         figures,
         projections,
         offsets,
@@ -617,7 +616,6 @@ fn feed_sketch(s: &Sketch, h: &mut std::collections::hash_map::DefaultHasher) {
     // drawn over them
     feed(entities, h);
     feed(patterns, h);
-    feed(rects, h);
     feed(figures, h);
     // the offsets held to their sources: which curve carries which copies
     feed(offsets, h);

@@ -174,7 +174,7 @@ pub struct DragSession {
     loop_grid: LoopGrid,
 }
 
-/// A STAMP OF THE STRUCTURE OF A SKETCH: how many points, entities, constraints, rectangles, splines and texts it has,
+/// A STAMP OF THE STRUCTURE OF A SKETCH: how many points, entities, constraints, figures, splines and texts it has,
 /// the ends of its entities, the kind of each constraint, whether it is a reference and the value of its dimension -
 /// what a frame of a drag leaves as it is. Each word turned and multiplied in, nothing laid out: laid out as the lists
 /// of the points of every entity and constraint, it was 20 ms of a frame on 70 000 rectangles. Where the points stand
@@ -183,7 +183,7 @@ pub struct DragSession {
 fn structure_stamp(s: &Sketch) -> u64 {
     let mut h: u64 = 0;
     let mut mix = |x: u64| h = (h.rotate_left(5) ^ x).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-    for n in [s.points.len(), s.entities.len(), s.constraints.len(), s.rects.len(), s.texts.len()] {
+    for n in [s.points.len(), s.entities.len(), s.constraints.len(), s.figures.len(), s.texts.len()] {
         mix(n as u64);
     }
     for e in &s.entities {
@@ -249,8 +249,10 @@ impl Project {
         let at = |s: &Sketch, i: usize| (s.points[i].x, s.points[i].y);
         let at_start: Vec<(f64, f64)> = sess.watched.iter().map(|&i| at(s, i)).collect();
         // the centres of the rectangles drawn by their corners on the middles of their diagonals (`solve_sketch_inner`)
+        // the rectangles the frame touches read once, and only where it touches one
+        let rects = if sess.rects.is_empty() { Vec::new() } else { s.rects() };
         for r in sess.rects.iter().filter(|r| r.mid) {
-            let rect = &s.rects[r.index];
+            let rect = &rects[r.index];
             let (Some(&a), Some(&c), Some(&m)) = (sess.place.get(&rect.corners[0]), sess.place.get(&rect.corners[2]), sess.place.get(&rect.centre)) else { continue };
             (s.points[m].x, s.points[m].y) = ((s.points[a].x + s.points[c].x) / 2.0, (s.points[a].y + s.points[c].y) / 2.0);
         }
@@ -278,7 +280,7 @@ impl Project {
         let mut own_radii: Vec<crate::solver::RadiusVar> = sess.radii.iter().map(|r| crate::solver::RadiusVar { center: r.centre, value: radius(s, r) }).collect();
         let radii_was: Vec<f64> = own_radii.iter().map(|r| r.value).collect();
         // a rectangle changes its size from where it was drawn (`held_for_size`)
-        let anchors = sess.rects.iter().filter_map(|r| held_for_size(&s.rects[r.index], Some(d), r.centre)).filter(|p| sess.place.contains_key(p)).map(|p| Constraint::Fixed { p });
+        let anchors = sess.rects.iter().filter_map(|r| held_for_size(&rects[r.index], Some(d), r.centre)).filter(|p| sess.place.contains_key(p)).map(|p| Constraint::Fixed { p });
         let mut constraints: Vec<Constraint> = sess.constraints.iter().cloned().chain(anchors).collect();
         // WHERE CURVES MADE TO TOUCH TOUCH NOW, read before each frame as a full solve reads it (`touchings_follow`): kept
         // from the first frame, a circle made to touch an ellipse came away 10 deg off
@@ -379,7 +381,7 @@ impl Project {
         let mut touched: HashSet<Id> = part.points.iter().map(|&i| s.points[i].id).chain(carried.iter().copied()).collect();
         touched.insert(d);
         // how many constraints name each centre of a rectangle drawn by its corners
-        let mut naming: HashMap<Id, usize> = s.rects.iter().map(|r| (r.centre, 0)).collect();
+        let mut naming: HashMap<Id, usize> = s.rects().iter().map(|r| (r.centre, 0)).collect();
         for c in &s.constraints {
             for p in c.points() {
                 if let Some(n) = naming.get_mut(&p) {
@@ -394,8 +396,8 @@ impl Project {
             let own: Vec<Constraint> = part.constraints.iter().map(|&ci| active[ci].clone()).collect();
             own_points.iter().map(|q| q.id).zip(crate::solver::free_points(&own_points, &own_radii, &own)).collect()
         };
-        let rects: Vec<TouchedRect> = s
-            .rects
+        let all_rects = s.rects();
+        let rects: Vec<TouchedRect> = all_rects
             .iter()
             .enumerate()
             .filter(|(_, r)| touched.contains(&r.centre) || r.corners.iter().any(|k| touched.contains(k)))
@@ -406,7 +408,7 @@ impl Project {
             })
             .collect();
         let watched: Vec<usize> =
-            touched.iter().chain(rects.iter().map(|r| &s.rects[r.index].centre)).filter_map(|id| place.get(id).copied()).collect::<std::collections::BTreeSet<usize>>().into_iter().collect();
+            touched.iter().chain(rects.iter().map(|r| &all_rects[r.index].centre)).filter_map(|id| place.get(id).copied()).collect::<std::collections::BTreeSet<usize>>().into_iter().collect();
         let watched_ids: HashSet<Id> = watched.iter().map(|&i| s.points[i].id).collect();
         let driven: Vec<usize> = s.constraints.iter().enumerate().filter(|(_, c)| c.is_driven() && c.points().iter().any(|p| watched_ids.contains(p))).map(|(i, _)| i).collect();
         let drawn: Vec<usize> = s.entities.iter().enumerate().filter(|(_, e)| !e.construction).map(|(k, _)| k).collect();

@@ -2,7 +2,7 @@
 //! rectangle, a polygon or a slot lay rectangles, polygons and slots - each with a record of its own on its own curves, a
 //! rectangle with its centre and its diagonals, each held by as many constraints of its own as the figure copied (a
 //! rectangle whose turn an angle dimension took, by its parallel and square sides), which the copy satisfies where it
-//! stands: a solve after the copy moves no point of it.
+//! stands: a solve after the copy moves no point of it; and with its size - the radius of a polygon on the copy's circle.
 //!
 //! Reported behaviour: the copies were plain curves - a mirrored rectangle fell apart under a dragged corner, a copied
 //! polygon had no circle of its own to hold its corners; a paste from the clipboard laid plain curves still.
@@ -26,7 +26,7 @@ const SHAPES: [Shape; 5] = [
             let sides = p.add_rect_entity(si, 10.0, 5.0, 20.0, 12.0, Purpose::Real);
             let l = p.add_line_entity(si, 10.0, -10.0, 20.0, -14.0, Purpose::Real);
             let ends = p.sketches[si].entities.iter().find(|e| e.id == l).and_then(|e| e.kind.as_line()).expect("the line");
-            let r = p.sketches[si].rects[0].clone();
+            let r = p.sketches[si].rects()[0].clone();
             let dim = Constraint::AngleLines { a: ends.a, b: ends.b, c: r.corners[0], d: r.corners[1], deg: 20.0, expr: String::new(), driven: false, off: 0.0, at: None };
             p.give_rect_turn_to(si, &dim);
             p.sketches[si].constraints.extend([Constraint::Fixed { p: ends.a }, Constraint::Fixed { p: ends.b }, dim]);
@@ -37,8 +37,11 @@ const SHAPES: [Shape; 5] = [
     Shape { name: "rectangle from its centre", draw: |p, si| p.add_rect_from_centre(si, Point2::new(14.0, 8.0), Point2::new(20.0, 12.0), Purpose::Real) },
     Shape {
         name: "polygon",
+        // its size given by the radius of its circle, as the field of the polygon gives it
         draw: |p, si| {
             p.add_polygon_entity(si, Point2::new(14.0, 8.0), Point2::new(20.0, 10.0), 6, Purpose::Real);
+            let centre = p.sketches[si].entities.iter().find_map(|e| e.kind.as_circle()).map(|c| c.center).expect("the circle of the polygon");
+            p.ensure_diameter(si, centre, false);
             p.sketches[si].entities.iter().map(|e| e.id).collect()
         },
     },
@@ -84,7 +87,8 @@ const TOOLS: [Tool; 5] = [
 /// The records of the sketch: the rectangles, then the figures, each by the ids of its curves.
 fn records(p: &Project, si: usize) -> Vec<Vec<u64>> {
     let s = &p.sketches[si];
-    s.rects.iter().map(|r| r.sides.iter().copied().chain(r.diagonals.into_iter().flatten()).collect()).chain(s.figures.iter().map(|f| f.curves.clone())).collect()
+    let rects = s.rects();
+    rects.iter().map(|r| r.sides.iter().copied().chain(r.diagonals.into_iter().flatten()).collect()).chain(s.shapes_not_rects().map(|f| f.curves.clone())).collect()
 }
 
 fn check(shape: &Shape, tool: &Tool) -> Result<(), String> {
@@ -93,6 +97,7 @@ fn check(shape: &Shape, tool: &Tool) -> Result<(), String> {
     let eids = (shape.draw)(&mut p, si);
     let before = records(&p, si);
     let held = p.sketches[si].held_by_shapes().len();
+    let sized = p.sketches[si].constraints.iter().filter(|c| matches!(c, Constraint::Diameter { .. })).count();
     let old: Vec<u64> = p.sketches[si].entities.iter().map(|e| e.id).collect();
     (tool.apply)(&mut p, si, &eids);
     let copies = if tool.name == "Circular pattern" { 2 } else { 1 };
@@ -108,11 +113,16 @@ fn check(shape: &Shape, tool: &Tool) -> Result<(), String> {
             return Err(format!("a record of a copy names a curve the sketch has not: {r:?}"));
         }
     }
+    // the size of a figure goes with each copy of it: a radius of a polygon laid on the copy's own circle
+    let sizes = |p: &Project| p.sketches[si].constraints.iter().filter(|c| matches!(c, Constraint::Diameter { .. })).count();
+    if sizes(&p) != sized * (1 + copies) {
+        return Err(format!("{} radii of figures, not {}: a copy lost the size of the figure", sizes(&p), sized * (1 + copies)));
+    }
     let held_after = p.sketches[si].held_by_shapes().len();
     if held_after != held * (1 + copies) {
         return Err(format!("{held_after} constraints the figures hold themselves by, not {}: a copy is not held as the figure is", held * (1 + copies)));
     }
-    let centres: Vec<u64> = p.sketches[si].rects.iter().map(|r| r.centre).collect();
+    let centres: Vec<u64> = p.sketches[si].rects().iter().map(|r| r.centre).collect();
     if centres.iter().enumerate().any(|(k, c)| centres[..k].contains(c)) {
         return Err(format!("two rectangles share a centre: {centres:?}"));
     }

@@ -28,7 +28,7 @@ fn drawn(turned: bool) -> (Project, usize) {
 /// sketch, and how many constraints the lines left hold.
 fn broken(turned: bool, k: usize) -> (Project, usize, usize) {
     let (mut p, si) = drawn(turned);
-    let side = p.sketches[si].rects[0].sides[k];
+    let side = p.sketches[si].rects()[0].sides[k];
     p.delete_entities(si, &[side]);
     let held = p.sketches[si].constraints.len();
     (p, si, held)
@@ -95,10 +95,10 @@ fn the_two_sides_of_one_length_are_held_equal() {
 #[test]
 fn a_rectangle_broken_by_a_constraint_leaves_its_sides_related() {
     let (mut p, si) = drawn(false);
-    let r = p.sketches[si].rects[0].clone();
+    let r = p.sketches[si].rects()[0].clone();
     let ci = p.sketches[si].constraints.iter().position(|c| c.points().iter().all(|q| r.corners.contains(q)) && !matches!(c, Constraint::Distance { .. })).expect("an own constraint of the rectangle");
     assert!(p.delete_sketch_constraint(si, ci), "the constraint deleted");
-    assert!(p.sketches[si].rects.is_empty(), "setup: the rectangle is broken");
+    assert!(p.sketches[si].rects().is_empty(), "setup: the rectangle is broken");
     let s = &p.sketches[si];
     let (h, v) = (s.constraints.iter().filter(|c| matches!(c, Constraint::Horizontal { .. })).count(), s.constraints.iter().filter(|c| matches!(c, Constraint::Vertical { .. })).count());
     assert!(h == 2 && v == 2, "four sides of a rectangle broken by a constraint: {h} Horizontal, {v} Vertical: {:?}", s.constraints);

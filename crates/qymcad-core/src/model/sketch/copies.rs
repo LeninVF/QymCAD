@@ -44,17 +44,33 @@ impl Project {
     pub(crate) fn wholes_among(&self, si: usize, eids: &[Id]) -> Whole {
         let Some(s) = self.sketches.get(si) else { return Whole { rects: Vec::new(), figures: Vec::new() } };
         Whole {
-            rects: s.rects.iter().filter(|r| r.sides.iter().all(|e| eids.contains(e))).cloned().collect(),
-            figures: s.figures.iter().filter(|f| f.curves.iter().all(|e| eids.contains(e))).cloned().collect(),
+            rects: s.rects().iter().filter(|r| r.sides.iter().all(|e| eids.contains(e))).cloned().collect(),
+            figures: s.shapes_not_rects().filter(|f| f.curves.iter().all(|e| eids.contains(e))).cloned().collect(),
         }
     }
 
-    /// THE CONSTRAINTS THE COPIES OF THE SHAPES TAKEN WHOLE HOLD THEMSELVES BY: a copy that carries no constraints of the
-    /// set (a mirror, a pattern) still carries these, or it is no figure.
+    /// THE CONSTRAINTS THE COPIES OF THE SHAPES TAKEN WHOLE HOLD THEMSELVES BY, and the sizes of them: a copy that carries
+    /// no constraints of the set (a mirror, a pattern) still carries these, or it is no figure - and a figure of the size
+    /// the source has. A dimension stands on a shape when every point it measures is a point of it: the radius of a
+    /// polygon, the length and the width of a slot, the sides of a rectangle. An angle of three points is left out - a
+    /// mirror turns its sense. Carried by the copy alone, a mirrored polygon kept its shape and lost its size.
     pub(crate) fn copied_own_constraints(&self, si: usize, whole: &Whole, maps: &CopyMaps) -> Vec<Constraint> {
         let Some(s) = self.sketches.get(si) else { return Vec::new() };
         let rects = whole.rects.iter().flat_map(|r| s.constraints.iter().filter(move |c| r.holds(c)));
-        rects.chain(whole.figures.iter().flat_map(|f| f.own.iter())).map(|c| copied_constraint(c, maps)).collect()
+        let own = rects.chain(whole.figures.iter().flat_map(|f| f.own.iter()));
+        // the points of each shape taken whole: its curves' and, for a rectangle, its centre and diagonals'
+        let shapes: Vec<std::collections::HashSet<Id>> = whole
+            .rects
+            .iter()
+            .map(|r| r.sides.iter().chain(r.diagonals.iter().flatten()).filter_map(|e| s.entity(*e)).flat_map(entity_points).chain([r.centre]).collect())
+            .chain(whole.figures.iter().map(|f| f.curves.iter().filter_map(|e| s.entity(*e)).flat_map(entity_points).collect()))
+            .collect();
+        let sized = |c: &Constraint| {
+            let ps = constraint_point_ids(c);
+            c.dim_value().is_some() && !matches!(c, Constraint::Angle { .. }) && !ps.is_empty() && shapes.iter().any(|shape| ps.iter().all(|p| shape.contains(p)))
+        };
+        let sizes = s.constraints.iter().filter(|c| sized(c));
+        own.chain(sizes).map(|c| copied_constraint(c, maps)).collect()
     }
 
     /// LAY THE RECORDS OF THE COPIES of the shapes taken whole, on the copied curves and points.
@@ -68,7 +84,7 @@ impl Project {
             };
             let id = self.alloc_id();
             let copy = SketchRect { id, corners: r.corners.map(p), sides: r.sides.map(e), centre: p(r.centre), diagonals: r.diagonals.map(|d| d.map(e)), anchor };
-            self.sketches[si].rects.push(copy);
+            self.sketches[si].add_rect(&copy);
         }
         for f in &whole.figures {
             let own: Vec<Constraint> = f.own.iter().map(|c| copied_constraint(c, maps)).collect();

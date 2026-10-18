@@ -40,11 +40,8 @@ pub struct Sketch {
     /// Editable patterns: a source, the layout parameters and the ids of the derived copies.
     #[serde(default)]
     pub patterns: Vec<SketchPattern>,
-    /// The rectangles kept as one shape: their sides, corners, centre and construction diagonals, see `SketchRect`.
-    #[serde(default)]
-    pub rects: Vec<SketchRect>,
-    /// The other figures kept as one shape - regular polygons and slots: their curves and their own constraints, see
-    /// `SketchFigure`.
+    /// The figures kept as one shape - rectangles, regular polygons and slots: their curves and what holds them, see
+    /// `SketchFigure`; a rectangle is read as one through `Sketch::rects` (`SketchRect`).
     #[serde(default)]
     pub figures: Vec<SketchFigure>,
     /// Projections of body geometry (driven entities that reference their source).
@@ -200,8 +197,8 @@ impl Sketch {
     /// centre) and of a polygon or a slot (`SketchFigure::own`). One rule for every figure: none is listed nor badged.
     pub fn held_by_shapes(&self) -> std::collections::HashSet<usize> {
         let mut out = self.corner_holders();
-        if !self.figures.is_empty() || !self.rects.is_empty() {
-            let held = |c: &Constraint| self.rects.iter().any(|r| r.holds(c)) || self.figures.iter().any(|f| f.holds(c));
+        if !self.figures.is_empty() {
+            let held = |c: &Constraint| self.figures.iter().any(|f| f.holds(c));
             out.extend(self.constraints.iter().enumerate().filter(|(_, c)| held(c)).map(|(ci, _)| ci));
         }
         out
@@ -358,7 +355,7 @@ impl Sketch {
     /// The centre of a fillet - an arc touching its lines (`Tangent`) with no partner of one radius - carries nothing:
     /// the lines it touches hold it. Empty for any other point.
     pub fn carried_with(&self, centre: Id) -> Vec<Id> {
-        let rect: Vec<Id> = self.rects.iter().filter(|r| r.centre == centre).flat_map(|r| r.corners).collect();
+        let rect: Vec<Id> = self.rects().iter().filter(|r| r.centre == centre).flat_map(|r| r.corners).collect();
         if !rect.is_empty() {
             return rect;
         }
@@ -523,11 +520,12 @@ pub enum PatternKind {
     },
 }
 
-/// A SKETCH RECTANGLE KEPT AS ONE SHAPE: four sides each held at its turn (`Constraint::Orientation`: the first and the
-/// third at the turn of the rectangle, the second and the fourth square to them), and a centre on the middle of its
-/// diagonal - drawn as two construction diagonals for a rectangle drawn from its centre. It stays a rectangle until it
-/// is broken - a side deleted - and then the record, the centre and the diagonals go and four plain lines are left.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// A SKETCH RECTANGLE KEPT AS ONE SHAPE, as it is read off its figure (`FigureShape::Rectangle`): four sides each held at
+/// its turn (`Constraint::Orientation`: the first and the third at the turn of the rectangle, the second and the fourth
+/// square to them), and a centre on the middle of its diagonal - drawn as two construction diagonals for a rectangle
+/// drawn from its centre. It stays a rectangle until it is broken - a side deleted - and then the record, the centre and
+/// the diagonals go and four plain lines are left.
+#[derive(Clone, Debug, PartialEq)]
 pub struct SketchRect {
     pub id: Id,
     /// The corners in order round the rectangle.
@@ -543,10 +541,10 @@ pub struct SketchRect {
     pub anchor: RectAnchor,
 }
 
-/// A FIGURE OF A SKETCH KEPT AS ONE SHAPE, other than a rectangle (`SketchRect`, which holds a turn, an anchor and a
-/// centre of its own): a regular polygon or a slot. Its curves, and the constraints it holds itself by - not listed,
-/// not badged: they are the figure's, as the turn of a rectangle is the rectangle's. It stays a figure until one of its
-/// curves is deleted; then the record and its own constraints go, and plain curves are left.
+/// A FIGURE OF A SKETCH KEPT AS ONE SHAPE: a rectangle, a regular polygon or a slot - one record for every figure. Its
+/// curves, and the constraints it holds itself by - not listed, not badged: they are the figure's. A polygon and a slot
+/// keep theirs in `own`; a rectangle holds itself by its turn or by its shape, read off its corners (`SketchRect::holds`).
+/// It stays a figure until one of its curves is deleted; then the record and what holds it go, and plain curves are left.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SketchFigure {
     pub id: Id,
@@ -558,16 +556,68 @@ pub struct SketchFigure {
 /// WHAT A FIGURE IS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FigureShape {
+    /// a rectangle: its four sides (the curves of the figure, corner k to corner k + 1), and the rest of its frame
+    Rectangle(RectFrame),
     /// a regular polygon: its sides and its construction circle, each corner on the circle and the sides equal
     Polygon,
     /// a slot: two straight sides and two end arcs of one radius, the sides touching both ends
     Slot,
 }
 
+/// THE FRAME OF A RECTANGLE besides its sides: its corners in order round it, its centre, the construction diagonals of
+/// a rectangle drawn from its centre (corner 0 to 2, corner 1 to 3), and what a width or a height changed grows it from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RectFrame {
+    pub corners: [Id; 4],
+    pub centre: Id,
+    pub diagonals: Option<[Id; 2]>,
+    pub anchor: RectAnchor,
+}
+
 impl SketchFigure {
     /// Is `c` one of the constraints the figure holds itself by - of its kind, on the same points in the same order?
     pub fn holds(&self, c: &Constraint) -> bool {
-        self.own.iter().any(|o| std::mem::discriminant(o) == std::mem::discriminant(c) && constraint_point_ids(o) == constraint_point_ids(c))
+        match self.rect() {
+            Some(r) => r.holds(c),
+            None => self.own.iter().any(|o| std::mem::discriminant(o) == std::mem::discriminant(c) && constraint_point_ids(o) == constraint_point_ids(c)),
+        }
+    }
+
+    /// The rectangle the figure is, read as one; `None` for a polygon or a slot.
+    pub fn rect(&self) -> Option<SketchRect> {
+        let FigureShape::Rectangle(f) = self.shape else { return None };
+        let sides: [Id; 4] = self.curves.get(..4)?.try_into().ok()?;
+        Some(SketchRect { id: self.id, corners: f.corners, sides, centre: f.centre, diagonals: f.diagonals, anchor: f.anchor })
+    }
+}
+
+impl SketchRect {
+    /// The record of the rectangle, as a figure of its sketch.
+    pub fn figure(&self) -> SketchFigure {
+        let frame = RectFrame { corners: self.corners, centre: self.centre, diagonals: self.diagonals, anchor: self.anchor };
+        SketchFigure { id: self.id, shape: FigureShape::Rectangle(frame), curves: self.sides.to_vec(), own: Vec::new() }
+    }
+}
+
+impl Sketch {
+    /// THE RECTANGLES OF THE SKETCH, each read off its figure.
+    pub fn rects(&self) -> Vec<SketchRect> {
+        self.figures.iter().filter_map(SketchFigure::rect).collect()
+    }
+
+    /// The figures of the sketch other than rectangles: its polygons and slots.
+    pub fn shapes_not_rects(&self) -> impl Iterator<Item = &SketchFigure> {
+        self.figures.iter().filter(|f| f.rect().is_none())
+    }
+
+    /// Lay the record of rectangle `r` among the figures.
+    pub fn add_rect(&mut self, r: &SketchRect) {
+        self.figures.push(r.figure());
+    }
+
+    /// Take away the records of the rectangles `gone` picks.
+    pub fn drop_rects(&mut self, gone: impl Fn(&SketchRect) -> bool) {
+        self.figures.retain(|f| f.rect().is_none_or(|r| !gone(&r)));
     }
 }
 

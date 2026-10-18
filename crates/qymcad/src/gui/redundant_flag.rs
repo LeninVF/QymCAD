@@ -107,7 +107,7 @@ mod parts_tests {
         let si = app.create_sketch_on(qymcad_core::feature::SketchPlane::default());
         app.project.add_rect_entity(si, -20.0, -12.0, 40.0, 24.0, qymcad_core::feature::Purpose::Real);
         // two sides made equal by a person: the rectangle's own constraints are not listed, this one is
-        let [c0, c1, c2, _] = app.project.sketches[si].rects[0].corners;
+        let [c0, c1, c2, _] = app.project.sketches[si].rects()[0].corners;
         app.project.sketches[si].constraints.push(qymcad_core::model::Constraint::Equal { a: c0, b: c1, c: c1, d: c2 });
         app.project.regen_sketch(si);
         (app, si)

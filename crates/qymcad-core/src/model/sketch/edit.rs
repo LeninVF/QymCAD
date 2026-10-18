@@ -7,7 +7,7 @@ impl Project {
     /// side, or of the side across from it, is its width or its height. `None` when the side is no rectangle's.
     pub fn rect_dims(&mut self, si: usize, side: Id) -> Option<crate::model::RectDims> {
         let s = self.sketches.get(si)?;
-        let r = s.rects.iter().find(|r| r.sides.contains(&side))?.clone();
+        let r = s.rects().iter().find(|r| r.sides.contains(&side))?.clone();
         let [c0, c1, c2, c3] = r.corners;
         let find =
             |pairs: [(Id, Id); 2]| s.constraints.iter().position(|c| matches!(*c, Constraint::Distance { a, b, axis: 0, .. } if pairs.iter().any(|&(x, y)| (a == x && b == y) || (a == y && b == x))));
@@ -68,7 +68,7 @@ impl Project {
     /// whether the rectangle was found.
     pub fn dimension_rect(&mut self, si: usize, side: Id) -> bool {
         let Some(s) = self.sketches.get_mut(si) else { return false };
-        let Some(r) = s.rects.iter().find(|r| r.sides.contains(&side)).cloned() else { return false };
+        let Some(r) = s.rects().iter().find(|r| r.sides.contains(&side)).cloned() else { return false };
         let at = |id: Id| s.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
         let (Some(p0), Some(p1), Some(p2)) = (at(r.corners[0]), at(r.corners[1]), at(r.corners[2])) else { return false };
         let (w, h) = ((p1.0 - p0.0).hypot(p1.1 - p0.1), (p2.0 - p1.0).hypot(p2.1 - p1.1));
@@ -87,7 +87,7 @@ impl Project {
         let side_of = |s: &crate::model::Sketch, r: &crate::model::SketchRect, x: Id, y: Id| {
             r.sides.iter().any(|e| s.entity(*e).and_then(|q| q.kind.as_line()).is_some_and(|l| (l.a == x && l.b == y) || (l.a == y && l.b == x)))
         };
-        let turned: Vec<crate::model::SketchRect> = s.rects.iter().filter(|r| side_of(s, r, a, b) || side_of(s, r, c, d)).cloned().collect();
+        let turned: Vec<crate::model::SketchRect> = s.rects().iter().filter(|r| side_of(s, r, a, b) || side_of(s, r, c, d)).cloned().collect();
         for r in turned {
             let held_by_turns = s.constraints.iter().any(|k| matches!(k, Constraint::Orientation { a, .. } if r.corners.contains(a)));
             if !held_by_turns {
@@ -107,14 +107,14 @@ impl Project {
     /// at, so a dragged corner does not turn it.
     pub(crate) fn settle_rects_after(&mut self, si: usize, removed: &Constraint) {
         let Some(s) = self.sketches.get_mut(si) else { return };
-        let broken: Vec<crate::model::SketchRect> = s.rects.iter().filter(|r| r.holds(removed)).cloned().collect();
+        let broken: Vec<crate::model::SketchRect> = s.rects().iter().filter(|r| r.holds(removed)).cloned().collect();
         for r in &broken {
-            s.rects.retain(|k| k.id != r.id);
+            s.drop_rects(|k| k.id == r.id);
             s.constraints.retain(|k| !r.holds(k));
         }
         let diagonals: Vec<Id> = broken.iter().flat_map(|r| r.diagonals.into_iter().flatten()).collect();
         let free: Vec<crate::model::SketchRect> = s
-            .rects
+            .rects()
             .iter()
             .filter(|r| !s.constraints.iter().any(|k| matches!(k, Constraint::Orientation { a, .. } if r.corners.contains(a))))
             .filter(|r| !s.constraints.iter().any(|k| matches!(k, Constraint::AngleLines { a, b, c, d, .. } if [a, b, c, d].iter().filter(|p| r.corners.contains(p)).count() >= 2)))
@@ -188,7 +188,8 @@ impl Project {
     /// dragged pulled it out of shape. Answers how many constraints were laid.
     pub fn relate_lines_left(&mut self, si: usize, before: &[crate::model::SketchRect]) -> usize {
         let Some(s) = self.sketches.get(si) else { return 0 };
-        let sides: Vec<Id> = before.iter().filter(|r| !s.rects.iter().any(|k| k.id == r.id)).flat_map(|r| r.sides).collect();
+        let standing: std::collections::HashSet<Id> = s.rects().iter().map(|k| k.id).collect();
+        let sides: Vec<Id> = before.iter().filter(|r| !standing.contains(&r.id)).flat_map(|r| r.sides).collect();
         self.relate_lines(si, &sides)
     }
 
@@ -240,7 +241,7 @@ impl Project {
         laid
     }
     pub fn delete_sketch_constraint(&mut self, si: usize, ci: usize) -> bool {
-        let before: Vec<crate::model::SketchRect> = self.sketches.get(si).map(|s| s.rects.clone()).unwrap_or_default();
+        let before: Vec<crate::model::SketchRect> = self.sketches.get(si).map(|s| s.rects().clone()).unwrap_or_default();
         {
             let Some(s) = self.sketches.get_mut(si) else { return false };
             if ci >= s.constraints.len() {
@@ -271,7 +272,7 @@ impl Project {
         // is a virtual sharp no side ends at, and the arc or the cut between two sides is a piece of the same contour.
         // Left behind, the sharps and the arcs held the sides by their tangencies and dimensions, and Rotate of a
         // rectangle 45 x 35 rounded R3 all round was refused as held.
-        let taken: Vec<crate::model::SketchRect> = self.sketches.get(si).map(|s| s.rects.iter().filter(|r| r.sides.iter().all(|e| eids.contains(e))).cloned().collect()).unwrap_or_default();
+        let taken: Vec<crate::model::SketchRect> = self.sketches.get(si).map(|s| s.rects().iter().filter(|r| r.sides.iter().all(|e| eids.contains(e))).cloned().collect()).unwrap_or_default();
         for r in &taken {
             pts.extend(r.corners);
             let contour: Vec<Id> = self.connected_entities(si, r.sides[0]).into_iter().collect();
@@ -286,7 +287,7 @@ impl Project {
     }
     /// The rectangles of sketch `si` whose four corners are all among `pts`.
     pub(crate) fn whole_rects(&self, si: usize, pts: &[Id]) -> Vec<crate::model::SketchRect> {
-        self.sketches.get(si).map(|s| s.rects.iter().filter(|r| r.corners.iter().all(|c| pts.contains(c))).cloned().collect()).unwrap_or_default()
+        self.sketches.get(si).map(|s| s.rects().iter().filter(|r| r.corners.iter().all(|c| pts.contains(c))).cloned().collect()).unwrap_or_default()
     }
 
     /// THE EDIT ENDS AT THE SOLVER, not at a rebuild. `regen_sketch` recomputes the contours from whatever

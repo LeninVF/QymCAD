@@ -127,8 +127,8 @@ pub fn sketch_drag_start(sk: &mut qymcad_ui_state::SketchCtx, ctx: &egui::Contex
                     // The centre of a fillet carries nothing and stays refused - the lines it touches hold it.
                     let s = &sk.project.sketches[si];
                     let centres: Vec<Id> = s
-                        .rects
-                        .iter()
+                        .rects()
+                        .into_iter()
                         .map(|r| r.centre)
                         .chain(s.entities.iter().filter_map(|e| if let Some(qymcad_core::model::ArcParts { center, .. }) = e.kind.as_arc() { Some(center) } else { None }))
                         .collect();

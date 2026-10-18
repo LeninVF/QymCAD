@@ -59,7 +59,7 @@ fn with_whole_figures(project: &Project, si: usize, picked: &[Id]) -> Vec<Id> {
     let mut out = picked.to_vec();
     let Some(s) = project.sketches.get(si) else { return out };
     // a rectangle by its sides, a polygon by its sides and its circle, a slot by its sides and its ends
-    let wholes = s.rects.iter().map(|r| r.sides.to_vec()).chain(s.figures.iter().map(|f| f.curves.clone()));
+    let wholes = s.figures.iter().map(|f| f.curves.clone());
     for curves in wholes.filter(|c| c.iter().any(|e| picked.contains(e))) {
         out.extend(curves.into_iter().filter(|c| !picked.contains(c)));
     }
@@ -293,7 +293,7 @@ fn points_not_alone(project: &Project, si: usize) -> std::collections::HashSet<I
     let Some(s) = project.sketches.get(si) else { return Default::default() };
     // the centre of a rectangle and the middle of a line are places on a shape, held there, not shapes
     let middles = s.constraints.iter().filter_map(|c| if let qymcad_core::model::Constraint::Midpoint { p, .. } = c { Some(*p) } else { None });
-    s.entities.iter().flat_map(qymcad_core::model::entity_points).chain(s.immovable_points()).chain(s.rects.iter().map(|r| r.centre)).chain(middles).collect()
+    s.entities.iter().flat_map(qymcad_core::model::entity_points).chain(s.immovable_points()).chain(s.rects().iter().map(|r| r.centre)).chain(middles).collect()
 }
 
 /// The centre of the selected object (for the gizmo), in the part's XY coordinates.

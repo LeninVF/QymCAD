@@ -42,7 +42,6 @@ impl Project {
             notes: Vec::new(),
             texts: Vec::new(),
             patterns: Vec::new(),
-            rects: Vec::new(),
             figures: Vec::new(),
             projections: Vec::new(),
             offsets: Vec::new(),
@@ -252,7 +251,6 @@ impl Project {
             notes: Vec::new(),
             texts: Vec::new(),
             patterns: Vec::new(),
-            rects: Vec::new(),
             figures: Vec::new(),
             projections: Vec::new(),
             offsets: Vec::new(),
@@ -286,7 +284,6 @@ impl Project {
             notes: Vec::new(),
             texts: Vec::new(),
             patterns: Vec::new(),
-            rects: Vec::new(),
             figures: Vec::new(),
             projections: Vec::new(),
             offsets: Vec::new(),
@@ -801,10 +798,10 @@ impl Project {
         // A RECTANGLE LOSING A SIDE IS BROKEN: its diagonals go with the side, its centre with them, and the constraints
         // it held itself by - four plain lines are left, with nothing of the rectangle on them.
         let mut eids = eids.to_vec();
-        let before: Vec<crate::model::SketchRect> = self.sketches.get(si).map(|s| s.rects.clone()).unwrap_or_default();
+        let before: Vec<crate::model::SketchRect> = self.sketches.get(si).map(|s| s.rects()).unwrap_or_default();
         if let Some(s) = self.sketches.get_mut(si) {
-            let broken: Vec<crate::model::SketchRect> = s.rects.iter().filter(|r| r.sides.iter().chain(r.diagonals.iter().flatten()).any(|e| eids.contains(e))).cloned().collect();
-            s.rects.retain(|r| !broken.contains(r));
+            let broken: Vec<crate::model::SketchRect> = before.iter().filter(|r| r.sides.iter().chain(r.diagonals.iter().flatten()).any(|e| eids.contains(e))).cloned().collect();
+            s.drop_rects(|r| broken.contains(r));
             for r in &broken {
                 // the centre is a point of the rectangle no curve stands on: named, it goes, as a point drawn alone does not
                 eids.extend(r.diagonals.into_iter().flatten().chain([r.centre]));
@@ -905,7 +902,8 @@ impl Project {
     pub(crate) fn break_figures_of(&mut self, si: usize, going: &[Id]) {
         let Some(s) = self.sketches.get_mut(si) else { return };
         let alive: std::collections::HashSet<Id> = s.entities.iter().map(|e| e.id).filter(|id| !going.contains(id)).collect();
-        let broken: Vec<SketchFigure> = s.figures.iter().filter(|f| f.curves.iter().any(|c| !alive.contains(c))).cloned().collect();
+        // a rectangle is broken with its centre and its diagonals where a side is deleted (`delete_entities`)
+        let broken: Vec<SketchFigure> = s.shapes_not_rects().filter(|f| f.curves.iter().any(|c| !alive.contains(c))).cloned().collect();
         if broken.is_empty() {
             return;
         }
@@ -1036,7 +1034,7 @@ impl Project {
             DrawnFrom::Centre => crate::model::RectAnchor::Centre,
         };
         let id = self.alloc_id();
-        self.sketches[si].rects.push(crate::model::SketchRect { id, corners: [c0, c1, c2, c3], sides, centre, diagonals, anchor });
+        self.sketches[si].add_rect(&crate::model::SketchRect { id, corners: [c0, c1, c2, c3], sides, centre, diagonals, anchor });
         self.regen_sketch(si);
         sides.to_vec()
     }
@@ -1182,7 +1180,6 @@ impl Project {
             notes: Vec::new(),
             texts: Vec::new(),
             patterns: Vec::new(),
-            rects: Vec::new(),
             figures: Vec::new(),
             projections: Vec::new(),
             offsets: Vec::new(),

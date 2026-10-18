@@ -26,10 +26,10 @@ fn a_rectangle_turned_by_an_angle_a_hexagon_and_a_slot_show_no_badge() {
     let s = &hand.app.project.sketches[si];
     let status = hand.app.status.clone();
     assert!(
-        s.rects.len() == 1 && s.figures.len() == 2 && s.constraints.iter().any(|c| matches!(c, Constraint::AngleLines { .. })),
+        s.rects().len() == 1 && s.shapes_not_rects().count() == 2 && s.constraints.iter().any(|c| matches!(c, Constraint::AngleLines { .. })),
         "setup: {} rectangles, {} figures, no angle dimension in {:?}; the status line says {status:?}",
-        s.rects.len(),
-        s.figures.len(),
+        s.rects().len(),
+        s.shapes_not_rects().count(),
         s.constraints
     );
     assert!(!s.constraints.iter().any(|c| matches!(c, Constraint::Orientation { .. })), "setup: the angle did not take the rectangle's turn");

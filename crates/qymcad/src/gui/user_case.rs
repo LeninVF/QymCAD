@@ -1739,7 +1739,7 @@ mod tests {
                     Hand::new(&mut app).sk_tool(0).look2d((225.0, -25.0)).sk_rotate((225.0, -40.0), (225.0, -30.0), 30.0);
                     let sk = &app.project.sketches[si];
                     let at = |id: u64| sk.points.iter().find(|q| q.id == id).map(|q| (q.x, q.y));
-                    let turned = sk.rects.iter().find(|r| at(r.centre).is_some_and(|c| (c.0 - 225.0).hypot(c.1 + 30.0) < 1.0)).and_then(|r| {
+                    let turned = sk.rects().iter().find(|r| at(r.centre).is_some_and(|c| (c.0 - 225.0).hypot(c.1 + 30.0) < 1.0)).and_then(|r| {
                         let [a, b, _, d] = r.corners.map(at);
                         let (a, b, d) = (a?, b?, d?);
                         let turn = (b.1 - a.1).atan2(b.0 - a.0).to_degrees();
