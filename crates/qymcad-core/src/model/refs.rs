@@ -95,6 +95,16 @@ impl Project {
         }
     }
 
+    /// WHERE A REFERENCE TO THE FACE NAMED `id` OF `body` GOES BY THE NAME, with no place recorded: the face itself, the
+    /// face it merged into, the one face of its recipe, or the other piece of its face (`find_face`).
+    pub fn face_by_name(&self, body: Id, id: u32) -> Option<u32> {
+        let faces = self.regen_faces.get(&body)?;
+        if faces.iter().any(|f| f.id == id) {
+            return Some(id);
+        }
+        self.find_face(faces, id, None).map(|f| f.face)
+    }
+
     /// Say that a reference of step `node` was found by place: the rebuild marks the step when it ends.
     pub(crate) fn note_found_by_place(&self, node: Id) {
         if let Ok(mut now) = self.placed_now.lock() {
@@ -562,7 +572,13 @@ impl Project {
                 }
             }
             // Last, the other piece: no place recorded, of two pieces of a face the one not keeping the name of the whole.
+            // Not the name, so the step is marked for the person as one found by place is: the filter edited, a
+            // rounding's references went to the other piece of a wall and the window said nothing.
             if let Some(t) = self.names.other_piece(eid, &ids).filter(|t| !out.contains(t)) {
+                self.note_found_by_place(fid);
+                if std::env::var("QYM_SNAP_DEBUG").is_ok() {
+                    eprintln!("edge as the other piece: feature {fid}, reference {} = {} -> {t} = {}", eid, self.names.describe(eid), self.names.describe(t));
+                }
                 out.push(t);
             }
         }
@@ -679,6 +695,28 @@ mod tests {
         let edge = |id: u32, y: f64| crate::geom::MeshEdge { id, mid: [11.0, y, 60.0], dir: [0.0, 0.0, 1.0], ..Default::default() };
         let live = [edge(of_whole, -21.0), edge(of_piece, 21.0)];
         assert_eq!(p.resolve_edge_ids_in(&live, node, &[picked]), vec![of_piece], "the reference to the piece beside the whole did not go to the other piece");
+    }
+
+    /// A REFERENCE FOUND AS THE OTHER PIECE IS MARKED FOR THE PERSON, as one found by place is: the name it holds is not
+    /// in the body, and the piece taken is the only one of its face that is not the whole - a fallback, not the name. The
+    /// filter edited, a rounding's references went to the other piece of a wall and the window said nothing.
+    #[test]
+    fn an_edge_found_as_the_other_piece_marks_its_step() {
+        let mut p = Project::default();
+        let node = 2;
+        let wall = GeoName::new(206, Role::Wall, 168);
+        let whole = p.names.intern_face(wall);
+        let cut = crate::names::CutOff { feature: 206, role: Role::Wall, src: 167, split: 0, side: crate::names::Side::Front };
+        let old_piece = p.names.intern_face(GeoName { cut: Some(cut), ..wall });
+        let new_piece = p.names.intern_face(GeoName { split: 1, ..wall });
+        let tube = p.names.intern_face(GeoName::new(35, Role::Wall, 30));
+        let picked = p.names.intern_edge(crate::names::EdgeName::new(tube, old_piece, 0));
+        let of_whole = p.names.intern_edge(crate::names::EdgeName::new(tube, whole, 0));
+        let of_piece = p.names.intern_edge(crate::names::EdgeName::new(tube, new_piece, 0));
+        let edge = |id: u32, y: f64| crate::geom::MeshEdge { id, mid: [11.0, y, 60.0], dir: [0.0, 0.0, 1.0], ..Default::default() };
+        let live = [edge(of_whole, -21.0), edge(of_piece, 21.0)];
+        assert_eq!(p.resolve_edge_ids_in(&live, node, &[picked]), vec![of_piece], "setup: the reference goes to the other piece");
+        assert!(p.placed_now.lock().is_ok_and(|now| now.contains(&node)), "the step whose reference went to the other piece is not marked for the person");
     }
 
     /// A PIECE NAMED AFTER WHAT CUT IT OFF is a piece too. Measured on the filter: the other piece of a wall named
