@@ -13,7 +13,7 @@
 //!
 //! The open chains are made apart, from the curves joined end to end with a moved one: a chain is all the curves so
 //! joined, wherever they reach.
-use super::tess::{arrangement_faces, tessellate_sketch_multi};
+use super::tess::{arrangement_faces, tessellate_sketch_multi, without_spikes};
 use super::*;
 use crate::geom::ProfEdge;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -95,6 +95,8 @@ pub(super) fn regions_round(ch: &Change) -> Vec<(Contour, Vec<Id>)> {
                     }
                 }
             } else if inside(&b, &w) {
+                let (mut c, mut prov) = (c, prov);
+                without_spikes(&mut c, &mut prov);
                 out.push((c, prov));
             } else if inside(&b, &rim) {
                 // between the window and its sides: a curve laid in neither may cut it, so the window takes it in

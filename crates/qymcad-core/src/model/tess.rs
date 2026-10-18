@@ -587,7 +587,55 @@ pub(super) fn arrangement_regions(points: &[SketchPoint], entities: &[SketchEnti
 /// is stitched from. This is what keeps the identity of a contour stable across edits, so that loops which
 /// swapped places do not take over each other's ids.
 pub(super) fn arrangement_regions_prov(points: &[SketchPoint], entities: &[SketchEntity], splines: &[Spline]) -> Vec<(Contour, Vec<Id>)> {
-    arrangement_faces(points, entities, splines).inner
+    arrangement_faces(points, entities, splines)
+        .inner
+        .into_iter()
+        .map(|(mut c, mut prov)| {
+            without_spikes(&mut c, &mut prov);
+            (c, prov)
+        })
+        .collect()
+}
+
+/// A REGION WITHOUT THE LINES HANGING INTO IT: the walk round a face goes out along a line hanging into it and back, an
+/// edge and its twin side by side, and the region came with a spike of no width the kernel would not make a face of
+/// (measured on the case example: a chain of six lines hanging into the region of a base after an edit, the base refused
+/// to extrude). Such pairs are taken out, the inner first, until none is left; a bridge to an island stays, its two
+/// halves standing apart in the walk. Taken out of the region as it goes to the sketch, not out of the walks of the
+/// arrangement: the sketch, solved round a change, reads those to tell whether a region runs past its window, and with
+/// the hanging pieces gone it lost the region a last line closed (a hexagon side by side). The provenance is the
+/// entities left on the boundary.
+pub(super) fn without_spikes(c: &mut Contour, prov: &mut Vec<Id>) {
+    use crate::geom::ProfEdge;
+    let n = c.edges.len();
+    let same = |p: Point2, q: Point2| (p.x - q.x).abs() < 1e-9 && (p.y - q.y).abs() < 1e-9;
+    let back = |p: &ProfEdge, q: &ProfEdge| match (*p, *q) {
+        (ProfEdge::Line { a, b }, ProfEdge::Line { a: qa, b: qb }) => same(a, qb) && same(b, qa),
+        (ProfEdge::Arc { a, b, center, ccw }, ProfEdge::Arc { a: qa, b: qb, center: qc, ccw: qw }) => same(a, qb) && same(b, qa) && same(center, qc) && ccw != qw,
+        _ => false,
+    };
+    let mut kept: Vec<usize> = Vec::with_capacity(n);
+    for k in 0..n {
+        if kept.last().is_some_and(|&l| back(&c.edges[l], &c.edges[k])) {
+            kept.pop();
+        } else {
+            kept.push(k);
+        }
+    }
+    while kept.len() >= 2 && back(&c.edges[kept[kept.len() - 1]], &c.edges[kept[0]]) {
+        kept.pop();
+        kept.remove(0);
+    }
+    if kept.len() == n || kept.len() < 2 {
+        return;
+    }
+    c.edges = kept.iter().map(|&k| c.edges[k]).collect();
+    if c.edge_src.len() == n {
+        c.edge_src = kept.iter().map(|&k| c.edge_src[k]).collect();
+    }
+    c.points = c.points_from_edges();
+    let kept_src: std::collections::BTreeSet<Id> = c.edge_src.iter().copied().collect();
+    *prov = kept_src.into_iter().collect();
 }
 
 /// THE FACES OF AN ARRANGEMENT AND THE WALKS AROUND ITS PIECES: the regions of `arrangement_regions_prov`, and the walks
@@ -1143,6 +1191,24 @@ mod tests {
         assert!(faces(&before).contains(&rounded), "GUARD: the rounded rectangle is a face before the line: {:?}", faces(&before));
         let after = faces(&all);
         assert!(after.contains(&rounded) && after.contains(&vec![23, 55, 138]), "the line along the top, touching the fillet at its end, lost the faces: {after:?}");
+    }
+
+    /// A LINE THAT ENDS INSIDE A REGION IS NO PART OF ITS EDGE. The walk round a face went out along a line hanging into
+    /// it and back, and the region came with a spike of no width that the kernel would not make a face of. Measured on
+    /// the case example: an angle of the outline of a base edited to 231 left a chain of six lines hanging into the
+    /// region of the base, walked out and back, and the base refused to extrude. A square 10 x 10 and a line from the
+    /// middle of its bottom 4 up into it: the square is one region of area 100, the hanging line no edge of it.
+    #[test]
+    fn a_line_hanging_into_a_region_is_no_edge_of_it() {
+        use crate::model::{EntityKind, SketchEntity, SketchPoint};
+        let pts: Vec<SketchPoint> = [(1, 0.0, 0.0), (2, 10.0, 0.0), (3, 10.0, 10.0), (4, 0.0, 10.0), (5, 5.0, 0.0), (6, 5.0, 4.0)].iter().map(|&(id, x, y)| SketchPoint { id, x, y }).collect();
+        let l = |id, a, b| SketchEntity { id, kind: EntityKind::Line { a, b }, construction: false };
+        let ents = vec![l(10, 1, 2), l(11, 2, 3), l(12, 3, 4), l(13, 4, 1), l(14, 5, 6)];
+        let regions = super::arrangement_regions_prov(&pts, &ents, &[]);
+        assert_eq!(regions.len(), 1, "the square is not one region: {}", regions.len());
+        let (contour, ids) = &regions[0];
+        assert!(!ids.contains(&14), "the line hanging into the square is an edge of its region: {ids:?}");
+        assert!((contour.area().abs() - 100.0).abs() < 1e-9, "the region of the square holds {}", contour.area());
     }
 
     use super::{arr_intersect, meeting_pairs, within_weld, ArrCurve, BoxPair, Welded, WELD};
