@@ -70,6 +70,15 @@ a tag in the high bits.
   never as the first number free. A number a seam takes from an edge of another pair wearing it through the history is
   that edge's to yield: it is named by its own pair (`a_seam_is_numbered_by_where_it_comes_from`,
   `a_seam_keeps_its_name_whatever_order_the_edits_come_in`).
+  **Where the seam stands** on a round face an extrusion makes of a circle the lines of its sketch cut into arcs: in the
+  middle of the arc whose wall takes the smallest name - the order the model numbers walls in (the region, the sketch
+  entity, the piece) - never on a point where two arcs met, never by length or by the order the kernel hands the edges
+  in (`seams_inside_arcs`, `occt_bridge.cpp`). Those points are where the other lines touch the circle and where the
+  walls of later steps come to it; a seam on one ran straight on from the end of an edge there, and a rounding of that
+  edge was refused at any radius. A whole circle no line cut keeps its seam where its curve starts. An edit moving the
+  points moves the seam within its arc
+  (`the_seam_of_the_post_stands_inside_an_arc_and_the_edge_at_a_joint_is_rounded`,
+  `the_rounding_of_the_vacuum_cleaner_takes_all_eight_edges_after_an_edit`).
 * **A vertex** (`VertexName`): the three smallest descriptors of the edges meeting at it.
 
 ## How the bridge names a result

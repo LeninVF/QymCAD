@@ -2787,6 +2787,84 @@ extern "C" QymShape* qym_shape_extrude_profile(const double* data, size_t n, dou
         return nullptr;
     }
 }
+// AN ARC OF A PROFILE, the circle it lies on and the name its wall takes: what the seam of a round face made of arcs is
+// placed by (`seams_inside_arcs`).
+struct ProfileArc {
+    gp_Circ circle;
+    gp_Pnt middle;
+    unsigned name;
+};
+
+static std::vector<ProfileArc> profile_arcs(const TopoDS_Shape& face, const TopTools_DataMapOfShapeInteger& esrc) {
+    std::vector<ProfileArc> out;
+    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+        // a whole circle is no arc: it was never cut, and its seam stays where its curve starts
+        if (!esrc.IsBound(ex.Current()) || BRep_Tool::IsClosed(TopoDS::Edge(ex.Current()))) continue;
+        Standard_Real f, l;
+        const Handle(Geom_Curve) c = BRep_Tool::Curve(TopoDS::Edge(ex.Current()), f, l);
+        Handle(Geom_Circle) circle = Handle(Geom_Circle)::DownCast(c);
+        if (circle.IsNull()) {
+            if (auto t = Handle(Geom_TrimmedCurve)::DownCast(c)) circle = Handle(Geom_Circle)::DownCast(t->BasisCurve());
+        }
+        if (circle.IsNull()) continue;
+        out.push_back({circle->Circ(), c->Value(0.5 * (f + l)), (unsigned)esrc.Find(ex.Current())});
+    }
+    return out;
+}
+
+// THE SEAM OF A ROUND FACE MADE OF ARCS STANDS IN THE MIDDLE OF AN ARC, not where two arcs met. The lines of a sketch cut
+// a circle into arcs; the profiles merged, the arcs join into one circle, and its one vertex - the seam of the round face
+// the extrusion makes of it - stood where the merging left it: on a point where two arcs met, where the other lines touch
+// the circle and where the walls of later steps come to it. A rounding of an edge there met the seam going straight on
+// from its end and was refused at any radius (measured on a sample: of eight edges rounded R8.6 one was left out after an
+// edit moved the seam of a round post onto it). The arc is chosen by the recipe - the one whose wall takes the smallest
+// name, the order the model numbers walls in (the region, the sketch entity, the piece) - never by length or by the order
+// the kernel hands the edges in; an edit moving the points where the arcs meet moves the seam within its arc. Only a circle
+// standing alone, its vertex shared with no other edge, is closed again: a vertex another edge meets holds the outline
+// together. The name the circle's wall takes stays with it.
+static TopoDS_Shape seams_inside_arcs(const TopoDS_Shape& merged, const std::vector<ProfileArc>& arcs, TopTools_DataMapOfShapeInteger& esrc) {
+    TopTools_IndexedDataMapOfShapeListOfShape v2e;
+    TopExp::MapShapesAndAncestors(merged, TopAbs_VERTEX, TopAbs_EDGE, v2e);
+    BRepTools_ReShape re;
+    std::vector<std::pair<TopoDS_Shape, TopoDS_Shape>> moved; // the circle and the one standing in for it
+    TopTools_MapOfShape seen;
+    for (TopExp_Explorer ex(merged, TopAbs_EDGE); ex.More(); ex.Next()) {
+        const TopoDS_Edge e = TopoDS::Edge(ex.Current());
+        if (!seen.Add(e) || !BRep_Tool::IsClosed(e)) continue;
+        TopoDS_Vertex v0, v1;
+        TopExp::Vertices(e, v0, v1);
+        const int vi = v0.IsNull() ? 0 : v2e.FindIndex(v0);
+        if (vi < 1) continue;
+        TopTools_MapOfShape meeting;
+        for (TopTools_ListIteratorOfListOfShape it(v2e.FindFromIndex(vi)); it.More(); it.Next()) meeting.Add(it.Value());
+        if (meeting.Extent() != 1) continue;
+        Standard_Real f, l;
+        const Handle(Geom_Circle) circle = Handle(Geom_Circle)::DownCast(BRep_Tool::Curve(e, f, l));
+        if (circle.IsNull()) continue;
+        const gp_Circ c = circle->Circ();
+        const ProfileArc* first = nullptr;
+        for (const ProfileArc& a : arcs) {
+            const bool same = a.circle.Location().Distance(c.Location()) < 1e-6 && std::abs(a.circle.Radius() - c.Radius()) < 1e-6 && a.circle.Axis().IsParallel(c.Axis(), 1e-9);
+            if (same && a.name != 0 && (!first || a.name < first->name)) first = &a;
+        }
+        if (!first || BRep_Tool::Pnt(v0).Distance(first->middle) < 1e-7) continue;
+        const gp_Vec to(c.Location(), first->middle);
+        if (to.Magnitude() < 1e-9) continue;
+        const TopoDS_Edge stands_in = BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(c.Location(), c.Axis().Direction(), gp_Dir(to)), c.Radius())).Edge();
+        re.Replace(e.Oriented(TopAbs_FORWARD), stands_in.Oriented(TopAbs_FORWARD));
+        moved.push_back({e, stands_in});
+    }
+    if (moved.empty()) return merged;
+    const TopoDS_Shape out = re.Apply(merged);
+    if (out.IsNull() || !BRepCheck_Analyzer(out).IsValid()) return merged; // no worse than the seam where it was
+    for (const auto& [was, now] : moved) {
+        if (!esrc.IsBound(was)) continue;
+        esrc.Bind(now, esrc.Find(was));
+        esrc.UnBind(was);
+    }
+    return out;
+}
+
 // N EXACT profiles: their FLAT faces are merged by a 2D boolean (Fuse plus UnifySameDomain at Z=0 are
 // dependable, unlike the solid versions), and then the ALREADY SINGLE face is extruded. Touching profiles
 // give one body WITHOUT seam edges (before: N prisms plus N booleans gave doubled seam edges along the line
@@ -2805,11 +2883,13 @@ extern "C" QymShape* qym_shape_extrude_profiles_fused(const double* data, const 
         // hundred holes cut in one node that was 199 booleans and 2.0 seconds of the 2.1 the whole rebuild
         // took. One operation over a list does the same work once - and it is the form that has something for
         // the parallel flag to divide.
+        std::vector<ProfileArc> arcs; // the arcs of every profile, for the seams (`seams_inside_arcs`)
         {
             TopTools_ListOfShape args, tools;
             for (size_t i = 0; i < nprof; ++i) {
                 TopoDS_Face f = build_exact_face_src(data + offsets[i], offsets[i + 1] - offsets[i], &esrc);
                 if (f.IsNull()) return nullptr;
+                for (const ProfileArc& a : profile_arcs(f, esrc)) arcs.push_back(a);
                 if (args.IsEmpty()) args.Append(f);
                 else tools.Append(f);
             }
@@ -2851,6 +2931,7 @@ extern "C" QymShape* qym_shape_extrude_profiles_fused(const double* data, const 
                 merged = uni.Shape();
             }
         } catch (...) {}
+        merged = seams_inside_arcs(merged, arcs, esrc);
         // extrude every resulting face; a single solid goes back as it is, disconnected ones as a compound
         std::vector<TopoDS_Shape> prisms;
         std::vector<TopoDS_Face> profiles;
