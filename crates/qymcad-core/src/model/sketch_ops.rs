@@ -126,10 +126,9 @@ impl Project {
     /// Fillet the corner at vertex `pid`, when exactly two edges meet there. The inner side is chosen by
     /// the bisector of the chords. Used both by click-on-corner and by the chain command. Returns whether
     /// it succeeded.
-    /// THE LARGEST VALUE A CORNER OF TWO LINES TAKES for `tool`: a fillet's point of touching lies r / tan(theta / 2) from
-    /// the corner (theta the angle between the lines), a chamfer's leg along the line, and the cut of a symmetric chamfer
-    /// is 2 sin(theta / 2) times its leg - none may reach the far end of the shorter line. `None` for a corner not made of two lines. The field of the tool refuses a value past it
-    /// in words, where the corner used to take it and do nothing, or cut it down without a word.
+    /// THE LARGEST VALUE A CORNER TAKES for `tool`, of any two curves: the largest the cut of the corner lays
+    /// (`blend_any`, the path the preview and the cut take). `None` where the pair is no corner. The field of the tool
+    /// refuses a value past it in words, where the corner used to take it and do nothing, or cut it down without a word.
     pub fn corner_limit(&self, si: usize, pid: Id, tool: CornerTool) -> Option<f64> {
         // Where more than two edges meet, there is a corner for every pair, and the field must refuse a value that
         // is too big for AT LEAST ONE of them: the tightest corner is the one that bounds it.
@@ -139,30 +138,83 @@ impl Project {
     pub fn corner_limit_near(&self, si: usize, pid: Id, tool: CornerTool, x: f64, y: f64) -> Option<f64> {
         self.vertex_pair(si, pid, Some((x, y))).and_then(|pair| self.corner_limit_of_pair(si, pid, pair, tool))
     }
-    /// The bound of one named pair of edges at `pid`.
+    /// The bound of one named pair of edges at `pid`: the value the cut of the corner takes, doubled until it refuses and
+    /// the edge between halved down to a billionth. Worked out by a formula of the angle and the shorter line, the bound
+    /// was there for two lines alone, and on a curve a value too big refused only on Enter.
     pub fn corner_limit_of_pair(&self, si: usize, pid: Id, (e1, e2): (Id, Id), tool: CornerTool) -> Option<f64> {
-        let (pcx, pcy) = self.point_xy(si, pid)?;
-        let mut dirs = Vec::new();
-        for e in [e1, e2] {
-            let (a, b) = self.line_ends(si, e)?;
-            let other = if a == pid { b } else { a };
-            let (ox, oy) = self.point_xy(si, other)?;
-            let l = (ox - pcx).hypot(oy - pcy);
-            if l < 1e-9 {
-                return None;
-            }
-            dirs.push(((ox - pcx) / l, (oy - pcy) / l, l));
-        }
-        if dirs.len() != 2 {
+        let corner = CornerAt::of(pid, [e1, e2]);
+        if !self.corner_at(si, corner) {
             return None;
         }
-        let shorter = dirs[0].2.min(dirs[1].2);
-        let theta = (dirs[0].0 * dirs[1].0 + dirs[0].1 * dirs[1].1).clamp(-1.0, 1.0).acos();
-        Some(match tool {
-            CornerTool::Fillet => shorter * (theta / 2.0).tan(),
-            CornerTool::Chamfer(crate::feature::ChamferMode::Symmetric) => shorter * 2.0 * (theta / 2.0).sin(),
-            CornerTool::Chamfer(_) => shorter,
-        })
+        // THE SAME CORNER ASKED AGAIN is answered as before: the bar of the tool asks every frame its field is shown, and
+        // on a corner of a spline the search lays some forty cuts
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let s = self.sketches.get(si)?;
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            for e in [e1, e2] {
+                crate::model::curve::Curve::of(s, s.entity(e)?)?.key(&mut h);
+            }
+            let (px, py) = self.point_xy(si, pid)?;
+            [px, py].iter().for_each(|v| h.write_u64(v.to_bits()));
+            format!("{tool:?}").hash(&mut h);
+            h.finish()
+        };
+        if let Some(found) = LIMITS.with(|m| m.borrow().iter().find(|l| l.key == key).map(|l| l.limit)) {
+            return found;
+        }
+        let limit = self.corner_limit_found(si, corner, tool);
+        LIMITS.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.len() >= 16 {
+                m.remove(0);
+            }
+            m.push(RememberedLimit { key, limit });
+        });
+        limit
+    }
+
+    /// The bound of `corner` for `tool`, worked out (`corner_limit_of_pair`).
+    fn corner_limit_found(&self, si: usize, corner: CornerAt, tool: CornerTool) -> Option<f64> {
+        let pid = corner.point;
+        let cut = |v: f64| match tool {
+            CornerTool::Fillet => CornerCut::Fillet(FilletSize::radius(v)),
+            CornerTool::Chamfer(crate::feature::ChamferMode::Symmetric) => CornerCut::Chamfer(ChamferLegs::equal(v)),
+            CornerTool::Chamfer(_) => CornerCut::Chamfer(ChamferLegs { mode: crate::feature::ChamferMode::TwoDist, first: v, second: v }),
+        };
+        let takes = |v: f64| self.blend_any(si, corner, cut(v)).is_some();
+        // a value the corner takes, and one it refuses, from a size of the drawing round the corner
+        let (px, py) = self.point_xy(si, pid)?;
+        let reach = self.sketches.get(si)?.points.iter().map(|q| (q.x - px).hypot(q.y - py)).fold(0.0, f64::max).max(1e-6);
+        let mut lo = reach * 1e-4;
+        if !takes(lo) {
+            return None;
+        }
+        // doubled up to a thousand sizes of the drawing round the corner, no further: a value past that is no bound a
+        // field needs, and the cut of a corner of a spline lays the offsets of the spline by it - doubled 60 times, the
+        // field of a corner of a spline searched for hours
+        let mut hi = reach;
+        let mut grown = 0;
+        while takes(hi) && grown < 10 {
+            lo = hi;
+            hi *= 2.0;
+            grown += 1;
+        }
+        if grown == 10 {
+            return Some(lo);
+        }
+        for _ in 0..60 {
+            let mid = 0.5 * (lo + hi);
+            if takes(mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+            if hi - lo <= lo * 1e-12 {
+                break;
+            }
+        }
+        Some(lo)
     }
 
     /// THE LARGEST VALUE `tool` TAKES on the corners of a set of lines at once (every line of the sketch with `None`): a
@@ -346,4 +398,14 @@ impl Project {
     pub fn fillet_all_corners(&mut self, si: usize, r: f64) -> usize {
         self.fillet_all_corners_of(si, r, None)
     }
+}
+
+/// A BOUND OF A CORNER WORKED OUT BEFORE, by the key of its curves, its point and the tool.
+struct RememberedLimit {
+    key: u64,
+    limit: Option<f64>,
+}
+
+thread_local! {
+    static LIMITS: std::cell::RefCell<Vec<RememberedLimit>> = const { std::cell::RefCell::new(Vec::new()) };
 }

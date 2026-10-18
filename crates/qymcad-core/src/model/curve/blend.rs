@@ -244,6 +244,24 @@ pub fn chamfer(arms: [Arm; 2], legs: ChamferLegs) -> Option<[f64; 2]> {
             // the cut grows with the legs near the corner: the leg whose cut is as long as asked, by halving
             let cut = |d: f64| -> Option<f64> { Some(arms[0].curve.at(arms[0].reach(d)?).dist(arms[1].curve.at(arms[1].reach(d)?))) };
             let (mut lo, mut hi) = (0.0, legs.first);
+            // a leg as long as the cut need not fit: the cut across a corner is longer than its legs, and a cut of 16 on a
+            // square corner of a side 12 was refused for its leg of 16, where its legs are 11.3. The longest leg both arms
+            // reach is found by halving, and the cut must fit within it
+            if cut(hi).is_none() {
+                let (mut fits, mut not) = (0.0, hi);
+                for _ in 0..60 {
+                    let mid = 0.5 * (fits + not);
+                    if cut(mid).is_some() {
+                        fits = mid;
+                    } else {
+                        not = mid;
+                    }
+                }
+                if cut(fits)? < legs.first {
+                    return None;
+                }
+                hi = fits;
+            }
             while cut(hi)? < legs.first {
                 lo = hi;
                 hi *= 2.0;

@@ -420,7 +420,7 @@ impl Curve {
     }
 
     /// A KEY OF THE CURVE BY THE BITS OF ITS NUMBERS: two curves of one key are one curve.
-    fn key(&self, h: &mut impl std::hash::Hasher) {
+    pub(crate) fn key(&self, h: &mut impl std::hash::Hasher) {
         use std::hash::Hash;
         let bits = |p: Point2, h: &mut dyn std::hash::Hasher| {
             h.write_u64(p.x.to_bits());
