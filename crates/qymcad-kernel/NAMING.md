@@ -54,7 +54,7 @@ a tag in the high bits.
   surfaces meet. The one edge of its pair is named by the pair alone: the faces at its ends change with any edit beside
   it (told by them, 901 edges of the examples that did not move were renamed over the matrix of edits). Several edges of
   one pair - the upper and the lower edge of a slot, the pieces of an edge a row of notches cut - are told apart by the
-  two smallest named faces at their ends, apart from their own two (`qym_shape_edge_end_faces`), never by their place in
+  two smallest named faces at their ends, apart from their own two (`naming::ends_of`), never by their place in
   an order of the pair: numbered within the pair as the first number free, an edit that took one of them away
   renumbered the others, and a chamfer took the edge beside its own (`an_edge_keeps_its_name_when_its_twin_goes`). Only edges of one pair with the same ends carry a number,
   by where they stand (`twins_with_the_same_ends_are_numbered_by_where_they_stand`); a number a neighbour wears through
@@ -63,7 +63,7 @@ a tag in the high bits.
   name recorded as yielded to the new one (`naming::edges`, `an_edge_named_beside_a_face_gone_takes_the_name_of_its_pair`).
   A name of another pair whose faces are all in the body stays; a reference reads it through its pair.
   **An edge with one face on both sides** - the seam where a round face closes, an edge lying inside a face - is numbered
-  by where it comes from and where it stands (`naming::edges_on_their_face`, `qym_shape_edges_on_their_face`): the seam
+  by where it comes from and where it stands (`naming::edges_on_their_face`): the seam
   where the surface closes along U from 0 (a revolution closes there, at the plane its profile starts on; a cylinder at
   the start of its curve), along V from 1000, an edge inside the face from 2000; several of one kind in the order of
   where they stand on the face (along the seam, then across it). Never by the order the kernel gives the edges in,
@@ -100,10 +100,10 @@ In `qym_result`, in this order:
    off and of where they stand, never of the number the kernel gave them
    (`the_halves_of_a_wall_are_named_by_where_they_stand`). A piece no face of the node stands beside is numbered among
    such pieces by the same order. **A piece the history does not tell** - a face with no name on one surface of the
-   kernel with named faces all of one face, that face among them - is a piece of it (`naming::untold_pieces`,
-   `qym_shape_faces_on_one_surface`): the pieces of a split face keep its surface, and on the filter the history of a
+   kernel with named faces all of one face, that face among them - is a piece of it (`naming::untold_pieces`): the pieces of a split face keep its surface, and on the filter the history of a
    widened window told only the upper half of a wall (`a_piece_without_history_is_a_piece_of_its_surface`).
-5. **What the history was silent about** (`naming::silent`): the seams, in waves, after a named neighbour
+5. **What the history was silent about** (`naming::silent`), read of the body in one walk before any face takes its
+   name (`qym_shape_naming_facts`, `naming::Facts`) and through what each face has become since: the seams, in waves, after a named neighbour
    (`naming::seams`); a face with no history and no named neighbour - a body brought in from a file or made of a mesh -
    by where it lies (`naming::placed`); the edges, after their pair of faces (`naming::edges`); the vertices after
    their edges (`naming::name_edge_ends`).

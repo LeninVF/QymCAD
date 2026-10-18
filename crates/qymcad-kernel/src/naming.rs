@@ -17,17 +17,22 @@
 use qymcad_core::feature::{EdgeEnds, EdgeFaces, EdgeOnItsFace, FacePlace, FaceSplit, NamedAfter, OnItsFace, OnOneSurface, PieceSide, Rename, SilentNaming};
 use qymcad_core::model::Id;
 use qymcad_core::names::{CutOff, EdgeName, GeoName, NameMint, Role, Side};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// NAME WHAT THE HISTORY OF `ask.body` WAS SILENT ABOUT, in the live body and in the answer.
 pub(crate) fn silent(kernel: &crate::OcctKernel, ask: SilentNaming<'_>) -> NamedAfter {
     let SilentNaming { body, feature, listed, scale, names } = ask;
     let shapes = kernel.shapes.borrow();
     let Some(shape) = shapes.get(&body) else { return NamedAfter::default() };
+    // a name the history gave to several edges is no name of any of them: each is named by its pair below; unshared
+    // before the facts are read, so the facts carry the numbers the edges wear to the end
+    shape.unshare_edge_ids();
+    let facts = shape.naming_facts();
+    let mut moved = Moved::default();
     // the faces as the document lists them; for a body raised again from its file, as the kernel holds them
     let mut live: Vec<u32> = match listed {
         Some(list) => list.to_vec(),
-        None => shape.face_places().iter().map(|p| p.id).collect(),
+        None => facts.places.iter().map(|p| p.id).collect(),
     };
     let was = live.clone();
     let mut named = NamedAfter::default();
@@ -36,7 +41,7 @@ pub(crate) fn silent(kernel: &crate::OcctKernel, ask: SilentNaming<'_>) -> Named
     let roles = kernel.roles.borrow_mut().remove(&body).unwrap_or_default();
     let held: HashSet<u32> = live.iter().copied().chain(shape.absorbed_names().into_iter().flat_map(|a| [a.loser, a.winner])).chain(shape.face_splits().into_iter().map(|s| s.origin)).collect();
     let landed = land_roles(&roles, &held, names);
-    land(shape, &landed, &mut live);
+    land(shape, &landed, &mut live, &mut moved);
     let named_as: HashMap<u32, u32> = landed.iter().map(|r| (r.was, r.now)).collect();
     // the names faces merged into one yielded, in the names the roles took: a wall of a tool merged with a face of the
     // body yields under the number it was handed, and the table has to hear its name
@@ -48,39 +53,37 @@ pub(crate) fn silent(kernel: &crate::OcctKernel, ask: SilentNaming<'_>) -> Named
         // operation to fold into its own group (measured: 26 faces instead of 56, a face pull no longer building)
         shape.clear_face_splits();
         let asked: Vec<u32> = splits.iter().flat_map(|s| [s.piece, s.origin]).collect();
-        let split = Split { splits: &splits, pairs: &shape.edge_face_pairs(), sides: &shape.piece_sides(&asked), places: &shape.face_places() };
+        let split = Split { splits: &splits, pairs: &facts.pairs(&moved), sides: &shape.piece_sides(&asked), places: &facts.places(&moved) };
         let renames = pieces(&split, &live, feature, names);
-        land(shape, &renames, &mut live);
+        land(shape, &renames, &mut live, &mut moved);
     }
     // the pieces the history did not tell: a nameless face on the surface of a named face is a piece of it
-    let untold = untold_pieces(&shape.faces_on_one_surface(), &live, names);
+    let untold = untold_pieces(&facts.surfaces(&moved), &live, names);
     if !untold.is_empty() {
         let asked: Vec<u32> = untold.iter().flat_map(|s| [s.piece, s.origin]).collect();
-        let split = Split { splits: &untold, pairs: &shape.edge_face_pairs(), sides: &shape.piece_sides(&asked), places: &shape.face_places() };
+        let split = Split { splits: &untold, pairs: &facts.pairs(&moved), sides: &shape.piece_sides(&asked), places: &facts.places(&moved) };
         let renames = pieces(&split, &live, feature, names);
-        land(shape, &renames, &mut live);
+        land(shape, &renames, &mut live, &mut moved);
     }
     // in waves: a face in a corner has orphans for neighbours, and the faces the first wave names anchor the second
     // (measured: on a shell of a shell exactly four corner faces stayed nameless in one pass)
     for _ in 0..8 {
-        let renames = seams(feature, &shape.edge_face_pairs(), &live, names);
+        let renames = seams(feature, &facts.pairs(&moved), &live, names);
         if renames.is_empty() {
             break;
         }
-        land(shape, &renames, &mut live);
+        land(shape, &renames, &mut live, &mut moved);
     }
     // asked of the list first, which costs nothing; a body raised from its file is always asked of the kernel
     if listed.is_none() || !live.iter().all(|d| names.knows(*d)) {
-        let renames = placed(feature, scale, &shape.face_places(), names);
-        land(shape, &renames, &mut live);
+        let renames = placed(feature, scale, &facts.places(&moved), names);
+        land(shape, &renames, &mut live, &mut moved);
     }
     // what each face the document lists became, over all the waves: one renaming the document applies at once
     named.faces = was.iter().zip(&live).filter(|(w, n)| w != n).map(|(w, n)| Rename { was: *w, now: *n }).collect();
-    // a name the history gave to several edges is no name of any of them: each is named by its pair below
-    shape.unshare_edge_ids();
-    let pairs = shape.edge_face_pairs();
+    let pairs = facts.pairs(&moved);
     if !pairs.is_empty() {
-        let renames = edges(&pairs, &shape.edge_end_faces(), &edges_at(shape), &shape.edges_on_their_face(), names);
+        let renames = edges(&pairs, &ends_of(&facts.at_ends, &pairs, &moved), &facts.edges, &facts.on_face, names);
         // a name that told another pair yielded to the name of the pair: a reference to it, or to a piece of its pair,
         // follows the record in every later rebuild, not only in this one
         named.absorbed.extend(renames.iter().filter(|r| names.edge(r.was).is_some()).map(|r| qymcad_core::feature::Absorbed { loser: r.was, winner: r.now }));
@@ -90,11 +93,96 @@ pub(crate) fn silent(kernel: &crate::OcctKernel, ask: SilentNaming<'_>) -> Named
     named
 }
 
-/// THE FACES OF ONE WAVE RENAMED, in the live body and in the list of live faces - all at once: one wave gives a piece
-/// the name of its whole and the whole a name of its own, and applied one after the other the second took both
-/// (measured: the two strips of a pinched rim under one name, nothing left to select one with).
-fn land(shape: &crate::Shape, renames: &[Rename], live: &mut [u32]) {
+/// WHAT THE NAMING READS OF A BODY, asked of the bridge once (`Shape::naming_facts`), under the numbers the faces wore
+/// before they took their names: each rule reads them through what the faces have become since (`Moved`). Asked one by
+/// one after every wave, the naming of the 18 roundings of the case example took 752 ms in the bridge alone, of it 242 ms
+/// the faces at the ends of edges and 183 ms the polylines of the edges; read once, 152 ms, and the whole naming 310 ms.
+#[derive(Default)]
+pub(crate) struct Facts {
+    pub places: Vec<FacePlace>,
+    pub surfaces: Vec<OnOneSurface>,
+    pub pairs: Vec<EdgeFaces>,
+    pub at_ends: Vec<FaceAtEnd>,
+    pub edges: Vec<EdgeAt>,
+    pub on_face: Vec<EdgeOnItsFace>,
+}
+
+impl Facts {
+    /// The edges between two faces, under the names the faces wear now.
+    fn pairs(&self, moved: &Moved) -> Vec<EdgeFaces> {
+        self.pairs.iter().map(|p| EdgeFaces { edge: p.edge, faces: p.faces.map(|f| moved.now(f)) }).collect()
+    }
+
+    /// Where every face lies, under the name it wears now.
+    fn places(&self, moved: &Moved) -> Vec<FacePlace> {
+        self.places.iter().map(|p| FacePlace { id: moved.now(p.id), ..*p }).collect()
+    }
+
+    /// The faces on one surface of the kernel, under the names they wear now.
+    fn surfaces(&self, moved: &Moved) -> Vec<OnOneSurface> {
+        self.surfaces.iter().map(|s| OnOneSurface { face: moved.now(s.face), surface: moved.now(s.surface) }).collect()
+    }
+}
+
+/// A FACE MEETING AN EDGE AT ONE OF ITS ENDS, not one of the faces the edge runs between.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FaceAtEnd {
+    pub edge: u32,
+    pub face: u32,
+}
+
+/// WHAT EACH FACE THE FACTS WERE READ UNDER HAS BECOME, over the waves of renaming. A face no wave renamed is not
+/// in it.
+#[derive(Default)]
+struct Moved(HashMap<u32, u32>);
+
+impl Moved {
+    fn now(&self, face: u32) -> u32 {
+        self.0.get(&face).copied().unwrap_or(face)
+    }
+
+    /// One wave renamed, all at once, as the body applies it: every face wearing a name it renames takes the new one.
+    fn follow(&mut self, renames: &[Rename]) {
+        let to: HashMap<u32, u32> = renames.iter().map(|r| (r.was, r.now)).collect();
+        for now in self.0.values_mut() {
+            if let Some(n) = to.get(now) {
+                *now = *n;
+            }
+        }
+        for r in renames {
+            self.0.entry(r.was).or_insert(r.now);
+        }
+    }
+}
+
+/// THE TWO SMALLEST FACES NAMED BY RECIPE AT THE ENDS OF EACH EDGE, apart from its own two, under the names they wear
+/// now (0 where there is none). A positional number does not count: it drifts itself.
+fn ends_of(at_ends: &[FaceAtEnd], pairs: &[EdgeFaces], moved: &Moved) -> Vec<EdgeEnds> {
+    use qymcad_core::names::{NAMED, ROLE};
+    let own: HashMap<u32, [u32; 2]> = pairs.iter().map(|p| (p.edge, p.faces)).collect();
+    let mut around: BTreeMap<u32, BTreeSet<u32>> = BTreeMap::new();
+    for r in at_ends {
+        let face = moved.now(r.face);
+        if face & (NAMED | ROLE) != 0 && !own.get(&r.edge).is_some_and(|f| f.contains(&face)) {
+            around.entry(r.edge).or_default().insert(face);
+        }
+    }
+    around
+        .into_iter()
+        .map(|(edge, faces)| {
+            let mut two = faces.into_iter();
+            EdgeEnds { edge, around: [two.next().unwrap_or(0), two.next().unwrap_or(0)] }
+        })
+        .collect()
+}
+
+/// THE FACES OF ONE WAVE RENAMED, in the live body, in the list of live faces and in what the faces of the facts have
+/// become - all at once: one wave gives a piece the name of its whole and the whole a name of its own, and applied one
+/// after the other the second took both (measured: the two strips of a pinched rim under one name, nothing left to
+/// select one with).
+fn land(shape: &crate::Shape, renames: &[Rename], live: &mut [u32], moved: &mut Moved) {
     shape.rename_faces(renames);
+    moved.follow(renames);
     let now: HashMap<u32, u32> = renames.iter().map(|r| (r.was, r.now)).collect();
     for d in live.iter_mut() {
         if let Some(n) = now.get(d) {
@@ -437,7 +525,7 @@ pub(crate) fn edges(pairs: &[EdgeFaces], ends: &[EdgeEnds], body_edges: &[EdgeAt
         by_pair.entry([a.min(b), a.max(b)]).or_default().push(p.edge);
     }
     let around: HashMap<u32, [u32; 2]> = ends.iter().map(|e| (e.edge, e.around)).collect();
-    let at: HashMap<u32, [i64; 3]> = body_edges.iter().map(|e| (e.edge, e.at.map(|v| (v as f64 * 1e4).round() as i64))).collect();
+    let at: HashMap<u32, [i64; 3]> = body_edges.iter().map(|e| (e.edge, e.at.map(|v| (v * 1e4).round() as i64))).collect();
     // how many edges of the body run between each pair, the ones keeping a name through the history among them
     let mut of_pair: HashMap<[u32; 2], usize> = HashMap::new();
     for p in pairs {
@@ -472,18 +560,12 @@ pub(crate) fn edges(pairs: &[EdgeFaces], ends: &[EdgeEnds], body_edges: &[EdgeAt
     renames
 }
 
-/// AN EDGE OF THE BODY AND WHERE IT STANDS: the middle point of its polyline, which tells apart edges of one pair with
-/// the same faces at their ends.
+/// AN EDGE OF THE BODY AND WHERE IT STANDS: the point of its curve at the middle of its range, which tells apart edges
+/// of one pair with the same faces at their ends.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EdgeAt {
     pub edge: u32,
-    pub at: [f32; 3],
-}
-
-/// The edges of `shape` and where each stands.
-fn edges_at(shape: &crate::Shape) -> Vec<EdgeAt> {
-    let (lines, ids) = shape.edges_with_ids();
-    lines.iter().zip(ids).map(|(line, edge)| EdgeAt { edge, at: line.get(line.len() / 2).copied().unwrap_or([0.0; 3]) }).collect()
+    pub at: [f64; 3],
 }
 
 /// THE EDGES WITH ONE FACE ON BOTH SIDES, numbered by where they come from and where they stand - never by the order
