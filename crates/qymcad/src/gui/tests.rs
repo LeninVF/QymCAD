@@ -141,3 +141,6 @@ mod a_tangent_arc_goes_on_from_any_curve;
 
 #[cfg(test)]
 mod a_crossing_of_any_curve_is_snapped_to;
+
+#[cfg(test)]
+mod a_whole_ellipse_is_cut_as_any_curve;

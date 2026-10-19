@@ -23,7 +23,6 @@ pub mod refs;
 mod shift;
 mod stretch;
 mod touch;
-pub(in crate::model) use arrange::Arranged;
 pub(crate) use cut::Trimmed;
 pub use blend::{centres_touching, chamfer, radius_in, rounding, Arm, Half, Rounding};
 pub use marks::OvalAxes;

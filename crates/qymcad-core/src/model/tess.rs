@@ -709,8 +709,8 @@ fn run_as_curve(curve: &Curve, run: &[ProfEdge]) -> Option<Vec<ProfEdge>> {
 /// The planar arrangement of a sketch: every entity — lines, arcs, circles and splines — is intersected with every
 /// other, the curves are cut at the intersection points, and the minimal faces, that is the closed regions, are
 /// assembled. This is what turns the strip between two circles, cut by a line, into a selectable closed region.
-/// Returns the faces as contours, carrying exact `ProfEdge` edges for the B-rep; a spline as the segments of its
-/// tessellation. Ellipses are not cut: each is a region of its own.
+/// Returns the faces as contours, carrying exact `ProfEdge` edges for the B-rep: a spline, an ellipse and an arc of one
+/// are cut as the segments of their points and laid back as the curves they are.
 pub(super) fn arrangement_regions(points: &[SketchPoint], entities: &[SketchEntity]) -> Vec<Contour> {
     arrangement_regions_prov(points, entities).into_iter().map(|(c, _)| c).collect()
 }
@@ -790,11 +790,10 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
     let pt = |id: Id| at.get(&id).copied();
     let mut curves: Vec<ArrCurve> = Vec::new();
     let mut curve_eid: Vec<Id> = Vec::new(); // provenance of a curve, its entity id, parallel to `curves`
-    let mut out_ellipse: Vec<(Contour, Vec<Id>)> = Vec::new(); // ellipses are regions of their own, outside the arrangement graph
-                                                               // the curves that enter the arrangement as the segments of their points, as the curves they are, to give the kernel
+                                             // the curves that enter the arrangement as the segments of their points, as the curves they are, to give the kernel
     let exact: std::collections::HashMap<Id, Curve> = entities
         .iter()
-        .filter(|e| !e.construction && (e.kind.as_spline().is_some() || e.kind.as_ellipse().is_some_and(|el| el.span.is_some())))
+        .filter(|e| !e.construction && (e.kind.as_spline().is_some() || e.kind.as_ellipse().is_some()))
         .filter_map(|e| Curve::of_placed(&|id: Id| pt(id).map(|(x, y)| Point2::new(x, y)), e).map(|c| (e.id, c)))
         .collect();
     for e in entities {
@@ -803,17 +802,12 @@ pub(super) fn arrangement_faces(points: &[SketchPoint], entities: &[SketchEntity
         }
         let placed = |id: Id| pt(id).map(|(x, y)| Point2::new(x, y));
         let Some(curve) = Curve::of_placed(&placed, e) else { continue };
-        match curve.arranged() {
-            crate::model::curve::Arranged::Pieces(pieces) => {
-                curve_eid.extend(std::iter::repeat_n(e.id, pieces.len()));
-                curves.extend(pieces);
-            }
-            // an ellipse is a closed region of its own; its intersections are not part of the arrangement yet
-            crate::model::curve::Arranged::Region(contour) => out_ellipse.push((with_exact_edges(contour, &placed, e), vec![e.id])),
-        }
+        let pieces = curve.arranged();
+        curve_eid.extend(std::iter::repeat_n(e.id, pieces.len()));
+        curves.extend(pieces);
     }
     let nc = curves.len();
-    let mut out: Vec<(Contour, Vec<Id>)> = std::mem::take(&mut out_ellipse);
+    let mut out: Vec<(Contour, Vec<Id>)> = Vec::new();
     let mut outer: Vec<Contour> = Vec::new();
     if nc == 0 {
         return Faces { inner: out, outer };
