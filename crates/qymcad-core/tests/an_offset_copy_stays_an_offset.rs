@@ -89,3 +89,61 @@ fn a_fillet_where_a_spline_crosses_a_copy_is_done_in_a_moment() {
     let made = done.out;
     assert_eq!(made, 1, "the fillet at the crossing of a spline and a copy was not laid");
 }
+
+/// The closed spline of a second report, twelve nodes some 110 mm across, its offset 3 inwards in three pieces.
+const BIRD: [[f64; 2]; 12] = [
+    [75.8, -17.8],
+    [57.0, -22.8],
+    [23.6, -29.1],
+    [15.0, -52.7],
+    [46.1, -59.2],
+    [43.4, -77.3],
+    [68.0, -91.5],
+    [93.9, -88.9],
+    [88.8, -60.5],
+    [123.7, -51.4],
+    [106.9, -24.2],
+    [82.3, -34.6],
+];
+
+/// A NODE OF THE SOURCE LED IN FRAMES WHILE THE OFFSET CHANGES ITS PIECES: dragged, the inward offset of the spline of the
+/// report parts in four pieces and in five at the folds the drag brings in. Every frame, every place along every copy
+/// stands the distance off the source, and the offset keeps its dimension.
+///
+/// Reported behaviour: a closed spline offset inwards, a node of the source dragged - the copy fell apart, straight
+/// spans running across the drawing.
+#[test]
+fn the_copies_hold_while_a_drag_changes_the_pieces_of_the_offset() {
+    let mut failures = Vec::new();
+    for node_k in 2..=5 {
+        for way in [[0.0, 1.0], [1.0, 0.0], [0.0, -1.0], [-1.0, 0.0]] {
+            let mut p = Project::default();
+            p.new_document();
+            let si = p.new_sketch("S");
+            let bird = p.add_spline(si, BIRD.iter().map(|q| Point2::new(q[0], q[1])).collect(), Ends::Closed, Purpose::Real).expect("the spline");
+            p.solve_sketch(si);
+            assert!(p.offset_entities(si, &[bird], -3.0) > 0, "setup: the spline is not offset");
+            let node = p.sketches[si].entity(bird).and_then(|e| e.kind.as_spline()).map(|sp| sp.nodes[node_k]).expect("the node");
+            let q = p.sketches[si].point(node).map(|q| Point2::new(q.x, q.y)).expect("its place");
+            for frame in 1..=20 {
+                let t = frame as f64 * 0.3;
+                p.solve_sketch_drag(si, Some((node, q.x + way[0] * t, q.y + way[1] * t)));
+                let off = worst_off(&p, si, bird, 3.0);
+                let s = &p.sketches[si];
+                let held = s
+                    .offsets
+                    .first()
+                    .and_then(|o| o.copies.first())
+                    .is_some_and(|first| s.constraints.iter().any(|c| matches!(c, qymcad_core::model::Constraint::CurveDistance { to, .. } if to.curve_id() == Some(*first))));
+                if off > 0.15 || !held {
+                    failures.push(format!(
+                        "node {node_k} led {way:?}, frame {frame}: the copies stand up to {off:.3} off the distance, the dimension of the offset {}",
+                        if held { "kept" } else { "lost" }
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

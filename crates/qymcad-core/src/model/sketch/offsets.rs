@@ -313,6 +313,30 @@ impl Project {
                     }
                 }
             }
+            // A COPY OFF ITS PIECE: the copies share their ends where the pieces meet, and once the pieces change how they
+            // meet - a piece of the true offset parting in two at a fold a drag brought in - a copy laid on a new piece moved
+            // a shared end the copy beside it put back, and ran across the drawing to it (12 mm off the distance on a closed
+            // spline of 12 nodes offset 3 inwards). The copies of the offset are laid anew then, the dimension going to the
+            // first of them.
+            let s = &self.sketches[si];
+            let off_its_piece =
+                pieces.iter().zip(&kept).any(|(piece, copy)| s.entity(*copy).and_then(|e| Curve::of(s, e)).is_none_or(|c| c.ends().iter().zip(piece.ends()).any(|(a, b)| a.dist(b) > 1e-6)));
+            if off_its_piece {
+                let old: Vec<Id> = copies.iter().chain(&kept).copied().collect();
+                self.sketches[si].entities.retain(|e| !old.contains(&e.id));
+                kept = pieces.iter().map(|c| self.lay_curve(si, c, LayAs::default())).collect();
+                let to = self.sketches[si].entity(kept[0]).map(crate::model::curve_ref_of);
+                if let (Some(first), Some(to)) = (copies.first(), to) {
+                    for c in self.sketches[si].constraints.iter_mut() {
+                        if let Constraint::CurveDistance { to: on, .. } = c {
+                            if on.curve_id() == Some(*first) {
+                                *on = to.clone();
+                            }
+                        }
+                    }
+                }
+                out.relaid = true;
+            }
             // the copy carrying the dimension stays first; the copies no piece came onto go
             kept.sort_by_key(|id| copies.iter().position(|c| c == id).unwrap_or(usize::MAX));
             let gone: Vec<Id> = copies.iter().filter(|c| !kept.contains(c)).copied().collect();
