@@ -2774,3 +2774,9 @@ io-rebuild-left-errors = Operaciones que no se pudieron construir: { $n }. La pr
 io-rebuild-left-warnings = Operaciones construidas solo parcialmente: { $n }. La primera, { $where }:
 io-placement-left-errors = Uniones no satisfechas: { $n }. La primera, { $where }:
 par-left-errors = Parámetros sin valor: { $n }. El primero, { $where }:
+props-title = Propiedades
+
+settings-auto-constrain-hint = Horizontal, vertical, perpendicular y punto sobre arista se añaden automáticamente (solo las independientes, nunca sobrerrestringiendo)
+settings-point-numbers-hint = Mostrar junto a cada punto de un boceto su número para facilitar su identificación; desactivado, la hoja muestra solo las formas
+settings-dim-name-hint = Una cota cuyo campo "controlador:" tiene un nombre se muestra así: w = 110
+settings-dim-formula-hint = Una cota definida mediante una fórmula se muestra así: 2*w+10 = 110
