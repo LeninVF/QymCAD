@@ -254,7 +254,7 @@ pub fn piece_of(e: &ProfEdge) -> ([i64; 2], f64) {
         }
         ProfEdge::Cubic { .. } => {
             let m = e.curve_at(0.5).unwrap_or(Point2::new(0.0, 0.0));
-            (key(m.x, m.y), m.x + m.y * 1e-6)
+            (key(m.x, m.y), spline_along(m))
         }
     }
 }
@@ -272,8 +272,14 @@ fn along_a_line([a, b]: [Point2; 2]) -> [f64; 2] {
     [dx * s, dy * s]
 }
 
+/// WHERE A PLACE ON A SPLINE STANDS ALONG IT, for the order of its pieces: along X, then Y.
+fn spline_along(q: Point2) -> f64 {
+    q.x + q.y * 1e-6
+}
+
 /// WHERE A PIECE BEGINS ALONG ITS ENTITY, as `piece_of` measures along: its end lower along the entity - or nothing where
-/// the piece holds the start of the curve itself, an arc running over the angle 0 of its circle, or a whole circle.
+/// the piece holds the start of the curve itself, an arc running over the angle 0 of its circle, or a whole circle or
+/// ellipse.
 pub fn piece_start(e: &ProfEdge) -> Option<Point2> {
     match *e {
         ProfEdge::Line { a, b } => {
@@ -287,16 +293,22 @@ pub fn piece_start(e: &ProfEdge) -> Option<Point2> {
             let (first, from, to) = if ccw { (a, angle(a), angle(b)) } else { (b, angle(b), angle(a)) };
             (to >= from).then_some(first)
         }
+        // an arc of an ellipse as an arc of a circle, by its eccentric angles as `piece_of` measures along it; a whole
+        // ellipse holds the start of its curve
+        ProfEdge::Oval { from, sweep, .. } => {
+            let tau = std::f64::consts::TAU;
+            let low = if sweep >= 0.0 { from } else { from + sweep };
+            (!e.whole() && low.rem_euclid(tau) + sweep.abs() <= tau).then(|| e.curve_at(if sweep >= 0.0 { 0.0 } else { 1.0 })).flatten()
+        }
+        // a span of a spline by its end lower along X, then Y, the measure `piece_of` orders its pieces by
+        ProfEdge::Cubic { a, b, .. } => Some(if spline_along(a) <= spline_along(b) { a } else { b }),
         ProfEdge::Circle { .. } => None,
     }
 }
 
 /// THE TWO ENDS OF A PIECE, or nothing for a whole circle.
 pub fn piece_ends(e: &ProfEdge) -> Option<[Point2; 2]> {
-    match *e {
-        ProfEdge::Line { a, b } | ProfEdge::Arc { a, b, .. } => Some([a, b]),
-        ProfEdge::Circle { .. } => None,
-    }
+    e.ends()
 }
 
 /// The same without names, for profiles that do not come from a sketch.

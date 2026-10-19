@@ -450,43 +450,48 @@ pub(super) fn arr_intersect(x: ArrCurve, y: ArrCurve) -> Vec<(f64, f64)> {
     let on_seg = |a: (f64, f64), b: (f64, f64), t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
     let arc_ok = |c: (f64, f64), a0: f64, a1: f64, ccw: bool, p: (f64, f64)| angle_in_arc((p.1 - c.1).atan2(p.0 - c.0), a0, a1, ccw);
     match (x, y) {
-        (Line { a, b }, Line { a: c, b: d }) => match seg_seg_t([a.0, a.1], [b.0, b.1], [c.0, c.1], [d.0, d.1]) {
-            Some(t) => vec![on_seg(a, b, t)],
-            None => {
-                // Collinear overlap, as with two rectangles sharing a side: there is no point intersection,
-                // but the segments lie on top of each other, so both are cut at the ends of the overlap.
-                // Otherwise the arrangement loses regions. Coincident sub-edges are deduplicated below, when
-                // the edges are assembled.
-                let (ux, uy) = (b.0 - a.0, b.1 - a.1);
-                let len2 = ux * ux + uy * uy;
-                if len2 < 1e-18 {
-                    return Vec::new();
-                }
-                let cross1 = ux * (c.1 - a.1) - uy * (c.0 - a.0);
-                let cross2 = ux * (d.1 - a.1) - uy * (d.0 - a.0);
-                let tol = 1e-6 * len2.sqrt();
-                if cross1.abs() > tol || cross2.abs() > tol {
-                    return Vec::new(); // parallel, but not on the same line
-                }
-                let mut out = Vec::new();
-                let mut push_in = |px: f64, py: f64, sa: (f64, f64), sb: (f64, f64)| {
-                    let (vx, vy) = (sb.0 - sa.0, sb.1 - sa.1);
-                    let l2 = vx * vx + vy * vy;
-                    if l2 < 1e-18 {
-                        return;
+        // a point inside either segment, on the other or at its end: an end of one segment lying on the other is where
+        // that one is cut, whichever of the two comes first - a line drawn before a rectangle, from side to side of it,
+        // or a line through a point of the segments of an ellipse drawn before it, cut nothing
+        (Line { a, b }, Line { a: c, b: d }) => {
+            match seg_seg_t([a.0, a.1], [b.0, b.1], [c.0, c.1], [d.0, d.1]).map(|t| on_seg(a, b, t)).or_else(|| seg_seg_t([c.0, c.1], [d.0, d.1], [a.0, a.1], [b.0, b.1]).map(|u| on_seg(c, d, u))) {
+                Some(q) => vec![q],
+                None => {
+                    // Collinear overlap, as with two rectangles sharing a side: there is no point intersection,
+                    // but the segments lie on top of each other, so both are cut at the ends of the overlap.
+                    // Otherwise the arrangement loses regions. Coincident sub-edges are deduplicated below, when
+                    // the edges are assembled.
+                    let (ux, uy) = (b.0 - a.0, b.1 - a.1);
+                    let len2 = ux * ux + uy * uy;
+                    if len2 < 1e-18 {
+                        return Vec::new();
                     }
-                    let t = ((px - sa.0) * vx + (py - sa.1) * vy) / l2;
-                    if t > 1e-9 && t < 1.0 - 1e-9 {
-                        out.push((px, py));
+                    let cross1 = ux * (c.1 - a.1) - uy * (c.0 - a.0);
+                    let cross2 = ux * (d.1 - a.1) - uy * (d.0 - a.0);
+                    let tol = 1e-6 * len2.sqrt();
+                    if cross1.abs() > tol || cross2.abs() > tol {
+                        return Vec::new(); // parallel, but not on the same line
                     }
-                };
-                push_in(c.0, c.1, a, b);
-                push_in(d.0, d.1, a, b);
-                push_in(a.0, a.1, c, d);
-                push_in(b.0, b.1, c, d);
-                out
+                    let mut out = Vec::new();
+                    let mut push_in = |px: f64, py: f64, sa: (f64, f64), sb: (f64, f64)| {
+                        let (vx, vy) = (sb.0 - sa.0, sb.1 - sa.1);
+                        let l2 = vx * vx + vy * vy;
+                        if l2 < 1e-18 {
+                            return;
+                        }
+                        let t = ((px - sa.0) * vx + (py - sa.1) * vy) / l2;
+                        if t > 1e-9 && t < 1.0 - 1e-9 {
+                            out.push((px, py));
+                        }
+                    };
+                    push_in(c.0, c.1, a, b);
+                    push_in(d.0, d.1, a, b);
+                    push_in(a.0, a.1, c, d);
+                    push_in(b.0, b.1, c, d);
+                    out
+                }
             }
-        },
+        }
         // The tolerance lives in one place, inside `seg_circle_t`. A second filter at ±1e-9 used to stand here
         // and discarded a tangency that had already been found: the parameter of the tangency point came out as
         // −3.3e-6, which is 5e-5 mm before the start of the segment. Two thresholds answering one question is
@@ -632,7 +637,13 @@ fn exact_runs(c: &mut Contour, exact: &std::collections::HashMap<Id, Curve>) {
         if c.edge_src[p] != c.edge_src[k] {
             return false;
         }
-        let (Some(curve), Some([_, pb]), Some([qa, _]), Some(mp), Some(mk)) = (exact.get(&c.edge_src[k]), c.edges[p].ends(), c.edges[k].ends(), middles[p], middles[k]) else { return true };
+        let (Some(curve), Some([pa, pb]), Some([qa, qb]), Some(mp), Some(mk)) = (exact.get(&c.edge_src[k]), c.edges[p].ends(), c.edges[k].ends(), middles[p], middles[k]) else { return true };
+        // the walk turning back on the segment it came along, at the tip of a curve hanging into a region: the run out and
+        // the run back are two pieces, taken out of the region as a pair (`without_spikes`); joined, they were one piece
+        // from a point to itself
+        if pa.dist(qb) < 1e-12 && pb.dist(qa) < 1e-12 {
+            return false;
+        }
         let gap = (curve.polish(pb, mp) - curve.polish(qa, mk)).abs();
         gap < 1e-6 || (curve.closed() && (gap - 1.0).abs() < 1e-6)
     };
@@ -725,7 +736,7 @@ pub(super) fn arrangement_regions_prov(points: &[SketchPoint], entities: &[Sketc
 /// halves standing apart in the walk. Taken out of the region as it goes to the sketch, not out of the walks of the
 /// arrangement: the sketch, solved round a change, reads those to tell whether a region runs past its window, and with
 /// the hanging pieces gone it lost the region a last line closed (a hexagon side by side). The provenance is the
-/// entities left on the boundary.
+/// entities left on the boundary. A spline and an arc of an ellipse hang in as their pieces do, out and back.
 pub(super) fn without_spikes(c: &mut Contour, prov: &mut Vec<Id>) {
     use crate::geom::ProfEdge;
     let n = c.edges.len();
@@ -733,6 +744,11 @@ pub(super) fn without_spikes(c: &mut Contour, prov: &mut Vec<Id>) {
     let back = |p: &ProfEdge, q: &ProfEdge| match (*p, *q) {
         (ProfEdge::Line { a, b }, ProfEdge::Line { a: qa, b: qb }) => same(a, qb) && same(b, qa),
         (ProfEdge::Arc { a, b, center, ccw }, ProfEdge::Arc { a: qa, b: qb, center: qc, ccw: qw }) => same(a, qb) && same(b, qa) && same(center, qc) && ccw != qw,
+        // a piece of an ellipse or of a spline and the same piece run back: the ends swapped, the middle one
+        (ProfEdge::Oval { .. }, ProfEdge::Oval { .. }) | (ProfEdge::Cubic { .. }, ProfEdge::Cubic { .. }) => match (p.ends(), q.ends(), p.curve_at(0.5), q.curve_at(0.5)) {
+            (Some([a, b]), Some([qa, qb]), Some(m), Some(qm)) => same(a, qb) && same(b, qa) && same(m, qm),
+            _ => false,
+        },
         _ => false,
     };
     let mut kept: Vec<usize> = Vec::with_capacity(n);
@@ -1308,7 +1324,7 @@ mod tests {
     /// middle of its bottom 4 up into it: the square is one region of area 100, the hanging line no edge of it.
     #[test]
     fn a_line_hanging_into_a_region_is_no_edge_of_it() {
-        use crate::model::{EntityKind, SketchEntity, SketchPoint};
+        use crate::model::{SketchEntity, SketchPoint};
         let pts = vec![
             SketchPoint { id: 1, x: 0.0, y: 0.0 },
             SketchPoint { id: 2, x: 10.0, y: 0.0 },
@@ -1317,7 +1333,7 @@ mod tests {
             SketchPoint { id: 5, x: 5.0, y: 0.0 },
             SketchPoint { id: 6, x: 5.0, y: 4.0 },
         ];
-        let l = |id, a, b| SketchEntity { id, kind: EntityKind::Line { a, b }, construction: false };
+        let l = |id, a, b| SketchEntity { id, kind: crate::model::LineParts { a, b }.into(), construction: false };
         let ents = vec![l(10, 1, 2), l(11, 2, 3), l(12, 3, 4), l(13, 4, 1), l(14, 5, 6)];
         let regions = super::arrangement_regions_prov(&pts, &ents);
         assert_eq!(regions.len(), 1, "the square is not one region: {}", regions.len());

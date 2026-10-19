@@ -73,3 +73,52 @@ fn a_closed_spline_over_a_rectangle_gives_the_parts_the_two_make() {
     let sum: f64 = areas.iter().sum();
     assert!((sum - union).abs() < 0.01 * union, "the parts cover {sum} mm^2, not the {union} mm^2 of the two together");
 }
+
+/// A SPLINE OR AN ARC OF AN ELLIPSE HANGING INTO A REGION IS NO PART OF ITS EDGE, as a line hanging into it is not: the
+/// walk round the region goes out along it and back, and the region came with a spike of no width the kernel would not
+/// make a face of. A square 10 x 10, and from the middle of its bottom an open spline up into it, or a quarter of an
+/// ellipse about (7, 0) of semi-axes 2 x 4 from its bottom at (5, 0) up to (7, 4): the square is one region of area 100,
+/// with neither curve on its edge.
+#[test]
+fn a_spline_or_an_arc_of_an_ellipse_hanging_into_a_region_is_no_edge_of_it() {
+    let mut failures = Vec::new();
+    let square = |p: &mut Project, si: usize| {
+        p.add_rect_entity(si, 0.0, 0.0, 10.0, 10.0, Purpose::Real);
+    };
+    let (mut p, si) = sketch();
+    square(&mut p, si);
+    let spline = p.add_spline(si, vec![p2(5.0, 0.0), p2(4.0, 3.0), p2(6.0, 5.0)], Ends::Open, Purpose::Real).expect("the spline");
+    p.merge_close_points(si, 1e-9);
+    p.regen_sketch(si);
+    let regions = closed(&p, si);
+    if regions.len() != 1 || (regions[0].area().abs() - 100.0).abs() > 1e-6 || regions[0].edge_src.contains(&spline) {
+        failures.push(format!(
+            "the spline hanging into the square: {} regions of {:?}, the spline on their edges {:?}",
+            regions.len(),
+            regions.iter().map(|c| c.area().abs()).collect::<Vec<_>>(),
+            regions.iter().map(|c| c.edge_src.contains(&spline)).collect::<Vec<_>>()
+        ));
+    }
+    let (mut p, si) = sketch();
+    square(&mut p, si);
+    let arc = qymcad_core::model::EllipseArcSpec {
+        centre: p2(7.0, 0.0),
+        radii: p2(2.0, 4.0),
+        rot: 0.0,
+        angles: [std::f64::consts::FRAC_PI_2, std::f64::consts::PI],
+        winding: qymcad_core::feature::Winding::Ccw,
+    };
+    let quarter = p.add_ellipse_arc_entity(si, arc, Purpose::Real);
+    p.merge_close_points(si, 1e-9);
+    p.regen_sketch(si);
+    let regions = closed(&p, si);
+    if regions.len() != 1 || (regions[0].area().abs() - 100.0).abs() > 1e-6 || regions[0].edge_src.contains(&quarter) {
+        failures.push(format!(
+            "the quarter of an ellipse hanging into the square: {} regions of {:?}, the quarter on their edges {:?}",
+            regions.len(),
+            regions.iter().map(|c| c.area().abs()).collect::<Vec<_>>(),
+            regions.iter().map(|c| c.edge_src.contains(&quarter)).collect::<Vec<_>>()
+        ));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

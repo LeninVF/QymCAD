@@ -153,7 +153,8 @@ impl Project {
         let si = self.sketch_index(sketch);
         let at = |pid: Id| si.and_then(|si| self.sketches[si].points.iter().find(|q| q.id == pid)).map(|q| crate::geom::Point2::new(q.x, q.y));
         let ends_of = |src: Id| -> Vec<crate::geom::Point2> {
-            si.and_then(|si| self.sketches[si].entities.iter().find(|e| e.id == src)).map(|e| crate::model::entity_points(e).into_iter().filter_map(at).collect()).unwrap_or_default()
+            // the two ends of the curve only: a node of a spline or the end of an axis of an ellipse lies on it inside
+            si.and_then(|si| self.sketches[si].entities.iter().find(|e| e.id == src)).and_then(crate::model::entity_ends).map(|ends| ends.into_iter().filter_map(at).collect()).unwrap_or_default()
         };
         let near = |p: crate::geom::Point2, q: crate::geom::Point2| (p.x - q.x).abs() < 1e-6 && (p.y - q.y).abs() < 1e-6;
         // the entities meeting at every end of every piece of the sketch, over all of its regions: what crosses a piece is
@@ -456,7 +457,7 @@ impl Project {
 mod tests {
     use super::{PieceKey, PieceSources};
     use crate::feature::{Purpose, SideSource};
-    use crate::model::{EntityKind, Id, Project};
+    use crate::model::{Id, Project};
 
     /// The pieces of every closed contour of the sketch `si`.
     fn pieces(p: &Project, si: usize) -> PieceSources {
@@ -486,8 +487,7 @@ mod tests {
         let moving = p.add_line_entity(si, 10.0, -5.0, 10.0, 25.0, Purpose::Real);
         p.regen_sketch(si);
         let y_of = |p: &Project, pid: Id| p.sketches[si].points.iter().find(|q| q.id == pid).map_or(f64::NAN, |q| q.y);
-        let bottom =
-            p.sketches[si].entities.iter().find(|e| matches!(e.kind, EntityKind::Line { a, b } if y_of(&p, a) == 0.0 && y_of(&p, b) == 0.0)).map(|e| e.id).expect("the bottom of the rectangle");
+        let bottom = p.sketches[si].entities.iter().find(|e| e.kind.as_line().is_some_and(|l| y_of(&p, l.a) == 0.0 && y_of(&p, l.b) == 0.0)).map(|e| e.id).expect("the bottom of the rectangle");
         let before = source_at(&pieces(&p, si), bottom, [65.0, 0.0]).expect("setup: the piece from 30 to 100");
         let ends: Vec<Id> = p.sketches[si].entities.iter().find(|e| e.id == moving).map(crate::model::entity_points).unwrap_or_default();
         for q in p.sketches[si].points.iter_mut().filter(|q| ends.contains(&q.id)) {
@@ -496,5 +496,92 @@ mod tests {
         p.regen_sketch(si);
         let after = source_at(&pieces(&p, si), bottom, [65.0, 0.0]).expect("the piece from 30 to 100 is gone");
         assert_eq!(after, before, "the piece from 30 to 100 did not move and its source changed");
+    }
+    /// The source of the piece of the entity `src` whose middle is nearest to `near`.
+    fn source_near(p: &Project, si: usize, src: Id, near: [f64; 2]) -> Option<SideSource> {
+        let all = pieces(p, si);
+        let keys = all.slot.keys().filter(|k| k.src == src).map(|k| k.key);
+        let dist = |key: [i64; 2]| (key[0] as f64 * 1e-6 - near[0]).hypot(key[1] as f64 * 1e-6 - near[1]);
+        let key = keys.min_by(|a, b| dist(*a).total_cmp(&dist(*b)))?;
+        source_at(&all, src, key.map(|v| v as f64 * 1e-6))
+    }
+
+    /// The line `line` of sketch `si` moved off to the left, out of everything.
+    fn move_off(p: &mut Project, si: usize, line: Id) {
+        let ends: Vec<Id> = p.sketches[si].entities.iter().find(|e| e.id == line).map(crate::model::entity_points).unwrap_or_default();
+        for q in p.sketches[si].points.iter_mut().filter(|q| ends.contains(&q.id)) {
+            q.x = -50.0;
+        }
+        p.regen_sketch(si);
+    }
+
+    /// A PIECE OF AN ELLIPSE OR OF A SPLINE KEEPS ITS SOURCE WHEN A PIECE BEFORE IT GOES, by the rule of the pieces of a
+    /// line: named after what cut it off at its start. The pieces of an ellipse and of a spline were numbered by their
+    /// place along it, and a line crossing it taken away renumbered the pieces after the crossing.
+    ///
+    /// The upper half of an ellipse about (50, 10) of semi-axes 40 x 8, closed by its diameter, crossed by upright lines at
+    /// x = 30 and x = 70, and at x = 50.3 by a line moved off: its piece beyond x = 30 keeps its source. A whole ellipse is a
+    /// region of its own, not cut by the lines crossing it (`curve::arrange`), and its one piece holds its start. A spline over (0, 0), (50, 20), (100, 0) closed by
+    /// the line under it, crossed at x = 30 and at x = 10 by a line moved off: its piece from x = 30 to its node at
+    /// x = 50 keeps its source.
+    #[test]
+    fn a_piece_of_an_ellipse_or_a_spline_keeps_its_source_when_a_crossing_before_it_goes() {
+        use crate::geom::Point2;
+        let mut failures = Vec::new();
+        let mut p = Project::default();
+        p.new_document();
+        let si = p.new_sketch("ellipse");
+        let arc = crate::model::EllipseArcSpec { centre: Point2::new(50.0, 10.0), radii: Point2::new(40.0, 8.0), rot: 0.0, angles: [0.0, std::f64::consts::PI], winding: crate::feature::Winding::Ccw };
+        let ellipse = p.add_ellipse_arc_entity(si, arc, Purpose::Real);
+        p.add_line_entity(si, 90.0, 10.0, 10.0, 10.0, Purpose::Real);
+        p.add_line_entity(si, 30.0, 5.0, 30.0, 25.0, Purpose::Real);
+        p.add_line_entity(si, 70.0, 5.0, 70.0, 25.0, Purpose::Real);
+        let moving = p.add_line_entity(si, 50.3, 5.0, 50.3, 25.0, Purpose::Real);
+        p.merge_close_points(si, 1e-9);
+        p.regen_sketch(si);
+        let before = source_near(&p, si, ellipse, [15.4, 14.0]);
+        move_off(&mut p, si, moving);
+        let after = source_near(&p, si, ellipse, [15.4, 14.0]);
+        if before.is_none() || after != before {
+            failures.push(format!("the piece of the arc of the ellipse beyond x = 30: {before:?} -> {after:?}"));
+        }
+        let mut p = Project::default();
+        p.new_document();
+        let si = p.new_sketch("spline");
+        let nodes = [[0.0, 0.0], [50.0, 20.0], [100.0, 0.0]].map(|q| Point2::new(q[0], q[1])).to_vec();
+        let spline = p.add_spline(si, nodes, crate::feature::Ends::Open, Purpose::Real).expect("the spline");
+        p.add_line_entity(si, 0.0, 0.0, 100.0, 0.0, Purpose::Real);
+        p.add_line_entity(si, 30.0, -5.0, 30.0, 25.0, Purpose::Real);
+        let moving = p.add_line_entity(si, 10.0, -5.0, 10.0, 25.0, Purpose::Real);
+        p.merge_close_points(si, 1e-9);
+        p.regen_sketch(si);
+        let before = source_near(&p, si, spline, [40.0, 18.0]);
+        move_off(&mut p, si, moving);
+        let after = source_near(&p, si, spline, [40.0, 18.0]);
+        if before.is_none() || after != before {
+            failures.push(format!("the piece of the spline from x = 30 to its node: {before:?} -> {after:?}"));
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// A LINE ENDING INSIDE A SPLINE CUTS IT THERE, at a node of the spline as between its nodes: only the two ends of a
+    /// curve are its ends. Every node of a spline was read as an end of it, and a line ending on a node cut nothing - the
+    /// piece after it was named as one of the pieces cut by nothing, apart from the same line ending a little beside the
+    /// node. A spline over (0, 0), (50, 20), (100, 0) closed by the line under it, and a line from (50, 0) up to its node:
+    /// the piece of the spline from the node on is cut off by that line.
+    #[test]
+    fn a_line_ending_on_a_node_of_a_spline_cuts_it_there() {
+        use crate::geom::Point2;
+        let mut p = Project::default();
+        p.new_document();
+        let si = p.new_sketch("spline");
+        let nodes = [[0.0, 0.0], [50.0, 20.0], [100.0, 0.0]].map(|q| Point2::new(q[0], q[1])).to_vec();
+        let spline = p.add_spline(si, nodes, crate::feature::Ends::Open, Purpose::Real).expect("the spline");
+        p.add_line_entity(si, 0.0, 0.0, 100.0, 0.0, Purpose::Real);
+        let up = p.add_line_entity(si, 50.0, 0.0, 50.0, 20.0, Purpose::Real);
+        p.merge_close_points(si, 1e-9);
+        p.regen_sketch(si);
+        let source = source_near(&p, si, spline, [75.0, 15.0]).expect("the piece of the spline after its node");
+        assert_eq!(source.cut, up, "the piece of the spline after the line ending on its node: {source:?}");
     }
 }
