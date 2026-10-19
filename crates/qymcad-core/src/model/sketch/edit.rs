@@ -475,6 +475,8 @@ impl Project {
         };
         let mut map: std::collections::HashMap<Id, Id> = std::collections::HashMap::new();
         let mut curves: std::collections::HashMap<Id, Id> = std::collections::HashMap::new();
+        let stood: std::collections::HashMap<Id, Point2> = coords.iter().map(|&(id, x, y)| (id, Point2::new(x, y))).collect();
+        let was = |id: Id| stood.get(&id).copied();
         for (old, x, y) in coords {
             let (nx, ny) = f(x, y);
             let nid = self.alloc_id();
@@ -504,11 +506,11 @@ impl Project {
             // The internal constraints of the set are re-pointed at the new points, so the copy keeps its
             // shape but not its anchor or its links to the axes.
             let inside: std::collections::HashSet<Id> = map.keys().copied().collect();
-            let maps = CopyMaps { points: &map, curves: &curves, turn: &along };
-            let cons: Vec<Constraint> = self.internal_constraints(si, &inside, eids_taken).iter().map(|c| copied_constraint(c, &maps)).collect();
+            let maps = CopyMaps { points: &map, curves: &curves, turn: &along, was: &was };
+            let cons: Vec<Constraint> = self.internal_constraints(si, &inside, eids_taken).iter().filter_map(|c| copied_constraint(c, &maps)).collect();
             self.sketches[si].constraints.extend(cons);
         }
-        let maps = CopyMaps { points: &map, curves: &curves, turn: &along };
+        let maps = CopyMaps { points: &map, curves: &curves, turn: &along, was: &was };
         if !with_constraints {
             let own = self.copied_own_constraints(si, &whole, &maps);
             self.sketches[si].constraints.extend(own);
@@ -563,12 +565,14 @@ impl Project {
         }
         // The internal constraints and dimensions of the copy are re-pointed at the new points; every
         // reference stays within the set and is remapped through the map.
-        let maps = CopyMaps { points: &map, curves: &curves, turn: &|v| v };
+        let was = |id: Id| clip.points.iter().find(|q| q.0 == id).map(|q| Point2::new(q.1, q.2));
+        let maps = CopyMaps { points: &map, curves: &curves, turn: &|v| v, was: &was };
         for c in &clip.constraints {
-            let nc = copied_constraint(c, &maps);
-            self.sketches[si].constraints.push(nc);
+            if let Some(nc) = copied_constraint(c, &maps) {
+                self.sketches[si].constraints.push(nc);
+            }
         }
-        self.lay_copied_records(si, &clip.whole, &CopyMaps { points: &map, curves: &curves, turn: &|v| v });
+        self.lay_copied_records(si, &clip.whole, &maps);
         self.regen_sketch(si);
         new_ids
     }
