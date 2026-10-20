@@ -143,7 +143,7 @@ fn splines_ellipses_and_blocks_are_read() {
     let ellipse = got.curves.iter().find(|c| matches!(c, ProfEdge::Oval { .. }));
     let on_ellipse = ellipse.is_some_and(|e| (0..=64).filter_map(|k| e.curve_at(k as f64 / 64.0)).all(|q| (((q.x - 50.0) / 20.0).powi(2) + (q.y / 10.0).powi(2) - 1.0).abs() < 1e-9));
     assert!(on_ellipse && ellipse.is_some_and(|e| e.ends().is_none()), "the ellipse did not come in as the whole ellipse about (50, 0) of 20 and 10: {ellipse:?}");
-    let spline = got.curves.iter().find(|c| matches!(c, ProfEdge::Cubic { .. }));
+    let spline = got.curves.iter().find(|c| matches!(c, ProfEdge::Spline(_)));
     let middle = spline.and_then(|s| s.curve_at(0.5));
     assert!(middle.is_some_and(|m| (m.x - 20.0).abs() < 1e-9 && m.y.abs() < 1e-9), "the spline does not run through its middle at (20, 0): {spline:?}");
     let ends = spline.and_then(|s| s.ends());
@@ -174,10 +174,10 @@ fn real_drawings_are_measured() {
                         qymcad_core::geom::ProfEdge::Line { .. } => lines += 1,
                         qymcad_core::geom::ProfEdge::Arc { .. } => arcs += 1,
                         qymcad_core::geom::ProfEdge::Circle { .. } => circles += 1,
-                        qymcad_core::geom::ProfEdge::Oval { .. } | qymcad_core::geom::ProfEdge::Cubic { .. } => curves += 1,
+                        qymcad_core::geom::ProfEdge::Oval { .. } | qymcad_core::geom::ProfEdge::Spline(_) => curves += 1,
                     }
                 }
-                println!("DRAWING {}: lines {lines}, arcs {arcs}, circles {circles}, ellipses and spans of splines {curves}; not read {:?}", f.display(), s.skipped);
+                println!("DRAWING {}: lines {lines}, arcs {arcs}, circles {circles}, ellipses and splines {curves}; not read {:?}", f.display(), s.skipped);
             }
             Err(e) => println!("DRAWING {}: refused - {e}", f.display()),
         }

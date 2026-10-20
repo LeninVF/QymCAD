@@ -200,11 +200,12 @@ fn every_pair_of_kinds_at_a_vertex_is_rounded_and_chamfered() {
 }
 
 /// HOW FAR THE FILLET OF THE SKETCH STRAYS FROM TOUCHING ITS SIDES: the arc laid last, each of its ends on a side and
-/// that side running square to its radius there; and how far apart its ends stand.
+/// that side running square to its radius there; how far apart its ends stand, and its radius.
 struct Held {
     off: f64,
     lean: f64,
     apart: f64,
+    radius: f64,
 }
 
 fn held(p: &Project, si: usize) -> Option<Held> {
@@ -212,9 +213,9 @@ fn held(p: &Project, si: usize) -> Option<Held> {
     // the fillet: the arc laid last
     let arc = s.entities.iter().filter(|e| e.kind.as_arc().is_some()).max_by_key(|e| e.id)?;
     let curve = Curve::of(s, arc)?;
-    let Curve::Round { centre, .. } = curve else { return None };
+    let Curve::Round { centre, r, .. } = curve else { return None };
     let [a, b] = entity_ends(arc)?;
-    let mut out = Held { off: 0.0, lean: 0.0, apart: curve.at(0.0).dist(curve.at(1.0)) };
+    let mut out = Held { off: 0.0, lean: 0.0, apart: curve.at(0.0).dist(curve.at(1.0)), radius: r };
     for (q, id) in curve.ends().into_iter().zip([a, b]) {
         let side = s.entities.iter().find(|e| e.id != arc.id && entity_ends(e).is_some_and(|x| x.contains(&id)))?;
         let c = Curve::of(s, side)?;
@@ -228,7 +229,9 @@ fn held(p: &Project, si: usize) -> Option<Held> {
 
 /// A FILLET OF ANY TWO CURVES HOLDS ITS CORNER WHEN A SIDE IS DRAGGED: every pair rounded R2, the far end of the first
 /// side led 1 right and 1.5 down in six frames as the window drags it and let go - the arc still touches both sides
-/// where it ends on them, and its ends stay apart.
+/// where it ends on them, keeps its radius of 2, and its ends stay apart. How far apart is the turn of the corner the
+/// drag leaves: an open spline running nearly along a line after the drag turns some 10 deg, and its fillet of 2 has
+/// ends about 0.35 apart.
 ///
 /// Reported behaviour: a spline and a line rounded, the end of the line dragged - the arc shrank to nothing and was
 /// drawn as a circle, its ends one point: the sharp of the corner was held on the spline itself, not on its way past its
@@ -259,8 +262,10 @@ fn every_fillet_holds_its_corner_when_a_side_is_dragged() {
             }
             corner.p.solve_sketch(si);
             match held(&corner.p, si) {
-                Some(Held { off, lean, apart }) if off < 1e-4 && lean < 1e-3 && apart > 0.5 => {}
-                Some(Held { off, lean, apart }) => failures.push(format!("{first} to {second}: the arc ends {off:.2e} off its sides, leans {lean:.2e} off touching, its ends {apart:.3} apart")),
+                Some(Held { off, lean, apart, radius }) if off < 1e-4 && lean < 1e-3 && apart > 1e-3 && (radius - 2.0).abs() < 1e-6 => {}
+                Some(Held { off, lean, apart, radius }) => {
+                    failures.push(format!("{first} to {second}: the arc of radius {radius:.6} ends {off:.2e} off its sides, leans {lean:.2e} off touching, its ends {apart:.3} apart"))
+                }
                 None => failures.push(format!("{first} to {second}: no fillet left")),
             }
         }

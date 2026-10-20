@@ -77,7 +77,7 @@ fn polyline(edges: &[ProfEdge]) -> Vec<Point2> {
                 }
             }
             ProfEdge::Circle { .. } => {}
-            ProfEdge::Oval { .. } | ProfEdge::Cubic { .. } => pts.extend((0..=100).filter_map(|i| e.curve_at(i as f64 / 100.0))),
+            ProfEdge::Oval { .. } | ProfEdge::Spline(_) => pts.extend((0..=100).filter_map(|i| e.curve_at(i as f64 / 100.0))),
         }
     }
     pts

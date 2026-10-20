@@ -97,14 +97,15 @@ pub fn sketch_props(pr: &mut qymcad_ui_state::PropsCtx, ui: &mut egui::Ui, si: u
         // geometry and is reliable).
         let flagged = qymcad_ui_state::flagged_redundant(&*pr.cache, &*pr.project, si); // ONE rule for the list and for the canvas
         let holders = pr.project.sketches[si].held_by_shapes();
-        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            for (ci, c) in cons.iter_mut().enumerate() {
-                if is_sys(c) {
-                    continue; // a system `Fixed` on the origin or an axis is not shown
-                }
-                if holders.contains(&ci) {
-                    continue; // a cut corner's holders are the corner's, a figure's own constraints the figure's
-                }
+        // a system `Fixed` on the origin or an axis is not shown; a cut corner's holders are the corner's, a figure's own
+        // constraints the figure's
+        let rows: Vec<usize> = (0..cons.len()).filter(|ci| !is_sys(&cons[*ci]) && !holders.contains(ci)).collect();
+        // ONLY THE ROWS IN SIGHT ARE LAID OUT: the list of a sketch of 1 089 constraints, every row of it naming the curves it
+        // stands on, took 40 of the 61 ms of every frame of the sketch in a release build, nothing changing
+        let row_height = ui.spacing().interact_size.y;
+        egui::ScrollArea::vertical().max_height(360.0).show_rows(ui, row_height, rows.len(), |ui, in_sight| {
+            for ci in rows[in_sight].iter().copied() {
+                let c = &mut cons[ci];
                 let is_sel = cur_sel == Some(ci);
                 // is it a dimension? (consistent redundancy among dimensions is harmless and gets no warning)
                 let is_dim = matches!(

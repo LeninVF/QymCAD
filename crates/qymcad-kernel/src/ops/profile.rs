@@ -4,7 +4,7 @@
 
 use crate::door::Roles;
 use qymcad_core::feature::Sides;
-use qymcad_core::geom::EDGE_FIELDS;
+use qymcad_core::geom::edge_slots;
 use qymcad_core::model::Id;
 use qymcad_core::names::{CutOff, GeoName, Role, Side};
 
@@ -75,18 +75,15 @@ pub fn name_sides(profiles: &[Vec<f64>], sides: Sides<'_>, role: Role) -> NamedS
     NamedSides { profiles: rewritten, caps, roles }
 }
 
-/// The places of the sources in the slots of the edges of a profile - `[loops, then loop blocks of [n, n edges of
-/// EDGE_FIELDS]]` - counted from 1, 0 for an edge with no source.
+/// The places of the sources in the slots of the edges of a profile - `[loops, then loop blocks (`edge_slots`)]` -
+/// counted from 1, 0 for an edge with no source.
 fn loop_places(data: &[f64]) -> Vec<usize> {
     let mut out = Vec::new();
     let mut i = 1;
     for _ in 0..data.first().copied().unwrap_or(0.0) as usize {
-        let n = data.get(i).copied().unwrap_or(0.0) as usize;
-        i += 1;
-        for k in 0..n {
-            out.push(data.get(i + k * EDGE_FIELDS + EDGE_FIELDS - 1).copied().unwrap_or(0.0) as usize);
-        }
-        i += n * EDGE_FIELDS;
+        let block = edge_slots(data, i);
+        out.extend(block.names.iter().map(|s| data.get(*s).copied().unwrap_or(0.0) as usize));
+        i = block.end;
     }
     out
 }
@@ -110,16 +107,14 @@ pub fn name_sections(data: &[f64], offsets: &[usize], sides: Sides<'_>) -> Named
     NamedSections { data: rewritten, caps, roles }
 }
 
-/// Rename the slots of `loops` loop blocks starting at `at` - `[n, n edges of EDGE_FIELDS]` each - from the place of a
-/// source (from 1) to the number of its role, giving the numbers the edges took.
+/// Rename the slots of `loops` loop blocks starting at `at` (`edge_slots`) from the place of a source (from 1) to the
+/// number of its role, giving the numbers the edges took.
 fn rename_loops(data: &mut [f64], at: usize, loops: usize, numbers: &[u32]) -> Vec<u32> {
     let mut taken: Vec<u32> = Vec::new();
     let mut i = at;
     for _ in 0..loops {
-        let n = data.get(i).copied().unwrap_or(0.0) as usize;
-        i += 1;
-        for k in 0..n {
-            let slot = i + k * EDGE_FIELDS + EDGE_FIELDS - 1;
+        let block = edge_slots(data, i);
+        for slot in block.names {
             let Some(v) = data.get_mut(slot) else { continue };
             let place = *v as usize;
             let number = if place == 0 { 0 } else { numbers.get(place - 1).copied().unwrap_or(0) };
@@ -128,7 +123,7 @@ fn rename_loops(data: &mut [f64], at: usize, loops: usize, numbers: &[u32]) -> V
                 taken.push(number);
             }
         }
-        i += n * EDGE_FIELDS;
+        i = block.end;
     }
     taken
 }
@@ -208,9 +203,8 @@ mod tests {
     fn block(places: &[u32]) -> Vec<f64> {
         let mut v = vec![places.len() as f64];
         for p in places {
-            let mut e = vec![0.0; EDGE_FIELDS];
-            e[EDGE_FIELDS - 1] = *p as f64;
-            v.extend(e);
+            let line = qymcad_core::geom::ProfEdge::Line { a: qymcad_core::geom::Point2::new(0.0, 0.0), b: qymcad_core::geom::Point2::new(1.0, 0.0) };
+            v.extend(qymcad_core::geom::encode_edge(&line, *p));
         }
         v
     }
@@ -240,7 +234,7 @@ mod tests {
         assert_eq!(one.caps[0], 0, "one region has no key");
         // the profile of contour 40 holds sources 1 and 2 (13/0, 11/1), the profile of contour 30 holds source 3 (11/0)
         let two = name_sides(&[[vec![1.0], block(&[1, 2])].concat(), [vec![1.0], block(&[3])].concat()], Sides { feature: 5, sources: &sources, regions: &[40, 30] }, Role::Wall);
-        let walls_of = |p: &Vec<f64>| -> Vec<u32> { (0..p[1] as usize).map(|k| p[2 + k * EDGE_FIELDS + EDGE_FIELDS - 1] as u32).collect() };
+        let walls_of = |p: &Vec<f64>| -> Vec<u32> { edge_slots(p, 1).names.iter().map(|s| p[*s] as u32).collect() };
         let [first, second] = [&two.profiles[0], &two.profiles[1]].map(walls_of);
         assert!(second[0] < first[1] && first[1] < first[0], "the walls are not numbered by profile, then by recipe (30: 11/0; 40: 11/1, 13/0): {first:?} {second:?}");
         let named = |number: u32| two.roles.given.iter().find(|r| r.number == number).map(|r| r.recipe.clone());

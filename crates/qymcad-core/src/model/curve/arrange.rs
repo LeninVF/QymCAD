@@ -28,7 +28,18 @@ impl Curve {
                 let angle = |p: Point2| (p.y - centre.y).atan2(p.x - centre.x);
                 vec![ArrCurve::Arc { c: xy(centre), r, a0: angle(pa), a1: angle(pb), ccw: sweep >= 0.0, pa: xy(pa), pb: xy(pb) }]
             }
-            _ => self.polyline().windows(2).filter(|w| w[0].dist(w[1]) > 1e-9).map(|w| ArrCurve::Line { a: xy(w[0]), b: xy(w[1]) }).collect(),
+            _ => Curve::arranged_through(&self.polyline()),
         }
+    }
+
+    /// THE CURVE OF A SEGMENT OF THE ARRANGEMENT between its two ends: a line, which its intersections are found on.
+    pub(in crate::model) fn of_segment([a, b]: [Point2; 2]) -> Curve {
+        Curve::Line { a, b }
+    }
+
+    /// THE SEGMENTS OF A CURVE LAID OUT AT `points`, as the arrangement takes them; one of no length brings nothing.
+    pub(in crate::model) fn arranged_through(points: &[Point2]) -> Vec<ArrCurve> {
+        let xy = |p: Point2| (p.x, p.y);
+        points.windows(2).filter(|w| w[0].dist(w[1]) > 1e-9).map(|w| ArrCurve::Line { a: xy(w[0]), b: xy(w[1]) }).collect()
     }
 }

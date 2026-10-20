@@ -657,11 +657,11 @@ impl Project {
         let at: Vec<Point2> = sp.nodes.iter().map(|id| s.point(*id).map(|p| crate::geom::Point2::new(p.x, p.y))).collect::<Option<_>>()?;
         Some(SplineNow { at, handles: sp.handles.to_vec(), ends: sp.ends })
     }
-    /// Polyline of spline `eid` (a cubic Hermite tessellation) in world coordinates, for drawing - including the dashed
+    /// Polyline of spline `eid` in world coordinates, for drawing - including the dashed
     /// rendering of a construction spline, which never reaches the contours.
     pub fn spline_polyline(&self, si: usize, eid: Id) -> Vec<Point2> {
         match self.spline_of(si, eid) {
-            Some(sp) if sp.at.len() >= 2 => tessellate_spline_hermite(&sp.at, &sp.handles, sp.ends).points,
+            Some(sp) if sp.at.len() >= 2 => crate::model::spline_line(&sp.at, &sp.handles, sp.ends),
             _ => Vec::new(),
         }
     }
@@ -669,9 +669,10 @@ impl Project {
     /// it leaves by, explicit or automatic - in world coordinates. Used for drawing and dragging.
     pub fn spline_handles(&self, si: usize, eid: Id) -> Vec<SplineHandle> {
         let Some(sp) = self.spline_of(si, eid).filter(|sp| sp.at.len() >= 2) else { return Vec::new() };
+        let tangents = crate::geom::bspline::node_tangents(&sp.at, &sp.handles, sp.ends);
         (0..sp.at.len())
             .map(|i| {
-                let m = spline_tangents_at(&sp.at, &sp.handles, i, sp.ends).leave;
+                let m = tangents[i].leave;
                 SplineHandle { node: sp.at[i], end: crate::geom::Point2::new(sp.at[i].x + m.x, sp.at[i].y + m.y) }
             })
             .collect()
@@ -689,7 +690,7 @@ impl Project {
         self.regen_sketch(si);
         true
     }
-    /// Reset the tangent of a node to automatic (Catmull-Rom), so the handle follows the nodes again.
+    /// Reset the tangent of a node to automatic, so the handle follows the nodes again.
     pub fn reset_spline_handle(&mut self, si: usize, eid: Id, ki: usize) -> bool {
         let Some(sp) = self.spline_of(si, eid) else { return false };
         if ki >= sp.at.len() || !self.with_handles(si, eid, |h| h[ki] = Handle::default()) {
@@ -1244,12 +1245,13 @@ impl Project {
                 ProfEdge::Oval { .. } => {
                     self.lay_curve(si, &crate::model::curve::Curve::of_edge(e), crate::model::LayAs::default());
                 }
-                // the spans of a spline joined end to end are one spline
-                ProfEdge::Cubic { .. } => {
-                    let joined = curves[k - 1..].windows(2).take_while(|w| matches!((w[0].ends(), &w[1]), (Some([_, b]), ProfEdge::Cubic { a, .. }) if b.dist(*a) < 1e-9)).count();
-                    let spans = &curves[k - 1..k + joined];
+                // the pieces of a spline going on smoothly one into the next are one spline; a corner between two ends it
+                ProfEdge::Spline(_) => {
+                    let smooth = |a: &ProfEdge, b: &ProfEdge| matches!(b, ProfEdge::Spline(_)) && crate::model::curve::Curve::of_edge(a).goes_on_smoothly(&crate::model::curve::Curve::of_edge(b));
+                    let joined = curves[k - 1..].windows(2).take_while(|w| smooth(&w[0], &w[1])).count();
+                    let pieces = &curves[k - 1..k + joined];
                     k += joined;
-                    if let Some(spline) = crate::model::curve::Curve::of_spans(spans) {
+                    if let Some(spline) = crate::model::curve::Curve::of_splines(pieces) {
                         self.lay_curve(si, &spline, crate::model::LayAs::default());
                     }
                 }

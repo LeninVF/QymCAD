@@ -104,7 +104,7 @@ impl Session {
             Curve::Round { centre, r, .. } if c.closed() => SketchPick::Circle { centre: xy(centre), radius: r },
             Curve::Round { centre, sweep, .. } => SketchPick::Arc { centre: xy(centre), from: xy(from), to: xy(to), ccw: sweep >= 0.0 },
             Curve::Oval { centre, major, minor, .. } => SketchPick::Ellipse { centre: xy(centre), major: xy(centre + major), minor: xy(centre + minor) },
-            Curve::Spline { nodes, .. } => SketchPick::Spline { nodes: nodes.into_iter().map(xy).collect() },
+            Curve::Spline { .. } => SketchPick::Spline { nodes: c.nodes().into_iter().map(xy).collect() },
         })
     }
 

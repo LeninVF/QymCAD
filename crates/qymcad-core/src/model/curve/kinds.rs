@@ -313,9 +313,11 @@ impl EntityKind {
                 });
                 EntityKind::Ellipse { c: cid, ma, mi, span }
             }
-            Curve::Spline { nodes, tangents, ends } => {
-                let ids: Vec<Id> = nodes.iter().map(|q| point_at(*q)).collect();
-                let handles = tangents.iter().map(|t| Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect();
+            // a node at every knot of its B-spline, held by the tangents there: the entity draws this curve again
+            Curve::Spline { b, ends } => {
+                let h = b.hermite(*ends);
+                let ids: Vec<Id> = h.nodes.iter().map(|q| point_at(*q)).collect();
+                let handles = h.tangents.iter().map(|t| Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect();
                 EntityKind::Spline { nodes: ids, handles, ends: *ends }
             }
         }

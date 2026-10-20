@@ -14,6 +14,13 @@ pub struct Meet {
 /// How close two places must come to count as one, in millimetres: the tolerance the sketch stitches points at.
 const SAME: f64 = 1e-7;
 
+/// A STRAIGHT PIECE OF THE LAYOUT OF A CURVE: its two points and the places of the curve at them.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LaidPiece {
+    pub ends: [Point2; 2],
+    pub run: [f64; 2],
+}
+
 /// The places along a curve with their points, laid out once for a search.
 struct Laid {
     t: Vec<f64>,
@@ -61,10 +68,24 @@ impl Curve {
                 if a0.x.max(a1.x) + near < b0.x.min(b1.x) || b0.x.max(b1.x) + near < a0.x.min(a1.x) || a0.y.max(a1.y) + near < b0.y.min(b1.y) || b0.y.max(b1.y) + near < a0.y.min(a1.y) {
                     continue;
                 }
-                let Some(start) = pieces_meet([[a0, a1], [b0, b1]], near) else { continue };
-                let ta = la.t[i] + (la.t[i + 1] - la.t[i]) * start.x;
-                let tb = lb.t[j] + (lb.t[j + 1] - lb.t[j]) * start.y;
-                if let Some(m) = self.settle(other, Point2 { x: ta, y: tb }) {
+                let pieces = [LaidPiece { ends: [a0, a1], run: [la.t[i], la.t[i + 1]] }, LaidPiece { ends: [b0, b1], run: [lb.t[j], lb.t[j + 1]] }];
+                out.extend(self.meets_near(other, pieces));
+            }
+        }
+        out
+    }
+
+    /// WHERE THIS CURVE MEETS `other` BY TWO PIECES OF THEIR LAYOUTS: the place the pieces cross and the ends of either
+    /// within a few sags of the other (`pieces_starts`) taken as starts, each settled by Newton's steps on both curves at
+    /// once (`settle`); each place once.
+    pub(crate) fn meets_near(&self, other: &Curve, pieces: [LaidPiece; 2]) -> Vec<Meet> {
+        let [a, b] = pieces;
+        let mut out: Vec<Meet> = Vec::new();
+        for start in pieces_starts([a.ends, b.ends], 4.0 * SAG + 1e-9) {
+            let ta = a.run[0] + (a.run[1] - a.run[0]) * start.x;
+            let tb = b.run[0] + (b.run[1] - b.run[0]) * start.y;
+            if let Some(m) = self.settle(other, Point2 { x: ta, y: tb }) {
+                if !out.iter().any(|o| o.at.dist(m.at) < SAME * 10.0) {
                     out.push(m);
                 }
             }
@@ -74,7 +95,7 @@ impl Curve {
 
     /// Newton's steps on the places `start` (along this curve, along `other`) until the two points are one, within the
     /// curves; `None` when they do not settle.
-    fn settle(&self, other: &Curve, start: Point2) -> Option<Meet> {
+    pub(crate) fn settle(&self, other: &Curve, start: Point2) -> Option<Meet> {
         let (mut ta, mut tb) = (start.x, start.y);
         for _ in 0..40 {
             let (pa, pb) = (self.at(ta), other.at(tb));
@@ -109,17 +130,25 @@ impl Curve {
 /// WHERE TWO STRAIGHT PIECES CROSS, as the shares along each (x along the first, y along the second); or, where they do
 /// not cross but come within `near` of each other, the shares of their nearest points. `None` when they stay apart.
 fn pieces_meet(pieces: [[Point2; 2]; 2], near: f64) -> Option<Point2> {
+    pieces_starts(pieces, near).first().copied()
+}
+
+/// WHERE TWO STRAIGHT PIECES CROSS AND COME NEAR, as shares along each: the crossing first where they cross, then the
+/// ends of either that stand within `near` of the other, nearest first. Two curves nearly touching cross twice within a
+/// piece of their layouts, and the second crossing is found from an end.
+fn pieces_starts(pieces: [[Point2; 2]; 2], near: f64) -> Vec<Point2> {
     let [a, b] = pieces;
+    let mut out = Vec::new();
     let (r, s) = (a[1] - a[0], b[1] - b[0]);
     let q = b[0] - a[0];
     let den = r.x * s.y - r.y * s.x;
     if den.abs() > 1e-18 {
         let (t, u) = ((q.x * s.y - q.y * s.x) / den, (q.x * r.y - q.y * r.x) / den);
         if (-1e-9..=1.0 + 1e-9).contains(&t) && (-1e-9..=1.0 + 1e-9).contains(&u) {
-            return Some(Point2 { x: t.clamp(0.0, 1.0), y: u.clamp(0.0, 1.0) });
+            out.push(Point2 { x: t.clamp(0.0, 1.0), y: u.clamp(0.0, 1.0) });
         }
     }
-    // no crossing: the end of either piece nearest the other, when within `near`
+    // the ends of either piece near the other
     let share = |p: Point2, seg: [Point2; 2]| {
         let d = seg[1] - seg[0];
         let l2 = d.x * d.x + d.y * d.y;
@@ -133,7 +162,7 @@ fn pieces_meet(pieces: [[Point2; 2]; 2], near: f64) -> Option<Point2> {
         let k = share(p, seg);
         Close { off: Point2::new(seg[0].x + (seg[1].x - seg[0].x) * k, seg[0].y + (seg[1].y - seg[0].y) * k).dist(p), at }
     };
-    [
+    let mut closes: Vec<Close> = [
         close(a[0], b, Point2 { x: 0.0, y: share(a[0], b) }),
         close(a[1], b, Point2 { x: 1.0, y: share(a[1], b) }),
         close(b[0], a, Point2 { x: share(b[0], a), y: 0.0 }),
@@ -141,8 +170,10 @@ fn pieces_meet(pieces: [[Point2; 2]; 2], near: f64) -> Option<Point2> {
     ]
     .into_iter()
     .filter(|c| c.off <= near)
-    .min_by(|x, y| x.off.total_cmp(&y.off))
-    .map(|c| c.at)
+    .collect();
+    closes.sort_by(|x, y| x.off.total_cmp(&y.off));
+    out.extend(closes.into_iter().map(|c| c.at));
+    out
 }
 
 /// AN END OF ONE PIECE NEAR THE OTHER: how far it is, and the shares along the two pieces there.

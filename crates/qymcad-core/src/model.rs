@@ -1387,7 +1387,7 @@ mod sketch_types;
 pub use sketch_types::*;
 mod curves;
 pub mod curve;
-pub use tess::NodeTangents;
+pub use crate::geom::bspline::NodeTangents;
 pub use curve::kinds::*;
 pub use curve::refs::*;
 pub use curves::*;

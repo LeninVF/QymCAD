@@ -89,14 +89,15 @@ pub(super) fn every_kind_of_curve_cut_extended_and_copied(app: &mut App, problem
         problems.push(format!("curves: the top of the ellipse trimmed away - {arcs} arcs of an ellipse, the top gone {top_gone}"));
     }
     check_all(app, "curves: the top of an ellipse trimmed away", problems);
-    // an open spline left of the left upright, its right end extended to it
+    // an open spline left of the left upright, its right end extended to it - the way it leaves its end meets the upright at
+    // y = 30
     let mut hand = Hand::new(app);
-    hand.sk_tool(9).click2d(-30.0, 30.0).click2d(-24.0, 34.0).double_click2d(-16.0, 31.0);
+    hand.sk_tool(9).click2d(-30.0, 30.0).click2d(-24.0, 34.0).double_click2d(-16.0, 33.0);
     hand.key(egui::Key::Escape).key(egui::Key::Escape);
     hand.sk_tool(0);
     assert!(hand.press_hint(&qymcad_i18n::tr("tb-extend-hint")), "no Extend button");
     hand.close_window();
-    hand.click2d(-17.0, 31.3).click2d(-6.0, 40.0).key(egui::Key::Escape).key(egui::Key::Escape);
+    hand.click2d(-16.8, 33.2).click2d(-6.0, 40.0).key(egui::Key::Escape).key(egui::Key::Escape);
     let reaches = curves(app).iter().filter(|c| matches!(c, qymcad_core::model::curve::Curve::Spline { .. })).any(|c| c.ends().iter().any(|e| (e.x + 6.0).abs() < 1e-6));
     if !reaches {
         problems.push("curves: the spline extended to the left upright does not end on it".into());

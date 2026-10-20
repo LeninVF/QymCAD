@@ -100,12 +100,36 @@ pub fn centres_touching(curves: [&Curve; 2], r: f64) -> Vec<Point2> {
         for db in [-r, r] {
             for oa in a.offset(da) {
                 for ob in b.offset(db) {
-                    out.extend(oa.meet(&ob).into_iter().map(|m| m.at));
+                    out.extend(oa.meet(&ob).into_iter().map(|m| standing_off([&a, &b], r, m.at)));
                 }
             }
         }
     }
     out
+}
+
+/// THE CENTRE `r` OFF BOTH CURVES, from `m` near it, by Newton's steps on the two distances: the offset of a spline or an
+/// ellipse is laid within `OFFSET_TOLERANCE` of the true one, and the centre where two such offsets meet stood as far
+/// off - a circle of 3 touching a spline and a line came out of radius 2.999998.
+fn standing_off(curves: [&Curve; 2], r: f64, mut m: Point2) -> Point2 {
+    for _ in 0..8 {
+        let [fa, fb] = curves.map(|c| c.nearest(m));
+        let [ua, ub] = [fa, fb].map(|f| {
+            let away = m - f.point;
+            mul(away, 1.0 / away.x.hypot(away.y).max(1e-12))
+        });
+        let (ga, gb) = (fa.off - r, fb.off - r);
+        let det = ua.x * ub.y - ua.y * ub.x;
+        if det.abs() < 1e-12 {
+            break;
+        }
+        let step = Point2::new((ga * ub.y - gb * ua.y) / det, (ua.x * gb - ub.x * ga) / det);
+        m = m - step;
+        if step.x.hypot(step.y) < 1e-12 {
+            break;
+        }
+    }
+    m
 }
 
 /// How far a line is drawn on past each end to stand for the whole straight line it lies on, in mm: past the largest

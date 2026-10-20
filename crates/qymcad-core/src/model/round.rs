@@ -13,7 +13,7 @@
 //!
 //! The open chains are made apart, from the curves joined end to end with a moved one: a chain is all the curves so
 //! joined, wherever they reach.
-use super::tess::{arrangement_faces, tessellate_sketch_multi, without_spikes};
+use super::tess::{arrangement_faces, tessellate_sketch_multi};
 use super::*;
 use crate::geom::ProfEdge;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -67,19 +67,19 @@ pub(super) fn regions_round(ch: &Change) -> Vec<(Contour, Vec<Id>)> {
         // the sides a region running out of the window was found at: bottom, right, top, left
         let mut grow = [false; 4];
         let mut grew = false;
-        let faces = arrangement_faces(&pts, &ents); // a sketch with splines is never laid round (`regen_sketch`)
-                                                    // A PIECE OF THE DRAWING SEEN WHOLE IN THE WINDOW, clear of its sides, is walked round on its outside and not
-                                                    // made a region: a moved curve on that walk may close a region with what lies past the window. The window takes
-                                                    // the piece in, and the next laying reaches further along it - the half disc whose diameter was drawn last came
-                                                    // in a few segments a step
-        for walk in &faces.outer {
+        let super::tess::Faces { inner, outer, laid: curves } = arrangement_faces(&pts, &ents); // a sketch with splines is never laid round (`regen_sketch`)
+                                                                                                // A PIECE OF THE DRAWING SEEN WHOLE IN THE WINDOW, clear of its sides, is walked round on its outside and not
+                                                                                                // made a region: a moved curve on that walk may close a region with what lies past the window. The window takes
+                                                                                                // the piece in, and the next laying reaches further along it - the half disc whose diameter was drawn last came
+                                                                                                // in a few segments a step
+        for walk in &outer {
             let b = contour_box(walk);
             if !inside(&b, &w) && borders_a_moved_curve(walk, &moved, &free_end) {
                 w = union(w, b);
                 grew = true;
             }
         }
-        for (c, prov) in faces.inner {
+        for (c, prov) in inner {
             let b = contour_box(&c);
             if !ch.swept.iter().any(|s| meet(&b, s)) {
                 continue; // a region the change did not reach: the one of the sketch stands
@@ -93,7 +93,7 @@ pub(super) fn regions_round(ch: &Change) -> Vec<(Contour, Vec<Id>)> {
                 }
             } else if inside(&b, &w) {
                 let (mut c, mut prov) = (c, prov);
-                without_spikes(&mut c, &mut prov);
+                curves.finish(&mut c, &mut prov);
                 out.push((c, prov));
             } else if inside(&b, &rim) {
                 // between the window and its sides: a curve laid in neither may cut it, so the window takes it in

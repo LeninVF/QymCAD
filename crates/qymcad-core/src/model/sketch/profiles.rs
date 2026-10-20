@@ -555,11 +555,12 @@ mod tests {
         let moving = p.add_line_entity(si, 10.0, -5.0, 10.0, 25.0, Purpose::Real);
         p.merge_close_points(si, 1e-9);
         p.regen_sketch(si);
-        let before = source_near(&p, si, spline, [40.0, 18.0]);
+        // the piece from the crossing at x = 30 to the end of the spline, one edge over its node
+        let before = source_near(&p, si, spline, [65.0, 18.0]);
         move_off(&mut p, si, moving);
-        let after = source_near(&p, si, spline, [40.0, 18.0]);
+        let after = source_near(&p, si, spline, [65.0, 18.0]);
         if before.is_none() || after != before {
-            failures.push(format!("the piece of the spline from x = 30 to its node: {before:?} -> {after:?}"));
+            failures.push(format!("the piece of the spline from x = 30 to its end: {before:?} -> {after:?}"));
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }

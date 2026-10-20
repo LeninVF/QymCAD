@@ -257,10 +257,26 @@ impl Sketch {
         })
     }
 
-    /// The points not drawn among the sketch's own: the frame of reference, drawn by the axis marker. The virtual sharp of
-    /// a cut corner is drawn, and picked, like any point.
+    /// The points not drawn among the sketch's own: the frame of reference, drawn by the axis marker, and the nodes of the
+    /// copies an offset holds (`held_copy_nodes`). The virtual sharp of a cut corner is drawn, and picked, like any point.
     pub fn unseen_points(&self) -> std::collections::HashSet<Id> {
-        self.system_ids().into_iter().collect()
+        let mut out: std::collections::HashSet<Id> = self.system_ids().into_iter().collect();
+        out.extend(self.held_copy_nodes());
+        out
+    }
+
+    /// THE NODES OF THE COPIES AN OFFSET HOLDS: laid again from the curve offset after every change of it, they are not
+    /// dragged and are not drawn as points to take, as a pro-CAD draws an offset curve - an open piece keeps its two ends,
+    /// the corners it meets other curves at. Drawn, the copy of a spline of 82 nodes offset 3 covered the drawing with 688
+    /// points. A copy cut loose from its offset is a spline of its own, its nodes drawn.
+    pub fn held_copy_nodes(&self) -> std::collections::HashSet<Id> {
+        let mut out = std::collections::HashSet::new();
+        for id in self.offsets.iter().flat_map(|o| o.copies.iter()) {
+            let Some(sp) = self.entity(*id).and_then(|e| e.kind.as_spline()) else { continue };
+            let inner = if sp.ends == crate::feature::Ends::Closed { sp.nodes } else { sp.nodes.get(1..sp.nodes.len().saturating_sub(1)).unwrap_or(&[]) };
+            out.extend(inner.iter().copied());
+        }
+        out
     }
 
     pub fn system_ids(&self) -> Vec<Id> {

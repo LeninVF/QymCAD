@@ -454,13 +454,16 @@ impl Project {
         // Splines are cut into the arrangement with the rest (`arrangement_faces`), so their closed regions are among these.
         let mut pairs: Vec<(Contour, Vec<Id>)> = arrangement_regions_prov(&pts, &ents);
         pairs.extend(tessellate_sketch_multi(&pts, &ents).into_iter().filter(|c| !c.closed).map(|c| (c, Vec::new())));
-        // An open spline is an open chain too (cubic Hermite with tangent handles, automatic Catmull-Rom by default): a
-        // path for a sweep or a loft. A construction spline never reaches a profile; it is drawn dashed.
+        // An open spline is an open chain too: a path for a sweep or a loft, its exact edge its B-spline. A construction
+        // spline never reaches a profile; it is drawn dashed.
         for e in &ents {
             let Some(SplineParts { nodes, handles, ends: crate::feature::Ends::Open }) = e.kind.as_spline() else { continue };
             let cps: Vec<Point2> = nodes.iter().filter_map(|id| pts.iter().find(|p| p.id == *id).map(|p| crate::geom::Point2::new(p.x, p.y))).collect();
             if cps.len() >= 2 {
-                pairs.push((tessellate_spline_hermite(&cps, handles, crate::feature::Ends::Open), Vec::new()));
+                let curve = crate::model::curve::Curve::spline(cps, handles, crate::feature::Ends::Open);
+                let mut path = Contour::open(curve.polyline());
+                path.edges = curve.to_edges();
+                pairs.push((path, Vec::new()));
             }
         }
         // Contours of parametric text (its baked glyphs); ordinary, non-construction text reaches the

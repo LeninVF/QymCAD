@@ -78,7 +78,7 @@ pub fn sketch_export_edges(project: &qymcad_core::model::Project, si: usize) -> 
         let Some(ci) = project.contour_index(*cid) else { continue };
         let c = &project.contours[ci];
         if !c.edges.is_empty() {
-            out.extend(c.edges.iter().copied());
+            out.extend(c.edges.iter().cloned());
         } else {
             let n = c.points.len();
             let last = if c.closed { n } else { n.saturating_sub(1) };
@@ -159,6 +159,8 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
     // deliberately STAYS pickable (it is needed for a coincidence with the origin) - hence `axis_pts`
     // rather than `system_ids`
     let is_axis_ref = |id: Id| s.axis_pts.contains(&id) || p_eq(s.frame, id);
+    // the nodes of a copy an offset holds are not taken: the copy is laid again from the curve offset
+    let held = s.held_copy_nodes();
     // 1) the nearest point.
     //
     // THE ORIGIN YIELDS TO ORDINARY GEOMETRY STANDING ON IT. Reported behaviour: "I cannot move the
@@ -171,7 +173,7 @@ pub fn sketch_hit(pick: &qymcad_ui_state::PickCtx, rect: Rect, pos: Pos2, si: us
     let mut best_pt: Option<(f32, Id)> = None;
     let mut best_sys: Option<(f32, Id)> = None;
     for p in &s.points {
-        if is_axis_ref(p.id) {
+        if is_axis_ref(p.id) || held.contains(&p.id) {
             continue;
         }
         let d = sh.at(Point2::new(p.x, p.y)).distance(pos);

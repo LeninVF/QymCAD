@@ -67,8 +67,17 @@ extern "C" QymShape* qym_shape_helical_profile(const QymShape* base, const doubl
             size_t nedges = (size_t)(*pp++);
             if (nedges < 2) return why("helix/profile", "the profile loop has fewer than two edges"), nullptr;
             for (size_t i = 0; i < nedges; ++i) {
-                double kind = pp[0], ax = pp[1], ay = pp[2], bx = pp[3], by = pp[4], cx = pp[5], cy = pp[6], ccw = pp[7];
-                pp += QYM_EDGE_FIELDS;
+                // [kind, m, m numbers, name] (`geom::encode_edge`): a segment and an arc a, b, c, ccw; a circle r, c
+                const double* v = pp + 2;
+                const size_t m = (size_t)pp[1];
+                auto num = [&](size_t k) { return k < m ? v[k] : 0.0; };
+                double kind = pp[0], ax = num(0), ay = num(1), bx = num(2), by = num(3), cx = num(4), cy = num(5), ccw = num(6);
+                if (kind == 2.0) {
+                    ax = num(0);
+                    cx = num(1);
+                    cy = num(2);
+                }
+                pp += qym_edge_len(pp);
                 if (kind == 1.0) {                                  // AN ARC becomes a polyline by sagitta
                     double r = std::hypot(ax - cx, ay - cy);
                     double t0 = atan2(ay - cy, ax - cx), t1 = atan2(by - cy, bx - cx);

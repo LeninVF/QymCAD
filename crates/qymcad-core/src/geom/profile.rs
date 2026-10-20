@@ -161,35 +161,65 @@ pub fn circle_contour_from(cx: f64, cy: f64, radius: f64, max_sag: f64, src: cra
     c
 }
 
-/// How many numbers one edge occupies in the profile encoding: its kind, nine numbers of its shape and its name.
-pub const EDGE_FIELDS: usize = 11;
-
-/// The single source of truth for the edge format of a kernel profile:
-/// `[kind, nine numbers of its shape, name]`:
+/// The single source of truth for the edge format of a kernel profile: `[kind, m, m numbers of its shape, name]`:
 ///
 /// * 0, a segment: `ax, ay, bx, by`;
 /// * 1, an arc: `ax, ay, bx, by, cx, cy, ccw`;
-/// * 2, a circle: `r` first, its centre at the places of an arc's, `cx, cy`;
+/// * 2, a circle: `r, cx, cy`;
 /// * 3, an ellipse or an arc of one: `cx, cy, major x, major y, minor x, minor y, from, sweep` - the semi-axes as
 ///   vectors, the eccentric angles in radians;
-/// * 4, a cubic span of a spline: its Bezier points `a, c1, c2, b`.
+/// * 4, a piece of a spline, a cubic B-spline, clamped: `n`, its `n` poles `x, y`, its `n + 4` knots - one edge and
+///   one face a piece.
 ///
-/// The numbers an edge does not use are 0. The last number is the name descriptor of the face this edge will produce (0 means no name, and the kernel
-/// falls back to a positional index). The name is derived from the recipe as "the wall of feature F from sketch
-/// entity E", so inserting an edge in the middle of a contour does not shift the names of its neighbours.
+/// The last number is the name descriptor of the face this edge will produce (0 means no name, and the kernel falls
+/// back to a positional index). The name is derived from the recipe as "the wall of feature F from sketch entity E",
+/// so inserting an edge in the middle of a contour does not shift the names of its neighbours.
 ///
 /// The format used to be written out in six places (the contour, threads and four sets of tests), and widening the
-/// record from 8 numbers to 9 left them out of step: the kernel read the profile with a shift and removed 74 mm³
-/// instead of 7515. The record is therefore assembled here alone, both by the product and by the tests.
-pub fn encode_edge(e: ProfEdge, name: u32) -> [f64; EDGE_FIELDS] {
-    let s = name as f64;
-    match e {
-        ProfEdge::Line { a, b } => [0.0, a.x, a.y, b.x, b.y, 0.0, 0.0, 0.0, 0.0, 0.0, s],
-        ProfEdge::Arc { a, b, center, ccw } => [1.0, a.x, a.y, b.x, b.y, center.x, center.y, if ccw { 1.0 } else { 0.0 }, 0.0, 0.0, s],
-        ProfEdge::Circle { center, r } => [2.0, r, 0.0, 0.0, 0.0, center.x, center.y, 0.0, 0.0, 0.0, s],
-        ProfEdge::Oval { centre, major, minor, from, sweep } => [3.0, centre.x, centre.y, major.x, major.y, minor.x, minor.y, from, sweep, 0.0, s],
-        ProfEdge::Cubic { a, c1, c2, b } => [4.0, a.x, a.y, c1.x, c1.y, c2.x, c2.y, b.x, b.y, 0.0, s],
+/// record from 8 numbers to 9 left them out of step: the kernel read the profile with a shift and removed 74 mm^3
+/// instead of 7515. The record is therefore assembled here alone, and read by `edge_slots`, both by the product and by
+/// the tests.
+pub fn encode_edge(e: &ProfEdge, name: u32) -> Vec<f64> {
+    let shape: Vec<f64> = match e {
+        ProfEdge::Line { a, b } => vec![0.0, a.x, a.y, b.x, b.y],
+        ProfEdge::Arc { a, b, center, ccw } => vec![1.0, a.x, a.y, b.x, b.y, center.x, center.y, if *ccw { 1.0 } else { 0.0 }],
+        ProfEdge::Circle { center, r } => vec![2.0, *r, center.x, center.y],
+        ProfEdge::Oval { centre, major, minor, from, sweep } => vec![3.0, centre.x, centre.y, major.x, major.y, minor.x, minor.y, *from, *sweep],
+        ProfEdge::Spline(b) => {
+            let mut v = vec![4.0, b.poles.len() as f64];
+            v.extend(b.poles.iter().flat_map(|p| [p.x, p.y]));
+            v.extend_from_slice(&b.knots);
+            v
+        }
+    };
+    let mut out = Vec::with_capacity(shape.len() + 2);
+    out.push(shape[0]);
+    out.push((shape.len() - 1) as f64);
+    out.extend_from_slice(&shape[1..]);
+    out.push(name as f64);
+    out
+}
+
+/// WHERE THE EDGES OF ONE LOOP BLOCK STAND: the place of the name of each, and the place past the block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EdgeSlots {
+    pub names: Vec<usize>,
+    pub end: usize,
+}
+
+/// THE EDGES OF THE LOOP BLOCK AT `at` of an encoded profile - `[n, n edges]`, each edge `[kind, m, m numbers, name]`
+/// (`encode_edge`): the place of the name of each, and the place past the block. What every reader of the names of a
+/// profile walks it by.
+pub fn edge_slots(data: &[f64], at: usize) -> EdgeSlots {
+    let n = data.get(at).copied().unwrap_or(0.0) as usize;
+    let mut i = at + 1;
+    let mut names = Vec::with_capacity(n);
+    for _ in 0..n {
+        let m = data.get(i + 1).copied().unwrap_or(0.0) as usize;
+        names.push(i + 2 + m);
+        i += 3 + m;
     }
+    EdgeSlots { names, end: i }
 }
 
 /// One loop of exact edges: `[nedges, edges...]`. Names are absent (0) because the profile does not come from a
@@ -197,7 +227,7 @@ pub fn encode_edge(e: ProfEdge, name: u32) -> [f64; EDGE_FIELDS] {
 pub fn encode_loop(edges: &[ProfEdge]) -> Vec<f64> {
     let mut v = vec![edges.len() as f64];
     for e in edges {
-        v.extend_from_slice(&encode_edge(*e, 0));
+        v.extend(encode_edge(e, 0));
     }
     v
 }
@@ -247,12 +277,12 @@ pub fn piece_of(e: &ProfEdge) -> ([i64; 2], f64) {
             (key(center.x + r * mid.cos(), center.y + r * mid.sin()), mid.rem_euclid(tau))
         }
         ProfEdge::Circle { center, r } => (key(center.x + r, center.y), 0.0),
-        // an ellipse by the eccentric angle of its middle, a span of a spline by its middle along X, then Y
+        // an ellipse by the eccentric angle of its middle, a piece of a spline by its middle along X, then Y
         ProfEdge::Oval { from, sweep, .. } => {
             let m = e.curve_at(0.5).unwrap_or(Point2::new(0.0, 0.0));
             (key(m.x, m.y), (from + sweep * 0.5).rem_euclid(std::f64::consts::TAU))
         }
-        ProfEdge::Cubic { .. } => {
+        ProfEdge::Spline(_) => {
             let m = e.curve_at(0.5).unwrap_or(Point2::new(0.0, 0.0));
             (key(m.x, m.y), spline_along(m))
         }
@@ -300,8 +330,8 @@ pub fn piece_start(e: &ProfEdge) -> Option<Point2> {
             let low = if sweep >= 0.0 { from } else { from + sweep };
             (!e.whole() && low.rem_euclid(tau) + sweep.abs() <= tau).then(|| e.curve_at(if sweep >= 0.0 { 0.0 } else { 1.0 })).flatten()
         }
-        // a span of a spline by its end lower along X, then Y, the measure `piece_of` orders its pieces by
-        ProfEdge::Cubic { a, b, .. } => Some(if spline_along(a) <= spline_along(b) { a } else { b }),
+        // a piece of a spline by its end lower along X, then Y, the measure `piece_of` orders its pieces by
+        ProfEdge::Spline(_) => e.ends().map(|[a, b]| if spline_along(a) <= spline_along(b) { a } else { b }),
         ProfEdge::Circle { .. } => None,
     }
 }

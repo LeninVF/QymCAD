@@ -769,6 +769,27 @@ struct QymEdges {
                                            // the edge, the connector's secondary axis (zero = no neighbouring
                                            // face)
 };
+// WHERE THE MIDDLE OF AN EDGE STANDS ON A FACE OF IT, as (u, v) of the face's surface: off the edge's own curve on that
+// face, at the place `t` of its curve - the two run together on an edge of a body. Sought by projecting the point onto the
+// surface only where the edge has no such curve: projected, a grid of the surface searched for each of two faces of each
+// edge, the edges of a ring between a closed spline and its offset (900 edges on 303 faces) took most of the listing.
+static bool edge_mid_on_face(const TopoDS_Edge& ed, const TopoDS_Face& fc, Standard_Real t, const gp_Pnt& mid, Standard_Real& u, Standard_Real& v) {
+    Standard_Real pf, pl;
+    Handle(Geom2d_Curve) pc = BRep_Tool::CurveOnSurface(ed, fc, pf, pl);
+    if (!pc.IsNull() && t >= std::min(pf, pl) - 1e-9 && t <= std::max(pf, pl) + 1e-9) {
+        const gp_Pnt2d uv = pc->Value(t);
+        u = uv.X();
+        v = uv.Y();
+        return true;
+    }
+    Handle(Geom_Surface) su = BRep_Tool::Surface(fc);
+    if (su.IsNull()) return false;
+    GeomAPI_ProjectPointOnSurf pj(mid, su);
+    if (!pj.IsDone() || pj.NbPoints() < 1) return false;
+    pj.LowerDistanceParameters(u, v);
+    return true;
+}
+
 // The edges of `s` as `qym_shape_edges` hands them out; an exception goes up to it.
 static std::unique_ptr<QymEdges> edges_of(const QymShape* s) {
     auto e = std::make_unique<QymEdges>();
@@ -789,7 +810,11 @@ static std::unique_ptr<QymEdges> edges_of(const QymShape* s) {
             QYM_SIGNALS;
             c = BRep_Tool::Curve(TopoDS::Edge(edges(i)), f, l);
             if (!c.IsNull()) {
-                const int n = 24;
+                // AN EDGE OF A B-SPLINE BY ITS SPANS: eight points a span between its knots, 24 at the least. Laid by 24
+                // points along the whole of it, the edge of a side swept from a closed spline of 38 nodes was drawn a
+                // polygon whose middle stood 0.55 mm off the edge
+                Handle(Geom_BSplineCurve) bs = Handle(Geom_BSplineCurve)::DownCast(c);
+                const int n = bs.IsNull() ? 24 : std::max(24, 8 * (bs->NbKnots() - 1));
                 for (int k = 0; k <= n; ++k) {
                     gp_Pnt p = c->Value(f + (l - f) * k / n);
                     pts.push_back(static_cast<float>(p.X()));
@@ -832,10 +857,8 @@ static std::unique_ptr<QymEdges> edges_of(const QymShape* s) {
                         const TopoDS_Face& fc = TopoDS::Face(it.Value());
                         Handle(Geom_Surface) su = BRep_Tool::Surface(fc);
                         if (su.IsNull()) break;
-                        GeomAPI_ProjectPointOnSurf pj(mid, su);
-                        if (!pj.IsDone() || pj.NbPoints() < 1) break;
                         Standard_Real u, v;
-                        pj.LowerDistanceParameters(u, v);
+                        if (!edge_mid_on_face(ed, fc, (f + l) * 0.5, mid, u, v)) break;
                         GeomLProp_SLProps pr(su, u, v, 1, 1e-6);
                         if (!pr.IsNormalDefined()) break;
                         gp_Dir n = pr.Normal();
@@ -879,10 +902,8 @@ static std::unique_ptr<QymEdges> edges_of(const QymShape* s) {
                 if (!pick.IsNull()) {
                     gp_Pnt mid = c->Value((f + l) * 0.5);
                     Handle(Geom_Surface) su = BRep_Tool::Surface(pick);
-                    GeomAPI_ProjectPointOnSurf pj(mid, su);
-                    if (!su.IsNull() && pj.IsDone() && pj.NbPoints() >= 1) {
-                        Standard_Real u, v;
-                        pj.LowerDistanceParameters(u, v);
+                    Standard_Real u, v;
+                    if (!su.IsNull() && edge_mid_on_face(ed, pick, (f + l) * 0.5, mid, u, v)) {
                         GeomLProp_SLProps pr(su, u, v, 1, 1e-6);
                         if (pr.IsNormalDefined()) {
                             gp_Dir n = pr.Normal();

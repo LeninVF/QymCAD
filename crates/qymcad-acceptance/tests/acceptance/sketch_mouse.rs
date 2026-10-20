@@ -352,7 +352,9 @@ probe! {
         s.key(Key::Escape);
         let arrow = s.word("tb-select-hint");
         s.press_hint(&arrow);
-        s.click_on_sketch(8.75, 13.5);
+        // the middle of the first span of the spline through the three nodes - of continuous curvature, its spans by
+        // the lengths of their chords, symmetric about x = 20: (10, 16.5)
+        s.click_on_sketch(10.0, 16.5);
         assert_eq!(picked(&mut s), 1, "a click on the curve of the spline picked {} things", picked(&mut s));
         s.key(Key::Delete);
         let sk = &s.document().sketches[0];
@@ -375,13 +377,13 @@ probe! {
         s.press_hint(&arrow);
         let sk = &s.document().sketches[0];
         assert!(sk.splines == 1 && sk.places.len() == 3, "the spline closed on its first node holds {} splines and the points {:?}", sk.splines, sk.places);
-        // the middle of the closing span, from (20, 30) to (0, 0), the tangents of the loop half the step between the
-        // neighbours, (-20, 0) and (10, -15): (10, 15) + (-20, 0) / 8 - (10, -15) / 8 = (6.25, 16.875)
-        assert!(matches!(s.sketch_under(6.25, 16.875), Some(SketchPick::Spline { .. })), "no closing span runs from (20, 30) back to (0, 0)");
+        // the middle of the closing span, from (20, 30) to (0, 0), of the loop of continuous curvature through the three
+        // nodes, its spans by the lengths of their chords - 40, 36.06 and the closing 36.06: (3.24, 18.88)
+        assert!(matches!(s.sketch_under(3.24, 18.88), Some(SketchPick::Spline { .. })), "no closing span runs from (20, 30) back to (0, 0)");
         s.drag_on_sketch((40.0, 0.0), (50.0, -10.0));
         let sk = &s.document().sketches[0];
         assert!(sk.splines == 1 && sk.places.len() == 3, "the loop dragged by a node holds {} splines and the points {:?}", sk.splines, sk.places);
-        // with the node at (50, -10) the tangents are (-25, 5) and (15, -20): the middle comes to (5, 18.125)
-        assert!(matches!(s.sketch_under(5.0, 18.125), Some(SketchPick::Spline { .. })), "the loop dragged by a node is no longer closed");
+        // with the node at (50, -10) the middle of the closing span comes to (3.74, 18.99)
+        assert!(matches!(s.sketch_under(3.74, 18.99), Some(SketchPick::Spline { .. })), "the loop dragged by a node is no longer closed");
     }
 }

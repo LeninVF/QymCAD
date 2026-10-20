@@ -134,9 +134,14 @@ pub struct SketchEntity {
 }
 
 /// THE POINTS A SPLINE IS LAID OUT BY, in order along it, from its nodes where they stand (`at`): what it is drawn,
-/// picked and boxed by, its sag under 0.4 % of the mean span between its nodes.
+/// picked and boxed by - its curve laid out to the sag of every curve (`Curve::polyline`), a loop without its start
+/// again at its end.
 pub fn spline_line(at: &[Point2], handles: &[Handle], ends: crate::feature::Ends) -> Vec<Point2> {
-    tess::tessellate_spline_hermite(at, handles, ends).points
+    let mut line = crate::model::curve::Curve::spline(at.to_vec(), handles, ends).polyline();
+    if ends == crate::feature::Ends::Closed && line.len() > 2 {
+        line.pop();
+    }
+    line
 }
 
 /// THE POINTS AN ARC OF AN ELLIPSE IS LAID OUT BY, in order along it: the ellipse by its centre and the ends of its

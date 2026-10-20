@@ -156,10 +156,12 @@ fn leave(h: &mut Hand, kind: &str) {
             at(h, 0.0, 0.0);
             at(h, 0.9, 5.92);
         }
+        // leaving the vertex at 50 deg, as the line does: through (3, 5) the spline of continuous curvature left it at 72
+        // deg, 18 deg off the arc arriving upright, and a fillet of 2 there was an arc of 0.6 mm
         "open spline" => {
             h.sk_tool(9);
             at(h, 0.0, 0.0);
-            at(h, 3.0, 5.0);
+            at(h, 4.0, 4.0);
             at(h, 7.0, 6.0);
             h.double_click2d(V.x + 10.0, V.y + 11.0);
         }

@@ -1,12 +1,12 @@
 //! AN OFFSET OF ANY CURVE FOLLOWS ITS SOURCE: an ellipse, an arc of one, an open and a closed spline offset by 3, then
 //! the source edited - a point of it dragged - and the offset stands 3 from it again; its dimension set to 5, and it
-//! stands 5 from it. The nodes of the copy are points of the true offset, so they stand at the distance to 1e-6.
+//! stands 5 from it - every place of the copy at the distance within the tolerance of an offset.
 //!
 //! Reported behaviour: the offset of an ellipse or a spline was a free spline - the source edited, the offset stayed
 //! where it was.
 use qymcad_core::feature::{Ends, Purpose, Winding};
 use qymcad_core::geom::Point2;
-use qymcad_core::model::curve::Curve;
+use qymcad_core::model::curve::{Curve, OFFSET_TOLERANCE};
 use qymcad_core::model::{Constraint, EllipseArcSpec, Id, Project};
 
 fn p2(at: [f64; 2]) -> Point2 {
@@ -56,17 +56,13 @@ fn node_up(p: &Project, si: usize, eid: Id) -> Option<Dragged> {
     Some(Dragged { point: node, to: p2([q.x, q.y + 3.0]) })
 }
 
-/// How far from `d` the nodes of the copies of the sketch's offset stand off the source, the worst of them; `None` where
-/// there is no offset.
+/// How far from `d` the copies of the sketch's offset stand off the source, the worst of 400 places of each; `None`
+/// where there is no offset.
 fn worst_off(p: &Project, si: usize, source: Id, d: f64) -> Option<f64> {
     let s = &p.sketches[si];
     let curve = Curve::of(s, s.entity(source)?)?;
-    let copies: Vec<Id> = s.entities.iter().filter(|e| e.id != source && e.kind.as_spline().is_some()).map(|e| e.id).collect();
-    let nodes: Vec<Id> = copies.iter().filter_map(|id| s.entity(*id)?.kind.as_spline().map(|sp| sp.nodes.to_vec())).flatten().collect();
-    if nodes.is_empty() {
-        return None;
-    }
-    nodes.iter().filter_map(|id| s.point(*id)).map(|q| (curve.nearest(p2([q.x, q.y])).off - d).abs()).reduce(f64::max)
+    let copies: Vec<Curve> = s.entities.iter().filter(|e| e.id != source && e.kind.as_spline().is_some()).filter_map(|e| Curve::of(s, e)).collect();
+    copies.iter().flat_map(|c| (0..=400).map(|k| c.at(k as f64 / 400.0))).map(|q| (curve.nearest(q).off - d).abs()).reduce(f64::max)
 }
 
 #[test]
@@ -96,7 +92,7 @@ fn an_offset_of_any_curve_follows_its_source() {
         p.solve_sketch_drag(si, Some((point, to.x, to.y)));
         p.solve_sketch(si);
         match worst_off(&p, si, eid, 3.0) {
-            Some(off) if off < 1e-6 => {}
+            Some(off) if off <= OFFSET_TOLERANCE => {}
             off => failures.push(format!("{name}: the source edited, the offset stands {off:?} off 3")),
         }
         // the dimension of the offset set to 5
@@ -110,7 +106,7 @@ fn an_offset_of_any_curve_follows_its_source() {
         }
         p.solve_sketch(si);
         match worst_off(&p, si, eid, 5.0) {
-            Some(off) if off < 1e-6 => {}
+            Some(off) if off <= OFFSET_TOLERANCE => {}
             off => failures.push(format!("{name}: its dimension set to 5, the offset stands {off:?} off 5")),
         }
     }

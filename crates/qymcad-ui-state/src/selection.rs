@@ -72,7 +72,9 @@ fn with_whole_figures(project: &Project, si: usize, picked: &[Id]) -> Vec<Id> {
 pub fn splines_with_handles(project: &Project, sel_sk: &SketchSelection, si: usize) -> Vec<Id> {
     let Some(s) = project.sketches.get(si) else { return Vec::new() };
     let picked = |e: &qymcad_core::model::SketchEntity, nodes: &[Id]| sel_sk.items.iter().any(|&(k, id)| (k == 1 && id == e.id) || (k == 0 && nodes.contains(&id)));
-    s.entities.iter().filter(|e| e.kind.as_spline().is_some_and(|sp| picked(e, sp.nodes))).map(|e| e.id).collect()
+    // a copy an offset holds has no handles to take: it is laid again from the curve offset
+    let held: std::collections::HashSet<Id> = s.offsets.iter().flat_map(|o| o.copies.iter().copied()).collect();
+    s.entities.iter().filter(|e| !held.contains(&e.id) && e.kind.as_spline().is_some_and(|sp| picked(e, sp.nodes))).map(|e| e.id).collect()
 }
 
 /// The indices of the texts selected in sketch `si`, in the order they were picked.

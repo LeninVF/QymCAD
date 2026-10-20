@@ -145,5 +145,5 @@ fn the_rim_of_an_extruded_spline_is_one_spline_an_edge() {
     let curves = live.projected(si);
     let splines = curves.iter().filter(|c| matches!(c, Curve::Spline { .. })).count();
     let off = curves.iter().flat_map(|c| (0..=50).map(move |k| c.at(k as f64 / 50.0))).map(|q| spline.nearest(q).off).fold(0.0, f64::max);
-    assert!(curves.len() == 4 && splines == 4 && off < 0.01, "the rim of a closed spline of four spans is {} curves, {splines} of them splines, {off:.4} off the spline at most", curves.len());
+    assert!(curves.len() == 1 && splines == 1 && off < 0.01, "the rim of a closed spline of four spans is {} curves, {splines} of them splines, {off:.4} off the spline at most", curves.len());
 }

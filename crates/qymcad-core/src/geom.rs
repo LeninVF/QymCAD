@@ -370,6 +370,7 @@ mod normal_tests {
     }
 }
 
+pub mod bspline;
 mod contour;
 pub use contour::*;
 mod mesh;

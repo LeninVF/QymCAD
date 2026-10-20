@@ -29,13 +29,7 @@ pub fn export_dxf(edges: &[ProfEdge], path: &str) -> Result<(), String> {
                 EntityType::Arc(Arc::new(at(center), center.dist(a), start, end))
             }
             ProfEdge::Oval { centre, major, minor, from, sweep } => EntityType::Ellipse(ellipse(OvalEdge { centre, major, minor, from, sweep })),
-            ProfEdge::Cubic { .. } => {
-                // the spans of one spline, joined end to end, are one SPLINE
-                let run = edges[k..].iter().zip(edges[k..].iter().skip(1)).take_while(|(x, y)| matches!((x.ends(), y), (Some([_, b]), ProfEdge::Cubic { a, .. }) if b.dist(*a) < 1e-9)).count() + 1;
-                let spline = spline(&edges[k..k + run]);
-                k += run - 1;
-                EntityType::Spline(spline)
-            }
+            ProfEdge::Spline(ref b) => EntityType::Spline(spline(b)),
         };
         drawing.add_entity(Entity::new(specific));
         k += 1;
@@ -83,18 +77,10 @@ fn ellipse(e: OvalEdge) -> Ellipse {
     }
 }
 
-/// The SPLINE of spans of a spline joined end to end: a cubic B-spline whose knots repeat three times between spans, so
-/// each span is the Bezier of its four points.
-fn spline(spans: &[ProfEdge]) -> Spline {
-    let mut control_points = Vec::new();
-    for (k, span) in spans.iter().enumerate() {
-        let ProfEdge::Cubic { a, c1, c2, b } = *span else { continue };
-        let lead = if k == 0 { vec![a] } else { Vec::new() };
-        control_points.extend(lead.into_iter().chain([c1, c2, b]).map(|p| Point::new(p.x, p.y, 0.0)));
-    }
-    let n = spans.len();
-    let knot_values = std::iter::repeat_n(0.0, 4).chain((1..n).flat_map(|k| std::iter::repeat_n(k as f64, 3))).chain(std::iter::repeat_n(n as f64, 4)).collect();
-    let mut out = Spline { degree_of_curve: 3, control_points, knot_values, ..Default::default() };
+/// The SPLINE of a spline edge: its cubic B-spline as it is, its poles and its knots.
+fn spline(b: &qymcad_core::geom::bspline::BSpline) -> Spline {
+    let control_points = b.poles.iter().map(|p| Point::new(p.x, p.y, 0.0)).collect();
+    let mut out = Spline { degree_of_curve: 3, control_points, knot_values: b.knots.clone(), ..Default::default() };
     out.set_is_planar(true);
     out
 }

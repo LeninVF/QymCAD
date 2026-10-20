@@ -134,6 +134,12 @@ mod a_spline_closes_on_its_first_node;
 mod a_filleted_spline_drags_lightly;
 
 #[cfg(test)]
+mod a_ring_of_a_large_spline_is_picked_lightly;
+
+#[cfg(test)]
+mod the_copy_of_an_offset_shows_no_nodes;
+
+#[cfg(test)]
 mod a_line_drawn_by_a_curve_touches_it;
 
 #[cfg(test)]

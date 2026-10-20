@@ -7,9 +7,10 @@
 //!
 //! A place along a curve is its parameter `t` from 0 at its start to 1 at its end. On a line that is the share of its
 //! length, on a round curve the share of its sweep, on an ellipse the share of the sweep of its eccentric angle, on a
-//! spline the span the place lies in plus the share of that span's own parameter - so `t = 1.5 / n` is half way along the
-//! second of `n` spans.
+//! spline the parameter of its B-spline (`geom::bspline`), whose knots stand at its nodes by the lengths of the chords
+//! between them.
 use super::*;
+use crate::geom::bspline::BSpline;
 
 mod arrange;
 mod blend;
@@ -27,6 +28,7 @@ pub(crate) use cut::Trimmed;
 pub use blend::{centres_touching, chamfer, radius_in, rounding, Arm, Half, Rounding};
 pub use marks::OvalAxes;
 pub use meet::Meet;
+pub(crate) use meet::LaidPiece;
 pub use shift::{Map, OFFSET_TOLERANCE};
 pub use stretch::End;
 pub use touch::WayOn;
@@ -55,8 +57,9 @@ pub enum Curve {
     /// an ellipse, or an arc of one: its semi-axes as vectors from the centre, from the eccentric angle `from` through the
     /// signed `sweep`
     Oval { centre: Point2, major: Point2, minor: Point2, from: f64, sweep: f64 },
-    /// a spline through `nodes`, a loop when `closed`, with the tangents each node is arrived at and left by
-    Spline { nodes: Vec<Point2>, tangents: Vec<NodeTangents>, ends: crate::feature::Ends },
+    /// a spline: a cubic B-spline, a loop when `ends` closes it - the one form a spline has, in the sketch and in the
+    /// kernel
+    Spline { b: BSpline, ends: crate::feature::Ends },
 }
 
 /// A PLACE ON A CURVE: its parameter, the point there and how far it is from what it was asked about.
@@ -160,10 +163,24 @@ impl Curve {
         }
     }
 
-    /// THE SPLINE THROUGH `nodes` with `handles`, open or closed, as the sketch draws it.
+    /// THE SPLINE THROUGH `nodes` with `handles`, open or closed, as the sketch draws it: continuous curvature through the
+    /// nodes no handle holds (`BSpline::through`); fewer than two nodes, a line of no length where the one stands.
     pub fn spline(nodes: Vec<Point2>, handles: &[Handle], ends: crate::feature::Ends) -> Curve {
-        let tangents = (0..nodes.len()).map(|i| tess::spline_tangents_at(&nodes, handles, i, ends)).collect();
-        Curve::Spline { nodes, tangents, ends }
+        match BSpline::through(&nodes, handles, ends) {
+            Some(b) => Curve::Spline { b, ends },
+            None => {
+                let at = nodes.first().copied().unwrap_or(Point2::new(0.0, 0.0));
+                Curve::Line { a: at, b: at }
+            }
+        }
+    }
+
+    /// THE B-SPLINE OF A SPLINE; `None` for a curve of another kind.
+    pub fn b_spline(&self) -> Option<&BSpline> {
+        match self {
+            Curve::Spline { b, .. } => Some(b),
+            _ => None,
+        }
     }
 
     /// Whether the curve closes on itself: a whole circle, a whole ellipse, a closed spline.
@@ -175,43 +192,27 @@ impl Curve {
         }
     }
 
-    /// The number of spans of a spline, one for any other curve.
+    /// The number of spans of a spline between its knots, one for any other curve.
     fn spans(&self) -> usize {
         match self {
-            Curve::Spline { nodes, ends, .. } => {
-                if *ends == crate::feature::Ends::Closed {
-                    nodes.len()
-                } else {
-                    nodes.len().saturating_sub(1)
-                }
-            }
+            Curve::Spline { b, .. } => b.spans(),
             _ => 1,
         }
     }
 
-    /// The span of a spline place `t` lies in, and the share of that span's parameter. The end of the curve is the end
-    /// of its last span: `n - 1e-15` rounds back to `n` past 8 spans, and a 4 096-span offset answered the start of its
-    /// last span at `t = 1`, 0.3 mm short of its end.
-    fn span_of(&self, t: f64) -> SpanAt {
-        let n = self.spans().max(1);
-        let x = t.clamp(0.0, 1.0) * n as f64;
-        let k = (x.floor() as usize).min(n - 1);
-        SpanAt { span: k, s: x - k as f64 }
-    }
-
-    /// THE HANDLES OF A SPLINE, the tangent each node is arrived at and left by, as a spline entity keeps them; `None`
-    /// for a curve of another kind.
+    /// THE HANDLES OF A SPLINE, the tangent each node is arrived at and left by, as a spline entity keeps them - a node at
+    /// every knot (`BSpline::hermite`); `None` for a curve of another kind.
     pub fn handles(&self) -> Option<Vec<crate::model::Handle>> {
-        let Curve::Spline { tangents, .. } = self else { return None };
-        Some(tangents.iter().map(|t| crate::model::Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect())
+        let Curve::Spline { b, ends } = self else { return None };
+        Some(b.hermite(*ends).tangents.iter().map(|t| crate::model::Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect())
     }
 
-    /// The Hermite segment of span `k` of a spline.
-    fn segment(&self, k: usize) -> Option<tess::HermiteSeg> {
-        let Curve::Spline { nodes, tangents, .. } = self else { return None };
-        let n = nodes.len();
-        let (i, j) = (k % n, (k + 1) % n);
-        Some(tess::HermiteSeg { p0: nodes[i], m0: tangents[i].leave, p1: nodes[j], m1: tangents[j].arrive })
+    /// THE NODES OF A SPLINE, a node at every knot; none for a curve of another kind.
+    pub fn nodes(&self) -> Vec<Point2> {
+        match self {
+            Curve::Spline { b, ends } => b.hermite(*ends).nodes,
+            _ => Vec::new(),
+        }
     }
 
     /// THE POINT at place `t`.
@@ -226,13 +227,7 @@ impl Curve {
                 let w = from + sweep * t;
                 Point2::new(centre.x + major.x * w.cos() + minor.x * w.sin(), centre.y + major.y * w.cos() + minor.y * w.sin())
             }
-            Curve::Spline { .. } => {
-                let at = self.span_of(t);
-                match self.segment(at.span) {
-                    Some(g) => tess::hermite_pt(g.p0, g.m0, g.p1, g.m1, at.s),
-                    None => Point2::new(f64::NAN, f64::NAN),
-                }
-            }
+            Curve::Spline { b, .. } => b.at(t),
         }
     }
 
@@ -248,11 +243,7 @@ impl Curve {
                 let w = from + sweep * t;
                 Point2::new(sweep * (-major.x * w.sin() + minor.x * w.cos()), sweep * (-major.y * w.sin() + minor.y * w.cos()))
             }
-            Curve::Spline { .. } => {
-                let at = self.span_of(t);
-                let Some(g) = self.segment(at.span) else { return Point2::new(0.0, 0.0) };
-                mul(hermite_derivative(g, at.s), self.spans() as f64)
-            }
+            Curve::Spline { b, .. } => b.velocity(t),
         }
     }
 
@@ -279,18 +270,27 @@ impl Curve {
         if let Curve::Line { .. } = self {
             return vec![0.0, 1.0];
         }
+        remembered_places(self)
+    }
+
+    /// The places of `places`, laid out afresh, no piece straying from the curve by more than `sag`.
+    fn places_laid(&self, sag: f64) -> Vec<f64> {
         let n = (self.spans() * 4).max(8);
         let mut out = vec![0.0];
+        let mut a = self.at(0.0);
         for k in 0..n {
             let (t0, t1) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
-            self.refine(Piece { from: t0, to: t1 }, 16, &mut out);
+            let b = self.at(t1);
+            self.refine(Laying { piece: Piece { from: t0, to: t1 }, ends: [a, b], sag }, 16, &mut out);
+            a = b;
         }
         out
     }
 
-    /// The end of `piece` pushed, after the places that split it until it lies within the sag.
-    fn refine(&self, piece: Piece, depth: u32, out: &mut Vec<f64>) {
-        let (a, b) = (self.at(piece.from), self.at(piece.to));
+    /// The end of a piece pushed, after the places that split it until it lies within the sag; the points at its ends
+    /// handed down, not read again.
+    fn refine(&self, laying: Laying, depth: u32, out: &mut Vec<f64>) {
+        let Laying { piece, ends: [a, b], sag } = laying;
         let off = [0.25, 0.5, 0.75]
             .iter()
             .map(|k| {
@@ -304,12 +304,13 @@ impl Curve {
                 }
             })
             .fold(0.0, f64::max);
-        if depth == 0 || off <= SAG {
+        if depth == 0 || off <= sag {
             out.push(piece.to);
         } else {
             let mid = 0.5 * (piece.from + piece.to);
-            self.refine(Piece { from: piece.from, to: mid }, depth - 1, out);
-            self.refine(Piece { from: mid, to: piece.to }, depth - 1, out);
+            let m = self.at(mid);
+            self.refine(Laying { piece: Piece { from: piece.from, to: mid }, ends: [a, m], sag }, depth - 1, out);
+            self.refine(Laying { piece: Piece { from: mid, to: piece.to }, ends: [m, b], sag }, depth - 1, out);
         }
     }
 
@@ -400,51 +401,26 @@ impl Curve {
     /// curve the second place may go past 1, round its start: the piece from 0.75 to 1.25 is the quarter on either side
     /// of its start.
     ///
-    /// A piece of a spline keeps the nodes inside it and gains one at each end. A span cut at the share `s` of its own
-    /// parameter is the same cubic over a shorter run of it, so each part of the span keeps its shape exactly once the
-    /// tangents at its two ends are scaled by the share of the span it runs over - which is why a node may leave by a
-    /// tangent other than the one it arrives by.
+    /// A piece of a spline is the piece of its B-spline (`BSpline::piece`); a piece round the start of a loop, the two on
+    /// either side of the start joined.
     pub fn piece(&self, run: [f64; 2]) -> Curve {
         let [from, to] = run;
         match self {
             Curve::Line { .. } => Curve::Line { a: self.at(from), b: self.at(to) },
             Curve::Round { centre, r, from: w, sweep } => Curve::Round { centre: *centre, r: *r, from: w + sweep * from, sweep: sweep * (to - from) },
             Curve::Oval { centre, major, minor, from: w, sweep } => Curve::Oval { centre: *centre, major: *major, minor: *minor, from: w + sweep * from, sweep: sweep * (to - from) },
-            Curve::Spline { nodes, .. } => {
-                let n = self.spans();
-                let wrap = |t: f64| if self.closed() { t.rem_euclid(1.0 + 1e-15) } else { t.clamp(0.0, 1.0) };
-                // the places of the piece's nodes, in units of spans of the whole spline: its two ends and every whole
-                // node between them
-                let (x0, x1) = (from * n as f64, to * n as f64);
-                let mut cuts: Vec<f64> = vec![x0];
-                cuts.extend((x0.floor() as i64 + 1..=x1.ceil() as i64 - 1).map(|k| k as f64).filter(|k| *k > x0 + 1e-12 && *k < x1 - 1e-12));
-                cuts.push(x1);
-                // dP/ds of the span a place lies in: of the span before it at a whole node when `before`, else after it
-                let ds = |x: f64, before: bool| {
-                    let k = (x.floor() as i64).rem_euclid(n as i64) as usize;
-                    let mut sp = SpanAt { span: k, s: x - x.floor() };
-                    if before && sp.s < 1e-12 {
-                        sp = SpanAt { span: (sp.span + n - 1) % n, s: 1.0 };
-                    }
-                    hermite_derivative(self.segment(sp.span).expect("a span of the spline"), sp.s)
+            Curve::Spline { b, .. } => {
+                let from = from.clamp(0.0, 1.0);
+                let reach = if self.closed() { from + 1.0 } else { 1.0 };
+                // a piece of no length is the place it stands at, a hair long
+                let to = to.clamp(from, reach).max(from + 1e-12);
+                let piece = if to > 1.0 {
+                    let (before, after) = (b.piece([from.min(1.0 - 1e-12), 1.0]), b.piece([0.0, (to - 1.0).max(1e-12)]));
+                    before.joined(&after, (1.0 - from) / (to - from))
+                } else {
+                    b.piece([from, to])
                 };
-                let last = cuts.len() - 1;
-                let mut out_nodes = Vec::with_capacity(cuts.len());
-                let mut out_tangents: Vec<NodeTangents> = Vec::with_capacity(cuts.len());
-                for (i, x) in cuts.iter().enumerate() {
-                    let at = self.at(wrap(x / n as f64));
-                    out_nodes.push(nodes.iter().copied().find(|q| q.dist(at) < 1e-12).unwrap_or(at));
-                    let arrive = (i > 0).then(|| mul(ds(*x, true), x - cuts[i - 1]));
-                    let leave = (i < last).then(|| mul(ds(*x, false), cuts[i + 1] - x));
-                    let (arrive, leave) = match (arrive, leave) {
-                        (Some(a), Some(l)) => (a, l),
-                        (Some(a), None) => (a, a),
-                        (None, Some(l)) => (l, l),
-                        (None, None) => (Point2::new(0.0, 0.0), Point2::new(0.0, 0.0)),
-                    };
-                    out_tangents.push(NodeTangents { arrive, leave });
-                }
-                Curve::Spline { nodes: out_nodes, tangents: out_tangents, ends: crate::feature::Ends::Open }
+                Curve::Spline { b: piece, ends: crate::feature::Ends::Open }
             }
         }
     }
@@ -488,10 +464,39 @@ impl Curve {
     }
 }
 
-/// The derivative dP/ds of a Hermite segment at the share `s` of its parameter.
-fn hermite_derivative(g: tess::HermiteSeg, s: f64) -> Point2 {
-    let (d00, d10, d01, d11) = (6.0 * s * s - 6.0 * s, 3.0 * s * s - 4.0 * s + 1.0, -6.0 * s * s + 6.0 * s, 3.0 * s * s - 2.0 * s);
-    Point2::new(d00 * g.p0.x + d10 * g.m0.x + d01 * g.p1.x + d11 * g.m1.x, d00 * g.p0.y + d10 * g.m0.y + d01 * g.p1.y + d11 * g.m1.y)
+/// THE PLACES A CURVE WAS LAID OUT AT, by the key of the curve.
+struct LaidPlaces {
+    key: u64,
+    places: std::rc::Rc<[f64]>,
+}
+
+/// How many layouts are remembered: a rebuild of a sketch lays each curve out for the arrangement of its regions and
+/// again for the points of every region it bounds.
+const REMEMBERED_PLACES: usize = 64;
+
+thread_local! {
+    static PLACES: std::cell::RefCell<Vec<LaidPlaces>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// THE PLACES OF CURVE `c`, AS LAID OUT BEFORE where it was (`Curve::places`): a rebuild of a sketch of a spline of 688
+/// nodes laid it out to its sag four times over.
+fn remembered_places(c: &Curve) -> Vec<f64> {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    c.key(&mut h);
+    let key = h.finish();
+    if let Some(found) = PLACES.with(|m| m.borrow().iter().find(|r| r.key == key).map(|r| r.places.clone())) {
+        return found.to_vec();
+    }
+    let places: std::rc::Rc<[f64]> = c.places_laid(SAG).into();
+    PLACES.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= REMEMBERED_PLACES {
+            m.remove(0);
+        }
+        m.push(LaidPlaces { key, places: places.clone() });
+    });
+    places.to_vec()
 }
 
 /// A vector `v` stretched by `k`.
@@ -506,9 +511,10 @@ struct Piece {
     to: f64,
 }
 
-/// A PLACE ON A SPLINE: its span, and the share of that span's own parameter.
+/// A PIECE BEING LAID OUT: its places, the points at them, and the sag it is laid to.
 #[derive(Clone, Copy)]
-struct SpanAt {
-    span: usize,
-    s: f64,
+struct Laying {
+    piece: Piece,
+    ends: [Point2; 2],
+    sag: f64,
 }

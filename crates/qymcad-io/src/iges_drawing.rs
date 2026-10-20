@@ -7,6 +7,7 @@
 //! and eight contacts. So the drawing side of IGES is read here, the way DXF is.
 use std::collections::{HashMap, HashSet};
 
+use qymcad_core::geom::bspline::{Approximated, BSpline};
 use qymcad_core::geom::{Point2, ProfEdge};
 
 /// What a drawing gave: the curves, and what was passed over.
@@ -399,7 +400,9 @@ impl Pen {
         }
     }
 
-    /// A rational B-spline curve (entity 126), laid down as a polyline of 16 pieces per span.
+    /// A rational B-spline curve (entity 126), placed and approximated by the cubic B-spline of the sketch within
+    /// 0.001 mm (`BSpline::approximate`), its knots begun at the file's: laid out as 16 segments a span, a curve of the
+    /// drawing was a run of lines a person could not drag, and a body had a face for each.
     fn spline(&mut self, m: &M, p: &[String]) {
         let at = |k: usize| p.get(k).map(|s| num(s)).unwrap_or(0.0);
         let (k, deg) = (at(1) as usize, at(2) as usize);
@@ -438,10 +441,19 @@ impl Pen {
             let h = dp[deg];
             [h[0] / h[3], h[1] / h[3], h[2] / h[3]]
         };
-        let n = 16 * (k + 1 - deg).max(1);
-        let pts: Vec<[f64; 3]> = (0..=n).map(|i| eval(v0 + (v1 - v0) * i as f64 / n as f64)).collect();
-        for s in pts.windows(2) {
-            self.line(m, s[0], s[1]);
+        let along = |u: f64| self.at(m, eval(v0 + (v1 - v0) * u));
+        let bends: Vec<f64> = knots[deg + 1..=k].iter().map(|x| (x - v0) / (v1 - v0)).collect();
+        let off = |q: Point2, u: f64| q.dist(along(u));
+        let curve = Approximated { at: &along, bends: &bends, ends: qymcad_core::feature::Ends::Open, off: &off, tolerance: 1e-3, through: None };
+        match BSpline::approximate(&curve) {
+            Some(b) => self.curves.push(ProfEdge::Spline(b)),
+            None => {
+                let n = 16 * (k + 1 - deg).max(1);
+                let pts: Vec<[f64; 3]> = (0..=n).map(|i| eval(v0 + (v1 - v0) * i as f64 / n as f64)).collect();
+                for s in pts.windows(2) {
+                    self.line(m, s[0], s[1]);
+                }
+            }
         }
     }
 }

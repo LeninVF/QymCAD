@@ -103,6 +103,7 @@
 #include <Geom2dConvert.hxx>
 #include <BSplCLib.hxx>
 #include <TColStd_Array1OfReal.hxx>
+#include <TColStd_Array1OfInteger.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
@@ -203,6 +204,7 @@
 #include <gp_Trsf.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Cone.hxx>
@@ -358,9 +360,9 @@ struct QymShapeList {
 
 /// The bit that marks a STRUCTURAL name (one derived from the recipe) apart from a positional one.
 static const int QYM_NAMED = 0x40000000;
-/// HOW MANY NUMBERS ONE EDGE OF A PROFILE TAKES: its kind, nine numbers of its shape and its name. The Rust side holds
-/// the same number (`EDGE_FIELDS`, `geom/profile.rs`) and says what each number of each kind is.
-static const size_t QYM_EDGE_FIELDS = 11;
+/// HOW MANY NUMBERS THE EDGE OF A PROFILE AT `p` TAKES: its kind, the count `m` of the numbers of its shape, those, and
+/// its name. The Rust side writes the record (`geom::encode_edge`) and says what each number of each kind is.
+static inline size_t qym_edge_len(const double* p) { return 3 + (size_t)p[1]; }
 
 /// A ROLE AWAITING ITS NAME: the number the bridge hands a face an operation makes, until the table of the document
 /// names it when the result lands (`names::ROLE` on the Rust side).

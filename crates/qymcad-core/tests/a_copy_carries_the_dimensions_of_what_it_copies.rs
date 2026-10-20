@@ -27,8 +27,16 @@ fn place(p: &Project, si: usize, pid: Id) -> Point2 {
     p.sketches[si].point(pid).map(|q| Point2::new(q.x, q.y)).expect("the point")
 }
 
+/// WHICH SIZE OF A ROUND CURVE a radial dimension gives.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Radial {
+    Diameter,
+    Radius,
+}
+
 /// The radial dimension of the round curve of sketch `si`, its leader turned to `angle` radians on the screen.
-fn radial(p: &mut Project, si: usize, diam: bool, angle: f64) {
+fn radial(p: &mut Project, si: usize, size: Radial, angle: f64) {
+    let diam = size == Radial::Diameter;
     let c = centre_of(p, si);
     // the door of a circle; an arc is given its radius as the menu of the arc gives it
     let rim = p.sketches[si].entities.iter().find_map(|e| e.kind.as_arc()).map(|a| place(p, si, a.a));
@@ -65,7 +73,7 @@ const SHAPES: [Shape; 7] = [
         name: "circle with its diameter",
         draw: |p, si| {
             p.add_circle_entity(si, 30.0, 10.0, 5.0, Purpose::Real);
-            radial(p, si, true, 0.6);
+            radial(p, si, Radial::Diameter, 0.6);
             all(p, si)
         },
     },
@@ -73,7 +81,7 @@ const SHAPES: [Shape; 7] = [
         name: "circle with its radius",
         draw: |p, si| {
             p.add_circle_entity(si, 30.0, 10.0, 5.0, Purpose::Real);
-            radial(p, si, false, 2.0);
+            radial(p, si, Radial::Radius, 2.0);
             all(p, si)
         },
     },
@@ -81,7 +89,7 @@ const SHAPES: [Shape; 7] = [
         name: "arc with its radius",
         draw: |p, si| {
             p.add_arc_entity(si, Point2::new(30.0, 10.0), Point2::new(36.0, 10.0), Point2::new(30.0, 16.0), Winding::Ccw, Purpose::Real);
-            radial(p, si, false, -0.4);
+            radial(p, si, Radial::Radius, -0.4);
             all(p, si)
         },
     },
@@ -145,8 +153,8 @@ impl Map {
         let (s, c) = deg.to_radians().sin_cos();
         Map { x: [c, s], y: [-s, c], shift: [0.0, 0.0] }
     }
-    fn shift(dx: f64, dy: f64) -> Map {
-        Map { x: [1.0, 0.0], y: [0.0, 1.0], shift: [dx, dy] }
+    fn shift(by: [f64; 2]) -> Map {
+        Map { x: [1.0, 0.0], y: [0.0, 1.0], shift: by }
     }
     fn of(&self, q: Point2) -> Point2 {
         Point2::new(self.x[0] * q.x + self.y[0] * q.y + self.shift[0], self.x[1] * q.x + self.y[1] * q.y + self.shift[1])
@@ -159,7 +167,7 @@ const TOOLS: [Tool; 6] = [
         apply: |p, si, e| {
             p.copy_entities(si, e, 0.0, -50.0);
         },
-        maps: || vec![Map::shift(0.0, -50.0)],
+        maps: || vec![Map::shift([0.0, -50.0])],
     },
     Tool { name: "Mirror", apply: |p, si, e| p.mirror_entities(si, e, 0.0, 0.0, 0.0, 1.0), maps: || vec![Map { x: [-1.0, 0.0], y: [0.0, 1.0], shift: [0.0, 0.0] }] },
     Tool { name: "Mirror about a point", apply: |p, si, e| p.mirror_about_point(si, e, 0.0, 0.0), maps: || vec![Map::turn(180.0)] },
@@ -168,7 +176,7 @@ const TOOLS: [Tool; 6] = [
         apply: |p, si, e| {
             p.add_pattern(si, e, PatternKind::Linear { dx: 0.0, dy: -50.0, count: 3, dx2: 0.0, dy2: 0.0, count2: 0 });
         },
-        maps: || vec![Map::shift(0.0, -50.0), Map::shift(0.0, -100.0)],
+        maps: || vec![Map::shift([0.0, -50.0]), Map::shift([0.0, -100.0])],
     },
     Tool {
         name: "Circular pattern of 90 deg",

@@ -99,8 +99,7 @@ fn groove_profile_is_closed_exact_and_within_bounds() {
             ProfEdge::Line { a, b } => (a, b),
             ProfEdge::Arc { a, b, .. } => (a, b),
             ProfEdge::Circle { center, .. } => (center, center),
-            ProfEdge::Cubic { a, b, .. } => (a, b),
-            ProfEdge::Oval { .. } => unreachable!("a thread profile holds no ellipse"),
+            ProfEdge::Oval { .. } | ProfEdge::Spline(_) => unreachable!("a thread profile holds no ellipse and no spline"),
         };
         if g.groove.len() < 3 {
             bad.push(format!("{:?}: profile of {} edges", std, g.groove.len()));
@@ -163,8 +162,7 @@ fn print_fit_widens_groove_monotonically() {
                 ProfEdge::Line { a, b } => vec![a.x, b.x],
                 ProfEdge::Arc { a, b, .. } => vec![a.x, b.x],
                 ProfEdge::Circle { center, .. } => vec![center.x],
-                ProfEdge::Cubic { a, b, .. } => vec![a.x, b.x],
-                ProfEdge::Oval { .. } => unreachable!("a thread profile holds no ellipse"),
+                ProfEdge::Oval { .. } | ProfEdge::Spline(_) => unreachable!("a thread profile holds no ellipse and no spline"),
             })
             .fold(0.0_f64, |m, x| m.max(x.abs()))
     };
@@ -210,8 +208,7 @@ fn auger_flight_is_additive_ribbon_with_rounded_edges() {
             ProfEdge::Line { a, b } => vec![a.y, b.y],
             ProfEdge::Arc { a, b, .. } => vec![a.y, b.y],
             ProfEdge::Circle { center, .. } => vec![center.y],
-            ProfEdge::Cubic { a, b, .. } => vec![a.y, b.y],
-            ProfEdge::Oval { .. } => unreachable!("a thread profile holds no ellipse"),
+            ProfEdge::Oval { .. } | ProfEdge::Spline(_) => unreachable!("a thread profile holds no ellipse and no spline"),
         })
         .collect();
     assert!(ys.iter().cloned().fold(f64::MIN, f64::max) > 0.0, "the flight runs outwards from the shaft, y > 0");
@@ -247,8 +244,7 @@ fn crest_rounding_adds_arcs_and_keeps_contour_closed() {
         ProfEdge::Line { a, b } => (a, b),
         ProfEdge::Arc { a, b, .. } => (a, b),
         ProfEdge::Circle { center, .. } => (center, center),
-        ProfEdge::Cubic { a, b, .. } => (a, b),
-        ProfEdge::Oval { .. } => unreachable!("a thread profile holds no ellipse"),
+        ProfEdge::Oval { .. } | ProfEdge::Spline(_) => unreachable!("a thread profile holds no ellipse and no spline"),
     };
     for k in 0..round.groove.len() {
         let (_, b) = ends(&round.groove[k]);
@@ -275,8 +271,7 @@ fn internal_groove_goes_into_the_wall_external_into_the_shaft() {
                 ProfEdge::Line { a, b } => v.extend([a.y, b.y]),
                 ProfEdge::Arc { a, b, center, .. } => v.extend([a.y, b.y, center.y]),
                 ProfEdge::Circle { center, .. } => v.push(center.y),
-                ProfEdge::Cubic { a, b, .. } => v.extend([a.y, b.y]),
-                ProfEdge::Oval { .. } => unreachable!("a thread profile holds no ellipse"),
+                ProfEdge::Oval { .. } | ProfEdge::Spline(_) => unreachable!("a thread profile holds no ellipse and no spline"),
             }
         }
         (v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(f64::MIN, f64::max))
@@ -303,8 +298,7 @@ fn internal_groove_goes_into_the_wall_external_into_the_shaft() {
         ProfEdge::Line { a, b } => (a, b),
         ProfEdge::Arc { a, b, .. } => (a, b),
         ProfEdge::Circle { center, .. } => (center, center),
-        ProfEdge::Cubic { a, b, .. } => (a, b),
-        ProfEdge::Oval { .. } => unreachable!("a thread profile holds no ellipse"),
+        ProfEdge::Oval { .. } | ProfEdge::Spline(_) => unreachable!("a thread profile holds no ellipse and no spline"),
     };
     for k in 0..g.groove.len() {
         let (_, b) = ends(&g.groove[k]);

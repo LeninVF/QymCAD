@@ -10,6 +10,7 @@
 
 use dxf::entities::{Entity, EntityType};
 use dxf::Drawing;
+use qymcad_core::geom::bspline::{Approximated, BSpline};
 use qymcad_core::geom::{Point2, ProfEdge};
 use qymcad_core::model::curve::Curve;
 
@@ -225,6 +226,9 @@ fn read(drawing: &Drawing, entities: &[&Entity], place: &Place, depth: usize, cu
     }
 }
 
+/// How far a curve read from a drawing and laid as a cubic B-spline may stand from the curve of the file, in mm.
+const READ_TOLERANCE: f64 = 1e-3;
+
 /// A curve given by `at` over `[from, to]` as segments, halved wherever a chord's middle strays from the curve by more
 /// than `CHORD`; the corners lie on the curve.
 fn run(at: impl Fn(f64) -> Point2, from: f64, to: f64, curves: &mut Vec<ProfEdge>) {
@@ -259,7 +263,7 @@ fn off_chord(p: Point2, q: Point2, m: Point2) -> f64 {
 }
 
 /// A SPLINE: the rational B-spline of its control points, knots and weights by de Boor's rule; one given only by the
-/// points it runs through goes through them as a Catmull-Rom curve, the way a sketch's own spline does.
+/// points it runs through goes through them as the sketch draws a spline through its nodes.
 ///
 /// THE NUMBERS COME FROM THE FILE. The range of the curve is its knots `p` and `n`, and `t.clamp(lo, hi)` panics when
 /// the low end is above the high one or either is not a number - from the UI thread, ending the program; a knot, a
@@ -289,17 +293,11 @@ fn spline(sp: &dxf::entities::Spline, place: &Place, curves: &mut Vec<ProfEdge>)
     let drawn = made || (sp.fit_points.len() >= 2 && fit_finite);
     let even = w.iter().all(|v| (v - w[0]).abs() <= 1e-12 * w[0]);
     if made && p == 3 && even {
-        // a cubic with no weights of its own: each span between knots is a cubic, the Bezier of the blossoms of its ends
-        for span in p..ctrl.len() {
-            let (a, b) = (knots[span], knots[span + 1]);
-            if b - a > 1e-12 * (knots[ctrl.len()] - knots[p]) {
-                let q = |u: [f64; 3]| {
-                    let (x, y) = blossom(&ctrl, knots, span, u);
-                    place.at(x, y)
-                };
-                curves.push(ProfEdge::Cubic { a: q([a, a, a]), c1: q([a, a, b]), c2: q([a, b, b]), b: q([b, b, b]) });
-            }
-        }
+        // a cubic with no weights of its own is a spline of the sketch as it is: its poles placed - a place is an affine
+        // map - and its knots run from 0 to 1, clamped where the file leaves its ends free
+        let (lo, hi) = (knots[p], knots[ctrl.len()]);
+        let b = BSpline { knots: knots[..ctrl.len() + 4].iter().map(|k| (k - lo) / (hi - lo)).collect(), poles: ctrl.iter().map(|&(x, y)| place.at(x, y)).collect() };
+        curves.push(ProfEdge::Spline(b.piece([0.0, 1.0])));
     } else if made {
         let (lo, hi) = (knots[p], knots[ctrl.len()]);
         let at = |t: f64| {
@@ -327,16 +325,22 @@ fn spline(sp: &dxf::entities::Spline, place: &Place, curves: &mut Vec<ProfEdge>)
             let (x, y, wt) = d[p];
             place.at(x / wt, y / wt)
         };
-        run(at, lo, hi, curves);
+        // A RATIONAL SPLINE OR ONE OF ANOTHER DEGREE IS APPROXIMATED BY THE CUBIC B-SPLINE of the sketch within 0.001 mm
+        // (`BSpline::approximate`), its knots begun at the file's: laid out as segments, a curve of the drawing was a run of
+        // up to 65 536 lines a person could not drag, and a body had a face for each
+        let along = |u: f64| at(lo + (hi - lo) * u);
+        let bends: Vec<f64> = knots[p + 1..ctrl.len()].iter().map(|k| (k - lo) / (hi - lo)).collect();
+        let off = |q: Point2, u: f64| q.dist(along(u));
+        let fitted = BSpline::approximate(&Approximated { at: &along, bends: &bends, ends: qymcad_core::feature::Ends::Open, off: &off, tolerance: READ_TOLERANCE, through: None });
+        match fitted {
+            Some(b) => curves.push(ProfEdge::Spline(b)),
+            None => run(at, lo, hi, curves),
+        }
     } else if drawn {
-        // through the fit points as a Catmull-Rom curve: each span the cubic Bezier with handles a sixth of the chord
-        // across its ends
-        let pts: Vec<Point2> = sp.fit_points.iter().map(|q| Point2::new(q.x, q.y)).collect();
-        let n = pts.len();
-        for k in 0..n - 1 {
-            let (p0, p1, p2, p3) = (pts[k.saturating_sub(1)], pts[k], pts[k + 1], pts[(k + 2).min(n - 1)]);
-            let (c1, c2) = (p1 + (p2 - p0) * (1.0 / 6.0), p2 - (p3 - p1) * (1.0 / 6.0));
-            curves.push(ProfEdge::Cubic { a: place.at(p1.x, p1.y), c1: place.at(c1.x, c1.y), c2: place.at(c2.x, c2.y), b: place.at(p2.x, p2.y) });
+        // through the fit points as the sketch draws a spline through its nodes, placed
+        let pts: Vec<Point2> = sp.fit_points.iter().map(|q| place.at(q.x, q.y)).collect();
+        if let Some(b) = BSpline::through(&pts, &[], qymcad_core::feature::Ends::Open) {
+            curves.push(ProfEdge::Spline(b));
         }
     }
     match (drawn, invalid) {
@@ -345,21 +349,6 @@ fn spline(sp: &dxf::entities::Spline, place: &Place, curves: &mut Vec<ProfEdge>)
         (false, true) => SplineRead::Invalid,
         (false, false) => SplineRead::Skipped,
     }
-}
-
-/// THE BLOSSOM of the cubic B-spline of `ctrl` and `knots` on span `span` at `u`: de Boor's rule with the parameter of
-/// each level its own. At (a, a, a), (a, a, b), (a, b, b), (b, b, b) for a span from a to b it is the Bezier of the span.
-fn blossom(ctrl: &[(f64, f64)], knots: &[f64], span: usize, u: [f64; 3]) -> (f64, f64) {
-    let mut d: Vec<(f64, f64)> = ctrl[span - 3..=span].to_vec();
-    for (r, ur) in (1..=3).zip(u) {
-        for j in (r..=3).rev() {
-            let i = span - 3 + j;
-            let den = knots[i + 4 - r] - knots[i];
-            let a = if den.abs() < 1e-300 { 0.0 } else { (ur - knots[i]) / den };
-            d[j] = ((1.0 - a) * d[j - 1].0 + a * d[j].0, (1.0 - a) * d[j - 1].1 + a * d[j].1);
-        }
-    }
-    d[3]
 }
 
 /// WHAT BECAME OF A SPLINE, one of four: two flags side by side read the same and swap without a word.
@@ -397,13 +386,13 @@ fn placed_polyline(verts: &[(Point2, f64)], closed: bool, place: &Place, curves:
             }
             (ProfEdge::Circle { center, r }, Some((k, _))) => curves.push(ProfEdge::Circle { center: place.at(center.x, center.y), r: r * k }),
             (ProfEdge::Circle { center, r }, None) => run(|t| place.at(center.x + r * t.cos(), center.y + r * t.sin()), 0.0, std::f64::consts::TAU, curves),
-            // a place is an affine map, which takes an ellipse to an ellipse and a cubic to a cubic: by their points
+            // a place is an affine map, which takes an ellipse to an ellipse and a spline to a spline: by their points
             (ProfEdge::Oval { centre, major, minor, from, sweep }, _) => {
                 let c = place.at(centre.x, centre.y);
                 let axis = |v: Point2| place.at(centre.x + v.x, centre.y + v.y) - c;
                 curves.push(ProfEdge::Oval { centre: c, major: axis(major), minor: axis(minor), from, sweep });
             }
-            (ProfEdge::Cubic { a, c1, c2, b }, _) => curves.push(ProfEdge::Cubic { a: place.at(a.x, a.y), c1: place.at(c1.x, c1.y), c2: place.at(c2.x, c2.y), b: place.at(b.x, b.y) }),
+            (ProfEdge::Spline(b), _) => curves.push(ProfEdge::Spline(b.mapped(&|q| place.at(q.x, q.y)))),
         }
     }
 }

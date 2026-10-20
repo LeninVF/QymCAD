@@ -14,17 +14,13 @@ pub enum End {
 const REACH: f64 = 1e5;
 
 impl Curve {
-    /// THE SAME CURVE RUN THE OTHER WAY: its start its finish, a spline's tangents turned round.
+    /// THE SAME CURVE RUN THE OTHER WAY: its start its finish.
     pub fn reversed(&self) -> Curve {
         match self {
             Curve::Line { a, b } => Curve::Line { a: *b, b: *a },
             Curve::Round { centre, r, from, sweep } => Curve::Round { centre: *centre, r: *r, from: from + sweep, sweep: -sweep },
             Curve::Oval { centre, major, minor, from, sweep } => Curve::Oval { centre: *centre, major: *major, minor: *minor, from: from + sweep, sweep: -sweep },
-            Curve::Spline { nodes, tangents, ends } => Curve::Spline {
-                nodes: nodes.iter().rev().copied().collect(),
-                tangents: tangents.iter().rev().map(|t| NodeTangents { arrive: mul(t.leave, -1.0), leave: mul(t.arrive, -1.0) }).collect(),
-                ends: *ends,
-            },
+            Curve::Spline { b, ends } => Curve::Spline { b: b.reversed(), ends: *ends },
         }
     }
 
@@ -61,17 +57,14 @@ impl Curve {
                 let Curve::Oval { sweep: on, .. } = way else { return None };
                 Curve::Oval { centre: *centre, major: *major, minor: *minor, from: *from, sweep: sweep + on * hit.ta }
             }
-            Curve::Spline { nodes, tangents, ends } => {
-                let last = *nodes.last()?;
+            // the straight span on along the tangent of its end, joined on at the pace the curve ends with - smooth to the
+            // tangent there
+            Curve::Spline { b, ends } => {
+                let last = b.at(1.0);
                 let run = hit.at - last;
-                let mut nodes = nodes.clone();
-                let mut tangents = tangents.clone();
-                nodes.push(hit.at);
-                if let Some(t) = tangents.last_mut() {
-                    t.leave = run;
-                }
-                tangents.push(NodeTangents { arrive: run, leave: run });
-                Curve::Spline { nodes, tangents, ends: *ends }
+                let on = crate::geom::bspline::BSpline::of_spans(&[crate::geom::bspline::Span { from: last, leave: run, to: hit.at, arrive: run, run: [0.0, 1.0] }])?;
+                let (pace, reach) = (b.velocity(1.0).len(), run.len());
+                Curve::Spline { b: b.joined(&on, pace / (pace + reach).max(1e-300)), ends: *ends }
             }
         };
         Some(if end == End::Finish { longer } else { longer.reversed() })

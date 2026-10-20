@@ -108,20 +108,93 @@ pub fn draw_clip_ghost(clip: &Clipboard, cursor: Option<Point2>, scheme: &Scheme
 /// THE TRIANGLES OF A REGION OF A SKETCH, in the sketch's plane: contour `cid` minus its direct children - the material
 /// an extrusion takes from it (`Project::feature_holes`). Regions told apart this way never overlap, so their fills do
 /// not add up where contours nest.
-pub fn region_triangles(project: &qymcad_core::model::Project, cid: Id) -> Vec<[Point2; 3]> {
-    let Some(ci) = project.contour_index(cid) else { return Vec::new() };
+pub fn region_triangles(project: &qymcad_core::model::Project, cid: Id) -> std::rc::Rc<[[Point2; 3]]> {
+    let Some(ci) = project.contour_index(cid) else { return std::rc::Rc::from(Vec::new()) };
     let outer = &project.contours[ci];
     if !outer.closed || outer.points.len() < 3 {
-        return Vec::new();
+        return std::rc::Rc::from(Vec::new());
     }
-    let holes: Vec<Vec<Point2>> = project
+    let holes: Vec<&[Point2]> = project
         .sketch_of_contour(cid)
         .map(|sid| project.feature_holes(sid, cid))
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|h| project.contour_index(h).map(|hi| project.contours[hi].points.clone()))
+        .filter_map(|h| project.contour_index(h).map(|hi| &project.contours[hi].points[..]))
         .collect();
-    qymcad_core::geom::triangulate_with_holes(&outer.points, &holes)
+    // THE TRIANGLES ARE REMEMBERED BY THE POINTS THEY ARE MADE OF: the fill of a picked region and of the one under the
+    // pointer is drawn every frame, and laid anew each frame a ring between a closed spline and its offset, 14 600 points,
+    // took 0.8 s a frame - the pointer over the sketch hung the picking of a region. The same outline answers the same
+    // triangles; the last few are kept.
+    let key = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for ring in std::iter::once(&outer.points[..]).chain(holes.iter().copied()) {
+            ring.len().hash(&mut h);
+            for q in ring {
+                q.x.to_bits().hash(&mut h);
+                q.y.to_bits().hash(&mut h);
+            }
+        }
+        h.finish()
+    };
+    if let Some(tris) = REGION_TRIANGLES.with(|m| m.borrow().iter().find(|r| r.key == key).map(|r| r.tris.clone())) {
+        return tris;
+    }
+    // the fill is laid over points no farther apart than the eye tells: a ring laid out to 0.005 mm took 0.8 s to fill
+    // the first time, the cutting into triangles growing as the square of its points
+    let (lo, hi) = outer.points.iter().fold(([f64::MAX; 2], [f64::MIN; 2]), |(lo, hi), q| ([lo[0].min(q.x), lo[1].min(q.y)], [hi[0].max(q.x), hi[1].max(q.y)]));
+    let tol = (0.02f64).max(1e-4 * (hi[0] - lo[0]).hypot(hi[1] - lo[1]));
+    let owned: Vec<Vec<Point2>> = holes.iter().map(|h| thinned(h, tol)).collect();
+    let tris: std::rc::Rc<[[Point2; 3]]> = std::rc::Rc::from(qymcad_core::geom::triangulate_with_holes(&thinned(&outer.points, tol), &owned));
+    REGION_TRIANGLES.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= REMEMBERED_REGIONS {
+            m.remove(0);
+        }
+        m.push(RememberedRegion { key, tris: tris.clone() });
+    });
+    tris
+}
+
+/// THE POINTS OF A RING THINNED TO `tol`: a point is kept where the points since the last one kept would stand farther
+/// than `tol` off the chord to the next.
+fn thinned(ring: &[Point2], tol: f64) -> Vec<Point2> {
+    let Some(&first) = ring.first() else { return Vec::new() };
+    let mut out = vec![first];
+    let mut since: Vec<Point2> = Vec::new();
+    for w in ring.windows(2) {
+        let (a, next) = (out[out.len() - 1], w[1]);
+        let (dx, dy) = (next.x - a.x, next.y - a.y);
+        let len = dx.hypot(dy).max(1e-12);
+        let off = since.iter().map(|q| ((q.x - a.x) * dy - (q.y - a.y) * dx).abs() / len).fold(0.0, f64::max);
+        if off > tol {
+            out.push(w[0]);
+            since.clear();
+        }
+        since.push(w[1]);
+    }
+    if let Some(&last) = ring.last() {
+        if out.last().is_none_or(|q| q.x != last.x || q.y != last.y) {
+            out.push(last);
+        }
+    }
+    if out.len() < 3 {
+        return ring.to_vec();
+    }
+    out
+}
+
+/// How many regions the triangles are remembered of: the picked ones and the one under the pointer.
+const REMEMBERED_REGIONS: usize = 16;
+
+/// THE TRIANGLES OF A REGION by the key of the points they are made of.
+struct RememberedRegion {
+    key: u64,
+    tris: std::rc::Rc<[[Point2; 3]]>,
+}
+
+thread_local! {
+    static REGION_TRIANGLES: std::cell::RefCell<Vec<RememberedRegion>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// FILL THE TRIANGLES OF A REGION, each corner placed on the screen by `at`.

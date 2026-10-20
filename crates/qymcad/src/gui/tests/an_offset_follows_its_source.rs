@@ -7,9 +7,9 @@
 use crate::gui::hand::Hand;
 use crate::gui::{App, Sel};
 use qymcad_core::geom::Point2;
-use qymcad_core::model::curve::Curve;
+use qymcad_core::model::curve::{Curve, OFFSET_TOLERANCE};
 
-/// How far from `d` the nodes of the splines of sketch `si` stand off its ellipse, the worst of them; with the half axis
+/// How far from `d` the splines of sketch `si` stand off its ellipse, the worst of 400 places of each; with the half axis
 /// of the ellipse now. `None` where there is no ellipse or no spline.
 fn offset_off(app: &App, si: usize, d: f64) -> Option<Standing> {
     let s = &app.project.sketches[si];
@@ -17,13 +17,12 @@ fn offset_off(app: &App, si: usize, d: f64) -> Option<Standing> {
     let ellipse = Curve::of(s, e)?;
     let parts = e.kind.as_ellipse()?;
     let (c, ma) = (s.point(parts.c)?, s.point(parts.ma)?);
-    let nodes: Vec<Point2> =
-        s.entities.iter().filter_map(|e| e.kind.as_spline()).flat_map(|sp| sp.nodes.iter().filter_map(|id| s.point(*id)).map(|q| Point2::new(q.x, q.y)).collect::<Vec<_>>()).collect();
-    let off = nodes.iter().map(|q| (ellipse.nearest(*q).off - d).abs()).reduce(f64::max)?;
+    let places: Vec<Point2> = s.entities.iter().filter(|e| e.kind.as_spline().is_some()).filter_map(|e| Curve::of(s, e)).flat_map(|c| (0..=400).map(move |k| c.at(k as f64 / 400.0))).collect();
+    let off = places.iter().map(|q| (ellipse.nearest(*q).off - d).abs()).reduce(f64::max)?;
     Some(Standing { off, half_axis: (ma.x - c.x).hypot(ma.y - c.y) })
 }
 
-/// WHERE THE OFFSET STANDS: how far its nodes are off the distance, and the half axis of the ellipse.
+/// WHERE THE OFFSET STANDS: how far it is off the distance, and the half axis of the ellipse.
 #[derive(Debug)]
 struct Standing {
     off: f64,
@@ -49,7 +48,7 @@ fn an_offset_of_an_ellipse_follows_it_and_comes_back_with_undo() {
     hand.type_text("3").key(egui::Key::Enter);
     hand.key(egui::Key::Escape).key(egui::Key::Escape);
     let laid = offset_off(hand.app, si, 3.0);
-    assert!(laid.as_ref().is_some_and(|s| s.off < 1e-6), "setup: the offset stands {laid:?}; the status line says {:?}", hand.app.status);
+    assert!(laid.as_ref().is_some_and(|s| s.off <= OFFSET_TOLERANCE), "setup: the offset stands {laid:?}; the status line says {:?}", hand.app.status);
     // the half axis given 15 by the Dimension tool: the ellipse clicked, the dimension placed inside it - away from the
     // offset, which a click beside the ellipse takes as a second curve - and 15 typed
     assert!(hand.press_hint(&crate::i18n::tr("tb-dim-hint")), "no dimension button");
@@ -66,12 +65,12 @@ fn an_offset_of_an_ellipse_follows_it_and_comes_back_with_undo() {
     hand.key(egui::Key::Escape).key(egui::Key::Escape);
     let edited = offset_off(hand.app, si, 3.0);
     assert!(
-        edited.as_ref().is_some_and(|s| (s.half_axis - 15.0).abs() < 1e-6 && s.off < 1e-6),
+        edited.as_ref().is_some_and(|s| (s.half_axis - 15.0).abs() < 1e-6 && s.off <= OFFSET_TOLERANCE),
         "the half axis set to 15: the ellipse and its offset stand {edited:?}; the status line says {:?}",
         hand.app.status
     );
     // Ctrl+Z: the ellipse as it was, its offset with it
     hand.undo();
     let undone = offset_off(hand.app, si, 3.0);
-    assert!(undone.as_ref().is_some_and(|s| (s.half_axis - 12.0).abs() < 1e-6 && s.off < 1e-6), "Ctrl+Z: the ellipse and its offset stand {undone:?}");
+    assert!(undone.as_ref().is_some_and(|s| (s.half_axis - 12.0).abs() < 1e-6 && s.off <= OFFSET_TOLERANCE), "Ctrl+Z: the ellipse and its offset stand {undone:?}");
 }

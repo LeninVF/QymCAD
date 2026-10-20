@@ -1,6 +1,6 @@
 //! AN ELLIPSE AND A SPLINE GO OUT AND COME BACK AS THEMSELVES: written to DXF they are an ELLIPSE and a SPLINE of the file,
 //! and read back they are the curves they were, to 0.01 mm - not runs of segments; laid into a sketch, the ellipse is an
-//! ellipse and the spans of a spline one spline. Written to SVG, an ellipse is an elliptical arc of the path.
+//! ellipse and the spline one spline of its nodes. Written to SVG, an ellipse is an elliptical arc of the path.
 //!
 //! Reported behaviour: DXF wrote an ellipse and a spline as 48 LINEs each and read them back as segments, and SVG wrote an
 //! ellipse as a polyline.
@@ -19,15 +19,16 @@ fn p2(at: [f64; 2]) -> Point2 {
 }
 
 /// A whole ellipse 12 by 5 turned by 30 deg, an arc of an ellipse whose minor axis runs the other way round and whose
-/// way is clockwise, and a spline of two spans joined end to end.
+/// way is clockwise, and a spline through three nodes.
 fn curves() -> Vec<ProfEdge> {
     let t = 30f64.to_radians();
-    vec![
+    let spline = Curve::spline(vec![p2([0.0, 30.0]), p2([12.0, 30.0]), p2([24.0, 33.0])], &[], qymcad_core::feature::Ends::Open);
+    let mut out = vec![
         ProfEdge::Oval { centre: p2([10.0, 5.0]), major: p2([12.0 * t.cos(), 12.0 * t.sin()]), minor: p2([-5.0 * t.sin(), 5.0 * t.cos()]), from: 0.0, sweep: std::f64::consts::TAU },
         ProfEdge::Oval { centre: p2([40.0, 0.0]), major: p2([3.0, 0.0]), minor: p2([0.0, -7.0]), from: 0.4, sweep: -2.0 },
-        ProfEdge::Cubic { a: p2([0.0, 30.0]), c1: p2([4.0, 36.0]), c2: p2([8.0, 34.0]), b: p2([12.0, 30.0]) },
-        ProfEdge::Cubic { a: p2([12.0, 30.0]), c1: p2([16.0, 26.0]), c2: p2([20.0, 28.0]), b: p2([24.0, 33.0]) },
-    ]
+    ];
+    out.extend(spline.to_edges());
+    out
 }
 
 /// How far the curve `got` strays from `want` at most, over 200 places of each looked up on the other.
@@ -49,9 +50,9 @@ fn an_ellipse_and_a_spline_written_to_dxf_come_back_as_themselves() {
     }
     let back = import_dxf(&path).expect("the DXF is read back").curves;
     let ovals: Vec<&ProfEdge> = back.iter().filter(|e| matches!(e, ProfEdge::Oval { .. })).collect();
-    let spans: Vec<&ProfEdge> = back.iter().filter(|e| matches!(e, ProfEdge::Cubic { .. })).collect();
-    if ovals.len() != 2 || spans.len() != 2 || back.len() != 4 {
-        failures.push(format!("read back: {} curves, {} ellipses, {} spans of a spline", back.len(), ovals.len(), spans.len()));
+    let spans: Vec<&ProfEdge> = back.iter().filter(|e| matches!(e, ProfEdge::Spline(_))).collect();
+    if ovals.len() != 2 || spans.len() != 1 || back.len() != 3 {
+        failures.push(format!("read back: {} curves, {} ellipses, {} splines", back.len(), ovals.len(), spans.len()));
     } else {
         for (want, got) in curves().iter().zip(ovals.into_iter().chain(spans)) {
             let off = apart([&Curve::of_edge(want), &Curve::of_edge(got)]);

@@ -611,6 +611,40 @@ static double piece_distance(const gp_Pnt& p0, const gp_Pnt& p1, const gp_Pnt& q
     return x.Distance(y);
 }
 
+// THE POLYLINE OF A CURVED EDGE no piece of which strays from the edge by more than `sag`; false for an edge with no
+// curve or one OCCT cannot lay out.
+static bool polyline_of(const TopoDS_Shape& e, double sag, std::vector<gp_Pnt>& at) {
+    at.clear();
+    try {
+        QYM_SIGNALS;
+        BRepAdaptor_Curve c(TopoDS::Edge(e));
+        GCPnts_QuasiUniformDeflection laid(c, sag);
+        if (!laid.IsDone() || laid.NbPoints() < 2) return false;
+        for (int k = 1; k <= laid.NbPoints(); ++k) at.push_back(laid.Value(k));
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Whether no piece of polyline `a` comes within `gap` of a piece of polyline `b`.
+static bool polylines_apart(const std::vector<gp_Pnt>& a, const std::vector<gp_Pnt>& b, double gap) {
+    std::vector<Bnd_Box> boxes(b.size() > 0 ? b.size() - 1 : 0);
+    for (size_t y = 0; y + 1 < b.size(); ++y) {
+        boxes[y].Add(b[y]);
+        boxes[y].Add(b[y + 1]);
+        boxes[y].Enlarge(gap);
+    }
+    for (size_t x = 0; x + 1 < a.size(); ++x) {
+        Bnd_Box sa;
+        sa.Add(a[x]);
+        sa.Add(a[x + 1]);
+        for (size_t y = 0; y + 1 < b.size(); ++y)
+            if (!sa.IsOut(boxes[y]) && piece_distance(a[x], a[x + 1], b[y], b[y + 1]) <= gap) return false;
+    }
+    return true;
+}
+
 static bool face_is_pinched(const TopoDS_Face& f, double tol) {
     std::vector<TopoDS_Shape> es;
     std::vector<Bnd_Box> bx;
@@ -652,6 +686,12 @@ static bool face_is_pinched(const TopoDS_Face& f, double tol) {
                 }
                 continue;
             }
+            // CURVED EDGES ARE MEASURED BY THEIR POLYLINES FIRST, the general search only where those come near: each
+            // laid out to a sag of `sag`, two edges whose polylines stand farther apart than the tolerance and both sags
+            // do not meet. The general search took most of a rounding of a body of a closed spline and its offset, every
+            // piece of the offset measured against the spline on a face of their ring.
+            const double sag = 0.05;
+            if (polyline_of(es[i], sag, pa) && polyline_of(es[j], sag, pb) && polylines_apart(pa, pb, tol + 2.0 * sag)) continue;
             BRepExtrema_DistShapeShape d(es[i], es[j]);
             if (d.IsDone() && d.NbSolution() > 0 && d.Value() <= tol) return true;
         }
@@ -2281,57 +2321,79 @@ static TopoDS_Shape extrude_shape(const double* xy, size_t n, double h) {
 }
 
 // --- EXACT profiles (a B-rep built from real curves) ------------------------------------------
-// The encoding of the flat array of doubles: [L, then for each contour: nedges, then QYM_EDGE_FIELDS numbers per
-//   edge: kind, nine numbers of its shape, its name]. kind 0 is a segment (a to b), 1 an arc (a to b about c, ccw),
-//   2 a full circle (centre c, radius first - a contour of one "edge"), 3 an ellipse or an arc of one (centre, the
-//   semi-axes as vectors, the first eccentric angle and the signed sweep), 4 a cubic span of a spline by its four
-//   Bezier points. The first contour is the outer one, the rest are holes.
+// The encoding of the flat array of doubles: [L, then for each contour: nedges, then each edge as [kind, m, m numbers
+//   of its shape, its name] (`geom::encode_edge`, read by `qym_read_edge`)]. kind 0 is a segment (a to b), 1 an arc (a
+//   to b about c, ccw), 2 a full circle (radius, centre - a contour of one "edge"), 3 an ellipse or an arc of one
+//   (centre, the semi-axes as vectors, the first eccentric angle and the signed sweep), 4 a piece of a spline, a cubic
+//   B-spline by its poles and knots. The first contour is the outer one, the rest are holes.
 // It gives EXACT faces (a cylinder is 3 faces, not a faceted prism) and real edge and face topology.
-// The origins of one contour's edges (the 9th number of each edge), without moving the pointer.
-static std::vector<int> wire_src(const double* p) {
-    size_t nedges = (size_t)(p[0]);
-    std::vector<int> out;
-    out.reserve(nedges);
-    for (size_t i = 0; i < nedges; ++i) out.push_back((int)p[1 + i * QYM_EDGE_FIELDS + QYM_EDGE_FIELDS - 1]);
-    return out;
-}
-
 // THE WELD OF A PROFILE: ends of neighbouring edges nearer than this are one point - the same micrometre the model welds
 // the points of a sketch at (`model/tess.rs`). A profile from elsewhere (a DXF, a font, a file read) may miss closing by
 // less: built as it is, the loop stays open by that much and the face comes out short of it (4000 mm^3 read 3999.9967
 // for a gap of 1e-4).
 static const double QYM_PROFILE_WELD = 1e-3;
 
-// ONE EDGE OF AN ENCODED PROFILE, as read: what it is, the nine numbers of its shape, and its origin.
+// ONE EDGE OF AN ENCODED PROFILE, as read: what it is, the ten numbers of its shape, and its origin.
 struct QymProfileEdge {
     double kind;
-    double d[9];
+    // the numbers of a segment, an arc, a circle or an ellipse, at the places `geom::encode_edge` writes a segment, an
+    // arc and an ellipse at - a circle's radius first, its centre at the places of an arc's
+    double d[10];
+    // a piece of a spline: its poles x, y, then its knots
+    std::vector<double> bs;
     int src;
     // a circle and a whole ellipse are loops of their own, with no ends
     bool whole() const { return kind == 2.0 || (kind == 3.0 && std::abs(d[7]) >= 2.0 * M_PI - 1e-9); }
     // the point of an ellipse at its eccentric angle w
     gp_Pnt2d oval_at(double w) const { return gp_Pnt2d(d[0] + d[2] * cos(w) + d[4] * sin(w), d[1] + d[3] * cos(w) + d[5] * sin(w)); }
-    gp_Pnt2d start() const { return kind == 3.0 ? oval_at(d[6]) : gp_Pnt2d(d[0], d[1]); }
+    size_t poles() const { return (bs.size() - 4) / 3; }
+    gp_Pnt2d start() const {
+        if (kind == 3.0) return oval_at(d[6]);
+        if (kind == 4.0) return gp_Pnt2d(bs[0], bs[1]);
+        return gp_Pnt2d(d[0], d[1]);
+    }
     gp_Pnt2d end() const {
         if (kind == 3.0) return oval_at(d[6] + d[7]);
-        if (kind == 4.0) return gp_Pnt2d(d[6], d[7]);
+        if (kind == 4.0) return gp_Pnt2d(bs[2 * poles() - 2], bs[2 * poles() - 1]);
         return gp_Pnt2d(d[2], d[3]);
     }
-    // an ellipse is held by its centre and axes, and its ends are not moved; a segment, an arc and a cubic are
+    // an ellipse is held by its centre and axes, and its ends are not moved; a segment, an arc and a spline are
     bool set_end(const gp_Pnt2d& q) {
         if (kind == 3.0) return false;
-        double* at = kind == 4.0 ? d + 6 : d + 2;
+        double* at = kind == 4.0 ? &bs[2 * poles() - 2] : d + 2;
         at[0] = q.X();
         at[1] = q.Y();
         return true;
     }
     bool set_start(const gp_Pnt2d& q) {
         if (kind == 3.0) return false;
-        d[0] = q.X();
-        d[1] = q.Y();
+        double* at = kind == 4.0 ? &bs[0] : d;
+        at[0] = q.X();
+        at[1] = q.Y();
         return true;
     }
 };
+
+// ONE EDGE OF AN ENCODED PROFILE READ at `p` - `[kind, m, m numbers, name]` (`geom::encode_edge`) - and `p` moved past it.
+static QymProfileEdge qym_read_edge(const double*& p) {
+    QymProfileEdge g{p[0], {0.0}, {}, 0};
+    const size_t m = (size_t)p[1];
+    const double* v = p + 2;
+    if (g.kind == 4.0) {
+        // n poles, then n + 4 knots
+        const size_t n = (size_t)v[0];
+        g.bs.assign(v + 1, v + 1 + 2 * n + n + 4);
+    } else if (g.kind == 2.0) {
+        g.d[0] = v[0];
+        g.d[4] = v[1];
+        g.d[5] = v[2];
+    } else {
+        for (size_t k = 0; k < m && k < 10; ++k) g.d[k] = v[k];
+    }
+    g.src = (int)v[m];
+    p += 3 + m;
+    return g;
+}
 
 // THE EDGE OF AN ELLIPSE OR AN ARC OF ONE: OCCT wants its major radius first, so axes the other way round are taken as
 // (N, -M) from the angle less a quarter turn - the same points - and the plane is turned over where the minor axis lies
@@ -2358,12 +2420,37 @@ static TopoDS_Edge qym_oval_edge(const QymProfileEdge& g) {
     return e;
 }
 
-// THE EDGE OF A CUBIC SPAN OF A SPLINE, by its four Bezier points.
-static TopoDS_Edge qym_cubic_edge(const QymProfileEdge& g) {
-    TColgp_Array1OfPnt poles(1, 4);
-    for (int k = 0; k < 4; ++k) poles.SetValue(k + 1, gp_Pnt(g.d[2 * k], g.d[2 * k + 1], 0.0));
-    Handle(Geom_BezierCurve) curve = new Geom_BezierCurve(poles);
-    return BRepBuilderAPI_MakeEdge(curve).Edge();
+// THE EDGE OF A PIECE OF A SPLINE: the cubic B-spline of its poles and knots as the sketch holds it
+// (`geom::bspline`), the knots that stand together counted into their multiplicities - one edge and one smooth face a
+// piece.
+static TopoDS_Edge qym_spline_edge(const QymProfileEdge& g) {
+    const size_t n = g.poles();
+    if (n < 4) return TopoDS_Edge();
+    TColgp_Array1OfPnt poles(1, (int)n);
+    for (size_t k = 0; k < n; ++k) poles.SetValue((int)k + 1, gp_Pnt(g.bs[2 * k], g.bs[2 * k + 1], 0.0));
+    const double* u = &g.bs[2 * n];
+    std::vector<double> at;
+    std::vector<int> times;
+    for (size_t k = 0; k < n + 4; ++k) {
+        if (!at.empty() && u[k] == at.back()) ++times.back();
+        else {
+            at.push_back(u[k]);
+            times.push_back(1);
+        }
+    }
+    TColStd_Array1OfReal knots(1, (int)at.size());
+    TColStd_Array1OfInteger mults(1, (int)at.size());
+    for (size_t k = 0; k < at.size(); ++k) {
+        knots.SetValue((int)k + 1, at[k]);
+        mults.SetValue((int)k + 1, times[k]);
+    }
+    try {
+        QYM_SIGNALS;
+        Handle(Geom_BSplineCurve) c = new Geom_BSplineCurve(poles, knots, mults, 3);
+        return BRepBuilderAPI_MakeEdge(c).Edge();
+    } catch (...) {
+        return TopoDS_Edge();
+    }
 }
 
 static TopoDS_Wire build_exact_wire_src(const double*& p, TopTools_DataMapOfShapeInteger* esrc) {
@@ -2371,8 +2458,7 @@ static TopoDS_Wire build_exact_wire_src(const double*& p, TopTools_DataMapOfShap
     std::vector<QymProfileEdge> read;
     read.reserve(nedges);
     for (size_t i = 0; i < nedges; ++i) {
-        QymProfileEdge g{p[0], {p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9]}, (int)p[QYM_EDGE_FIELDS - 1]};
-        p += QYM_EDGE_FIELDS;
+        QymProfileEdge g = qym_read_edge(p);
         // A SEGMENT OF NO LENGTH IS NO EDGE: a glyph of a TTF closes by returning to its first point, and OCCT throws
         // building an edge between two equal points - the whole profile was refused
         if (g.kind == 0.0 && std::hypot(g.d[2] - g.d[0], g.d[3] - g.d[1]) < 1e-9) continue;
@@ -2391,9 +2477,12 @@ static TopoDS_Wire build_exact_wire_src(const double*& p, TopTools_DataMapOfShap
     BRepBuilderAPI_MakeWire mkw;
     std::vector<int> srcs; // the origins, in the order the edges are added
     srcs.reserve(read.size());
-    for (const QymProfileEdge& g : read) {
+    for (size_t at = 0; at < read.size(); ++at) {
+        const QymProfileEdge& g = read[at];
         TopoDS_Edge e;
-        if (g.kind == 2.0) { // a full circle
+        if (g.kind == 4.0) { // a piece of a spline
+            e = qym_spline_edge(g);
+        } else if (g.kind == 2.0) { // a full circle
             gp_Circ circ(gp_Ax2(gp_Pnt(g.d[4], g.d[5], 0.0), gp_Dir(0.0, 0.0, 1.0)), g.d[0]);
             e = BRepBuilderAPI_MakeEdge(circ).Edge();
         } else if (g.kind == 1.0) { // an arc from a to b about the centre c
@@ -2403,8 +2492,6 @@ static TopoDS_Wire build_exact_wire_src(const double*& p, TopTools_DataMapOfShap
             e = BRepBuilderAPI_MakeEdge(circ, gp_Pnt(g.d[0], g.d[1], 0.0), gp_Pnt(g.d[2], g.d[3], 0.0)).Edge();
         } else if (g.kind == 3.0) { // an ellipse or an arc of one
             e = qym_oval_edge(g);
-        } else if (g.kind == 4.0) { // a cubic span of a spline
-            e = qym_cubic_edge(g);
         } else { // a segment
             e = BRepBuilderAPI_MakeEdge(gp_Pnt(g.d[0], g.d[1], 0.0), gp_Pnt(g.d[2], g.d[3], 0.0)).Edge();
         }

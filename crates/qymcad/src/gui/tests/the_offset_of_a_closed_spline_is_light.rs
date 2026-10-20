@@ -28,7 +28,8 @@ fn the_offset_of_a_closed_spline_drawn_by_hand_is_a_spline_of_few_nodes() {
         .iter()
         .find(|e| e.kind.as_spline().is_some())
         .and_then(|e| qymcad_core::model::curve::Curve::of(&hand.app.project.sketches[si], e))
-        .map(|c| c.at(0.07))
+        // half way along its first span, by the knots of its curve
+        .map(|c| c.at(0.5 * c.b_spline().and_then(|b| b.inner_knots().first().copied()).unwrap_or(0.14)))
         .expect("the spline");
     hand.sk_tool(0).click2d(on_it.x, on_it.y);
     assert!(hand.press_hint(&crate::i18n::tr("tb-offset-hint")), "no sketch offset button");

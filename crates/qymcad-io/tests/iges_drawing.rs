@@ -144,19 +144,18 @@ fn a_transform_moves_what_it_carries_and_keeps_arcs_arcs() {
     assert!(matches!(d.curves[2], ProfEdge::Arc { a, b, ccw: false, .. } if near(a.x, -5.0) && near(b.y, 5.0)), "the mirrored arc: {:?}", d.curves[2]);
 }
 
-/// A SPLINE IS LAID ALONG ITS CURVE: a rational quarter circle stays on its radius at every vertex.
+/// A SPLINE IS LAID AS A SPLINE ALONG ITS CURVE: a rational quarter circle comes in as one spline of the sketch, on its
+/// radius within 0.001 mm, from its start to its end.
 #[test]
 fn a_rational_spline_stays_on_its_circle() {
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let text = iges((2, "MM"), &[E(126, 0, TOP, 0, format!("2,2,1,0,0,0,0.,0.,0.,1.,1.,1.,1.,{w},1.,5.,0.,0.,5.,5.,0.,0.,5.,0.,0.,1.,0.,0.,1."))]);
     let d = read("spline.igs", &text).expect("reads");
-    let l = lines(&d.curves);
-    assert!(l.len() >= 16, "a quarter circle laid down as {} pieces", l.len());
-    for s in &l {
-        for (x, y) in [(s[0], s[1]), (s[2], s[3])] {
-            assert!((x.hypot(y) - 5.0).abs() < 1e-9, "a vertex of the spline left its circle: ({x}, {y})");
-        }
-    }
+    let [ProfEdge::Spline(b)] = d.curves.as_slice() else { panic!("a quarter circle came in as {:?}, not one spline", d.curves) };
+    let off = (0..=1000).map(|k| b.at(k as f64 / 1000.0)).map(|q| (q.x.hypot(q.y) - 5.0).abs()).fold(0.0, f64::max);
+    assert!(off < 1e-3, "the spline stands up to {off:.5} off its circle");
+    let ends = [b.at(0.0), b.at(1.0)];
+    assert!(near(ends[0].x, 5.0) && near(ends[0].y, 0.0) && near(ends[1].x, 0.0) && near(ends[1].y, 5.0), "the spline does not run from (5, 0) to (0, 5): {ends:?}");
 }
 
 /// NOTES AND DIMENSIONS ARE COUNTED, NOT DRAWN - and a file of nothing else is refused by name.

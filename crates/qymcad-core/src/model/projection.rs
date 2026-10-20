@@ -36,10 +36,11 @@ enum Curve2 {
         minor_end: [f64; 2],
         arc: Option<OvalArc>,
     },
-    /// A spline through the points an edge is laid out by: an edge of no kind the sketch has - a spline of the body, a
-    /// curve where two faces meet.
+    /// A spline of the curve an edge is laid out by: an edge of no kind the sketch has - a spline of the body, a curve
+    /// where two faces meet - its nodes and the handles holding the curve at each.
     Spline {
         nodes: Vec<[f64; 2]>,
+        handles: Vec<crate::model::Handle>,
         ends: crate::feature::Ends,
     },
 }
@@ -378,9 +379,23 @@ impl Project {
         }
         // a closed edge comes back to its first point: the spline is a loop through the others
         let closed = (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-6;
-        let mut nodes = if closed { pts[..pts.len() - 1].to_vec() } else { pts };
-        nodes.dedup_by(|p, q| (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-9);
-        Curve2::Spline { nodes, ends: if closed { crate::feature::Ends::Closed } else { crate::feature::Ends::Open } }
+        let mut along: Vec<crate::geom::Point2> = (if closed { &laid[..laid.len() - 1] } else { &laid[..] }).to_vec();
+        along.dedup_by(|p, q| p.dist(*q) < 1e-9);
+        let ends = if closed { crate::feature::Ends::Closed } else { crate::feature::Ends::Open };
+        // THE CURVE THROUGH THE POINTS OF THE EDGE - they lie on it - AS FEW NODES AS ITS SHAPE NEEDS: the spline of the
+        // sketch through them, approximated within 0.001 mm (`BSpline::approximate`). Laid through every point the edge is
+        // laid out by, the projected spline of a body took a node a point, hundreds of them.
+        let through = crate::geom::bspline::BSpline::through(&along, &[], ends);
+        let fitted = through.as_ref().and_then(|b| {
+            let at = |u: f64| b.at(u);
+            let off = |q: crate::geom::Point2, u: f64| q.dist(b.at(u));
+            crate::geom::bspline::BSpline::approximate(&crate::geom::bspline::Approximated { at: &at, bends: &[], ends, off: &off, tolerance: 1e-3, through: None })
+        });
+        let Some(fitted) = fitted.or(through) else { return Curve2::Line(a, b) };
+        let h = fitted.hermite(ends);
+        let nodes = h.nodes.iter().map(|q| [q.x, q.y]).collect();
+        let handles = h.tangents.iter().map(|t| crate::model::Handle { arrive: Some([t.arrive.x, t.arrive.y]), leave: Some([t.leave.x, t.leave.y]) }).collect();
+        Curve2::Spline { nodes, handles, ends }
     }
 
     /// PLACE THE CURVES INTO THE SKETCH, each matched to the curve its edge gave before. A curve of an edge still there keeps
@@ -470,7 +485,7 @@ impl Project {
                     pts.extend([pc, pa, pi]);
                     pts.extend(span.iter().flat_map(|s| [s.from, s.to]));
                 }
-                Curve2::Spline { nodes, ends } => {
+                Curve2::Spline { nodes, handles, ends } => {
                     if nodes.len() < 2 {
                         continue;
                     }
@@ -486,8 +501,7 @@ impl Project {
                         let was = old.as_ref().map(|o| o.1[n]);
                         ids.push(if open && (n == 0 || n == last) { self.proj_point(si, &mut placing, was, *q) } else { self.proj_centre(si, &mut placing, was, *q) });
                     }
-                    let handles = vec![crate::model::Handle::default(); ids.len()];
-                    let e = self.proj_entity(si, old.map(|o| o.0), EntityKind::spline(ids.clone(), handles, *ends));
+                    let e = self.proj_entity(si, old.map(|o| o.0), EntityKind::spline(ids.clone(), handles.clone(), *ends));
                     ents.push(e);
                     edges.push(*edge);
                     pts.extend(ids);

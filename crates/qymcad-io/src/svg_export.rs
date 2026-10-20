@@ -34,7 +34,7 @@ pub fn export_svg(edges: &[ProfEdge], path: &str) -> Result<(), String> {
                 grow(center.x - r, center.y - r);
                 grow(center.x + r, center.y + r);
             }
-            ProfEdge::Oval { .. } | ProfEdge::Cubic { .. } => {
+            ProfEdge::Oval { .. } | ProfEdge::Spline(_) => {
                 for k in 0..=48 {
                     if let Some(p) = e.curve_at(k as f64 / 48.0) {
                         grow(p.x, p.y);
@@ -75,9 +75,15 @@ pub fn export_svg(edges: &[ProfEdge], path: &str) -> Result<(), String> {
                 let sflag = if ccw { 1 } else { 0 };
                 s.push_str(&format!("    <path d=\"M {:.4} {:.4} A {:.4} {:.4} 0 {} {} {:.4} {:.4}\"/>\n", sx(a.x), sy(a.y), r, r, large, sflag, sx(b.x), sy(b.y)));
             }
-            // a span of a spline is a cubic Bezier of SVG itself
-            ProfEdge::Cubic { a, c1, c2, b } => {
-                s.push_str(&format!("    <path d=\"M {:.4} {:.4} C {:.4} {:.4} {:.4} {:.4} {:.4} {:.4}\"/>\n", sx(a.x), sy(a.y), sx(c1.x), sy(c1.y), sx(c2.x), sy(c2.y), sx(b.x), sy(b.y)));
+            // a spline is a path of the cubic Beziers of SVG itself, one a span
+            ProfEdge::Spline(ref b) => {
+                let pieces = b.beziers();
+                let Some(first) = pieces.first() else { continue };
+                let mut d = format!("M {:.4} {:.4}", sx(first[0].x), sy(first[0].y));
+                for [_, c1, c2, end] in &pieces {
+                    d.push_str(&format!(" C {:.4} {:.4} {:.4} {:.4} {:.4} {:.4}", sx(c1.x), sy(c1.y), sx(c2.x), sy(c2.y), sx(end.x), sy(end.y)));
+                }
+                s.push_str(&format!("    <path d=\"{d}\"/>\n"));
             }
             // an ellipse as the elliptical arcs of SVG itself, a whole one as two halves: an arc of SVG from a point to the
             // same point draws nothing

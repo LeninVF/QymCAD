@@ -156,7 +156,7 @@ crates/qymcad-core/src/model/sketch/solve.rs 1 5 1
 crates/qymcad-core/src/model/sketch/trim.rs 4 1 0
 crates/qymcad-core/src/model/sketch_ops.rs 7 4 0
 crates/qymcad-core/src/model/sketch_types.rs 0 2 0
-crates/qymcad-core/src/model/tess.rs 9 28 0
+crates/qymcad-core/src/model/tess.rs 7 24 0
 crates/qymcad-core/src/model/timeline/add_ops.rs 13 2 4
 crates/qymcad-core/src/model/timeline/clone.rs 1 1 0
 crates/qymcad-core/src/model/timeline/delete.rs 0 2 1
@@ -170,7 +170,7 @@ crates/qymcad-core/src/solver.rs 0 8 0
 crates/qymcad-core/src/solver/conflicts.rs 0 4 0
 crates/qymcad-core/src/solver/freedom.rs 1 13 0
 crates/qymcad-core/src/solver/jacobian.rs 3 18 0
-crates/qymcad-core/src/solver/lm.rs 1 11 0
+crates/qymcad-core/src/solver/lm.rs 1 10 0
 crates/qymcad-core/src/solver/parts.rs 0 3 0
 crates/qymcad-core/src/subdiv.rs 5 11 0
 crates/qymcad-core/src/subdiv/patch.rs 5 1 0
@@ -291,7 +291,7 @@ crates/qymcad-io/src/ply.rs 0 3 0
 crates/qymcad-io/src/project_file.rs 0 5 0
 crates/qymcad-io/src/rigid.rs 1 1 0
 crates/qymcad-io/src/stl_import.rs 0 1 0
-crates/qymcad-io/src/svg_import.rs 5 1 0
+crates/qymcad-io/src/svg_import.rs 2 1 0
 crates/qymcad-io/src/threemf.rs 2 2 0
 crates/qymcad-io/src/xml.rs 0 1 0
 crates/qymcad-io/tests/a_coordinate_that_is_not_a_number_is_refused.rs 1 1 0
@@ -301,7 +301,7 @@ crates/qymcad-io/tests/a_spline_whose_numbers_make_no_curve_is_left_out.rs 0 5 0
 crates/qymcad-io/tests/formats.rs 0 1 0
 crates/qymcad-io/tests/gltf.rs 2 0 0
 crates/qymcad-io/tests/gltf_accessor_bounds.rs 3 1 0
-crates/qymcad-io/tests/iges_drawing.rs 2 3 0
+crates/qymcad-io/tests/iges_drawing.rs 2 2 0
 crates/qymcad-io/tests/obj.rs 0 3 0
 crates/qymcad-io/tests/ply.rs 0 2 0
 crates/qymcad-io/tests/stl.rs 0 5 0
