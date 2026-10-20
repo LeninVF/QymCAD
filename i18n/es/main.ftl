@@ -2780,11 +2780,8 @@ settings-auto-constrain-hint = Horizontal, vertical, perpendicular y punto sobre
 settings-point-numbers-hint = Mostrar junto a cada punto de un boceto su número para facilitar su identificación; desactivado, la hoja muestra solo las formas
 settings-dim-name-hint = Una cota cuyo campo "controlador:" tiene un nombre se muestra así: w = 110
 settings-dim-formula-hint = Una cota definida mediante una fórmula se muestra así: 2*w+10 = 110
-settings-auto-constrain-hint = Horizontal, vertical, perpendicular y punto sobre arista se añaden automáticamente (solo las independientes, nunca sobrerrestringiendo)
 settings-point-numbers-hint = El número de cada punto de un boceto junto a él, para consultar el boceto; desactivado, la hoja muestra solo las formas
 settings-dim-name-hint = Una cota cuyo campo "driver:" tiene un nombre se muestra así: w = 110
-settings-dim-formula-hint = Una cota definida mediante una fórmula se muestra así: 2*w+10 = 110
-props-title = Propiedades
 
 menu-export-stl-hint = Una malla de todos los cuerpos visibles, con una opción de calidad (impresión 3D)
 menu-export-obj-hint = Una malla de todos los cuerpos visibles con una calidad elegida: OBJ es leído por programas de renderizado y escultura
