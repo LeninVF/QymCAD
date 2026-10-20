@@ -3,7 +3,7 @@ bar-units-mm = mm
 ### Keys on the left are IDs — do not translate them. Values on the right are what the user sees.
 
 # Name of this language, in this language. Shown in the language menu.
-language-name = Español
+language-name = Español latinoamerica
 
 ## Menu bar
 
