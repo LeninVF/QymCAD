@@ -2780,3 +2780,43 @@ settings-auto-constrain-hint = Horizontal, vertical, perpendicular y punto sobre
 settings-point-numbers-hint = Mostrar junto a cada punto de un boceto su número para facilitar su identificación; desactivado, la hoja muestra solo las formas
 settings-dim-name-hint = Una cota cuyo campo "controlador:" tiene un nombre se muestra así: w = 110
 settings-dim-formula-hint = Una cota definida mediante una fórmula se muestra así: 2*w+10 = 110
+settings-auto-constrain-hint = Horizontal, vertical, perpendicular y punto sobre arista se añaden automáticamente (solo las independientes, nunca sobrerrestringiendo)
+settings-point-numbers-hint = El número de cada punto de un boceto junto a él, para consultar el boceto; desactivado, la hoja muestra solo las formas
+settings-dim-name-hint = Una cota cuyo campo "driver:" tiene un nombre se muestra así: w = 110
+settings-dim-formula-hint = Una cota definida mediante una fórmula se muestra así: 2*w+10 = 110
+props-title = Propiedades
+
+menu-export-stl-hint = Una malla de todos los cuerpos visibles, con una opción de calidad (impresión 3D)
+menu-export-obj-hint = Una malla de todos los cuerpos visibles con una calidad elegida: OBJ es leído por programas de renderizado y escultura
+menu-export-ply-hint = Una malla de todos los cuerpos visibles con una calidad elegida: PLY es el formato de los escáneres 3D
+menu-export-glb-hint = Una malla de todos los cuerpos visibles con una calidad elegida, un nodo por cuerpo: los navegadores y programas de renderizado abren glTF
+menu-export-3mf-hint = Una malla de todos los cuerpos visibles con una calidad elegida; el propio archivo indica las unidades en milímetros: para impresión
+menu-export-amf-hint = Una malla de todos los cuerpos visibles con una calidad elegida, en milímetros: para programas de impresión que esperan AMF
+
+tree-export-stl-hint = Una malla con una opción de calidad (impresión 3D); solo cuerpos visibles
+tree-export-obj-hint = Una malla con una calidad elegida; solo los cuerpos visibles
+tree-export-ply-hint = Una malla con una calidad elegida; solo los cuerpos visibles
+tree-export-glb-hint = Una malla con una calidad elegida; solo los cuerpos visibles
+tree-export-3mf-hint = Una malla con una calidad elegida; solo los cuerpos visibles
+tree-export-amf-hint = Una malla con una calidad elegida; solo los cuerpos visibles
+
+status-rollback-clear = Limpiando la reversión
+tree-base-plane-hint = Crear un boceto en este plano base del componente
+tree-rollback-hint = Construir la línea de tiempo solo hasta esta operación (igual que arrastrar aquí la barra de reversión)
+tree-export-svg-hint = Curvas exactas del boceto (líneas, arcos, círculos)
+tree-export-dxf-hint = Curvas exactas del boceto para CAM/CAD
+
+menu-export-step-hint = B-rep exacto de todos los cuerpos visibles del proyecto
+menu-export-iges-hint = Geometría exacta de todos los cuerpos visibles, escrita como caras: los programas antiguos también leen este IGES
+tree-export-step-hint = B-rep exacto; solo los cuerpos visibles de esta rama
+tree-export-iges-hint = Geometría exacta como caras; solo los cuerpos visibles del subárbol
+
+status-sketch-moved = Boceto movido
+status-sketch-copied = Boceto copiado
+thread-external = ext
+thread-internal = int
+all-of-them = todos
+action-cut = cortar
+ref-datum = referencia
+action-copy = copiar
+settings-grid-step = { "paso de cuadrícula " }
