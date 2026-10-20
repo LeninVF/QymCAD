@@ -296,7 +296,6 @@ help-section-assembly = Ensamblaje
 help-section-general = General
 help-section-cam = Mecanizado
 help-section-start = Lecciones
-cmdname-circle-3pt = Círculo por tres puntos
 cmdname-dim-angle = Cota angular
 cmdname-dim-radius = Radio / diámetro
 cmdname-datum-plane = Plano de referencia
@@ -652,7 +651,6 @@ tb-new-subassembly-hint = Nuevo subensamblaje — acceder a su edición [U]
 tb-shell-hint = Vaciado: cuerpo -> indique cara -> espesor -> Intro [H]
 tb-trim-hint = Recortar: hacer clic en un segmento lo elimina hasta las intersecciones; arrastrar recorta todo lo que cruce [K]
 tb-circle-hint = Círculo (centro + radio / por 2 puntos / tangente — modo arriba) [C]
-tb-circle-3pt = Círculo por 3 puntos
 tb-hole-hint = Taladro: cuerpo -> indique cara -> Ø/profundidad -> Intro [O]
 tb-slot-hint = Ranura (2 centros + anchura) [O]
 con-parallel-hint = Paralelo (2 líneas)
@@ -772,7 +770,6 @@ font-searching = Buscando fuentes…
 font-no-letters = no contiene los caracteres necesarios
 tool-offset = Desfase
 tool-project-body = Proyección
-tool-circle-3pt = Círculo por tres puntos
 opt-polygon-inscribed = Inscrito
 opt-height-short = alt.
 opt-note = nota
@@ -1044,7 +1041,7 @@ par-drop-driver = Quitar nombre conductor
 par-driver-goto = donde se encuentra esta cota — clic para ir allí
 par-owner-project = un parámetro del proyecto
 par-search = buscar por nombre o ruta
-par-name-taken =
+par-name-taken = El nombre del parámetro ya está en uso
     El nombre "{ $name }" ya está en uso por:
     { $where }
 par-name-bad = El nombre "{ $name }" no es válido para fórmulas: solo letras, dígitos y "_", y no debe comenzar por un dígito
@@ -1349,7 +1346,6 @@ sk-points-collinear-arc = Los puntos son colineales — no se puede construir un
 sk-points-collinear-circle = Los puntos son colineales — no se puede construir una circunferencia
 sk-angle = Ángulo
 sk-delete = Eliminar
-sk-centre-on-edge = El centro se sitúa sobre la propia arista — la circunferencia es degenerada
 sk-polygon-no-size = El vértice coincide con el centro — haga clic más alejado del centro
 sk-drawing = Dibujo
 sk-font-not-found = No se encontró la fuente (instale DejaVu u OpenSans)
@@ -1567,13 +1563,11 @@ g-array-created = Patrón creado (doble clic en una copia para editar)
 g-polygon-hint = Polígono: centro y luego un vértice
 g-paste-needs-assembly = Los componentes no pueden ir dentro de una pieza — elija un ensamblaje
 g-new-project = Nuevo proyecto.
-g-circle-3pt = Circunferencia por 3 puntos
 g-circle-hint = Circunferencia: centro y luego un punto del radio
 g-open-sketch-dim = Abra un boceto y haga clic en una línea (longitud) o circunferencia (radio)
 g-slot-hint = Colisa: 2 centros y luego la anchura
 g-body-moved = Desplazado
 g-rect-hint = Rectángulo: 2 esquinas
-g-dim-from-centre = Cota desde el centro de la circunferencia o arco
 g-dim-hint = Cota: clic en línea -> longitud, en circunferencia -> radio, o 2 puntos
 g-copied = Copiado
 in-fillet-all-cancelled = Redondear todas las esquinas cancelado
@@ -2814,3 +2808,24 @@ io-rebuild-left-errors = Operaciones que no se pudieron construir: { $n }. La pr
 io-rebuild-left-warnings = Operaciones construidas solo parcialmente: { $n }. La primera, { $where }:
 io-placement-left-errors = Restricciones de posición que no se cumplen: { $n }. La primera, { $where }:
 par-left-errors = Parámetros sin valor: { $n }. El primero, { $where }:
+
+# ── Missing translations (9 keys) ──
+
+# en: Three points the circle passes through
+opt-circle-3pt-hint = Tres puntos por los que pasa el círculo
+# en: Lead the pointer to where the circle should stand and click
+sk-tangent-place = Lleva el puntero al lugar donde debe situarse el círculo y haz clic
+# en: No circle of this radius touches both curves: change the radius in the bar
+sk-tangent-no-circle = Ningún círculo con este radio toca ambas curvas: cambia el radio en la barra
+# en: The size of the curve. Click a second item to get the least distance to it instead; or place the size with a click
+sk-size-hint = El tamaño de la curva. Haz clic en un segundo elemento para obtener la distancia mínima hasta él
+# en: The curve is picked — click a second item to measure the least distance to it
+sk-curve-picked = La curva está seleccionada; haz clic en un segundo elemento para medir la distancia mínima hasta él
+# en: Spline
+ent-spline = Spline
+# en: Point on an ellipse
+con-point-on-ellipse = Punto en una elipse
+# en: Point on a curve
+con-point-on-curve = Punto en una curva
+# en: L
+sk-length-short = L
