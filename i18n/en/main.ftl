@@ -7,7 +7,7 @@ language-name = English
 
 ## Menu bar
 
-menu-file = Archibo
+menu-file = File
 menu-edit = Edit
 menu-view = View
 menu-windows = Windows
